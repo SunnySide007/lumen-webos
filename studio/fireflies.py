@@ -79,7 +79,8 @@ class Fireflies:
         self.peak = self.near * rng.uniform(150.0, 450.0, count)
         # The three brightest are the nearest of those clear of the grass.
         clear = np.flatnonzero(self.y0 < GRASS - 0.1)
-        self.peak[clear[np.argsort(self.near[clear])[-3:]]] = (540.0, 620.0, 700.0)
+        heroes = clear[np.argsort(self.near[clear])[-3:]]
+        self.peak[heroes] = (540.0, 620.0, 700.0)[3 - heroes.size:]
         self.colour = np.array(GLOW)[None, :] * rng.uniform(0.85, 1.0, (count, 3))
         self.colour[:, 1] = 1.0
 

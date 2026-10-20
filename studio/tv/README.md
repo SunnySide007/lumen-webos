@@ -29,11 +29,23 @@ The size on the TV should match `ls -l dist/studio/aurora-2160p.mp4`.
 tools/tv.sh script studio/tv/hdr-check.sh
 ```
 
-It prints the picture settings' `pictureMode` and `dynamicRange` before and
-eight seconds after the player starts, then `RESULT: HDR (...)` or
-`RESULT: still SDR`. Today, in SDR, the TV reports `expert2` and `sdr`. In
-HDR, LG uses a separate set of picture modes (the `hdr...` names in
-`psmListForExpert`), so expect `pictureMode` to change as well.
+It closes the player if it is open, prints the picture settings'
+`pictureMode` and `dynamicRange`, starts the player, and polls for up to 30 s
+until the dynamic range leaves `sdr`. The last line is the verdict:
+
+| Result | Exit |
+| --- | --- |
+| `RESULT: HDR (...) after N s` | 0 |
+| `RESULT: still SDR ...` | 1 |
+| `RESULT: the player did not start` or `... is not in front` | 2 |
+| `RESULT: inconclusive` (the TV was in HDR before the player started) | 3 |
+
+Today, in SDR, the TV reports `expert2` and `sdr`. In HDR, LG uses a
+separate set of picture modes (the `hdr...` names in `psmListForExpert`), so
+expect `pictureMode` to change as well. Whether `dynamicRange` follows LG's
+own player is itself untested: if the screen clearly shows HDR (an HDR logo,
+the HDR picture modes in the menu) while the script says SDR, the screen
+wins; note both.
 
 While it plays, look at the TV:
 
@@ -53,7 +65,8 @@ tools/tv.sh run 'rm -rf /tmp/lumen-hdr'
 ## If it does not work
 
 * **The player will not open the file.** Try a folder on the apps
-  partition (1.8 GB free) instead of `/tmp`, then delete it afterwards:
+  partition (1.8 GB free) instead of `/tmp`. It is not a system partition,
+  but it is persistent, so run the last line whatever the result:
 
   ```sh
   tools/tv.sh run 'mkdir -p /media/developer/temp/lumen-hdr && cat > /media/developer/temp/lumen-hdr/loop.mp4' < dist/studio/aurora-2160p.mp4
@@ -64,7 +77,8 @@ tools/tv.sh run 'rm -rf /tmp/lumen-hdr'
 * **It plays, but stays SDR.** Try the Matroska version: it carries the same
   stream, and some players read HDR metadata from the container. Encode it
   if `dist/studio/aurora-2160p.mkv` does not exist yet, then copy it as
-  `loop.mkv` (remove `loop.mp4` first: the script prefers it):
+  `loop.mkv` (remove `loop.mp4` first: the script prefers it; it closes the
+  player from the first run itself):
 
   ```sh
   tools/studio.sh python3 studio/encode.py dist/studio/aurora-2160p --out dist/studio/aurora-2160p.mkv

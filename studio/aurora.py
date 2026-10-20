@@ -16,7 +16,7 @@ import math
 import numpy as np
 
 import hdr
-from scenekit import PEAK_NITS, TAU, harmonic, soft_clip, splat  # noqa: F401 (tests use harmonic)
+from scenekit import PEAK_NITS, TAU, harmonic, soft_clip, splat
 
 PRIMARIES = hdr.P3_D65
 

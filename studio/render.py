@@ -23,6 +23,7 @@ import time
 import aurora
 import exr
 import fireflies
+import hdr
 import pool
 import scenekit
 
@@ -67,10 +68,10 @@ def parse_args(argv):
 
 
 def scene_version(scene):
-    """A hash of the scene's source and the helpers it shares, so frames
-    from older code are not reused."""
+    """A hash of the scene's source and the modules it draws on (shared
+    helpers, primaries), so frames from older code are not reused."""
     digest = hashlib.sha256()
-    for path in (sys.modules[SCENES[scene].__module__].__file__, scenekit.__file__):
+    for path in (sys.modules[SCENES[scene].__module__].__file__, scenekit.__file__, hdr.__file__):
         with open(path, 'rb') as f:
             digest.update(f.read())
     return digest.hexdigest()[:12]

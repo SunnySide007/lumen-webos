@@ -58,6 +58,8 @@ def splat(image, px, py, peak, colour, sigma):
     pixels, one for all or one per point. Each pixel gets the light that
     falls on its square.
     """
+    if np.size(px) == 0:
+        return
     sigma = np.broadcast_to(np.asarray(sigma, dtype=np.float64), np.shape(px))
     radius = int(math.ceil(3.5 * sigma.max())) + 1
     offsets = np.arange(-radius, radius + 1)
