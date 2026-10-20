@@ -66,6 +66,8 @@ tools/studio.sh python3 -I -m unittest discover -s tools/tests -p 'test_studio*.
 ## Still to do
 
 * Watch it on the TV: the B9 must switch into its HDR picture mode on the loop.
+  [tv/README.md](tv/README.md) has the steps, and `tv/hdr-check.sh` plays a
+  loop in LG's player and reads the dynamic range back.
   The MP4 is tagged `hev1` (parameter sets repeat in the stream) and carries
   its HDR10 metadata in the stream's SEI only, with no `mdcv` or `clli` boxes;
   if the B9 wants either, try `.mkv`, then a container-level fix.
