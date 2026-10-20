@@ -6,8 +6,11 @@
 # and /var, lists directories, and calls luna-send on get*/list* methods only.
 # It runs under the TV's busybox sh, so it sticks to POSIX shell.
 
-if command -v timeout >/dev/null 2>&1; then
+# Older busybox (webOS 4) spells it `timeout -t SECS`, newer `timeout SECS`.
+if timeout 1 true >/dev/null 2>&1; then
     T="timeout 10"
+elif timeout -t 1 true >/dev/null 2>&1; then
+    T="timeout -t 10"
 else
     T=""
 fi
