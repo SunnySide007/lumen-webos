@@ -7,14 +7,22 @@
   release for Windows (pinned version and checksum) into third_party/, which
   git ignores. The UI is laid out for 1920x1080 and letterboxed into the window.
 
+  For automated checks, -Keys plays remote keys (U, D, L, R, OK, BACK),
+  -FixedDt makes the clock deterministic, and -ScreenshotWhenSettled saves
+  the frame once the keys are done and nothing moves, then quits.
+
 .EXAMPLE
   pwsh tools/sim.ps1
   pwsh tools/sim.ps1 -ExitAfter 5      # smoke test: run five seconds, then quit
   pwsh tools/sim.ps1 -ExitAfter 3 -Screenshot frame.png
+  pwsh tools/sim.ps1 -Keys "R,R,D" -FixedDt 0.016667 -ScreenshotWhenSettled row1.png
 #>
 param(
     [double]$ExitAfter = 0,
     [string]$Screenshot = '',
+    [string]$Keys = '',
+    [double]$FixedDt = 0,
+    [string]$ScreenshotWhenSettled = '',
     [switch]$Release
 )
 
@@ -49,8 +57,15 @@ $env:CARGO_TARGET_DIR = Join-Path $root 'shell/target-host'
 $cargoArgs = @('run', '--manifest-path', (Join-Path $root 'shell/Cargo.toml'))
 if ($Release) { $cargoArgs += '--release' }
 $cargoArgs += @('--', '--windowed')
+# An automated run that never settles must still end.
+if ($ScreenshotWhenSettled -and $ExitAfter -le 0) { $ExitAfter = 30 }
 if ($ExitAfter -gt 0) { $cargoArgs += @('--exit-after', "$ExitAfter") }
 if ($Screenshot) { $cargoArgs += @('--screenshot', [System.IO.Path]::GetFullPath($Screenshot)) }
+if ($Keys) { $cargoArgs += @('--keys', $Keys) }
+if ($FixedDt -gt 0) { $cargoArgs += @('--fixed-dt', "$FixedDt") }
+if ($ScreenshotWhenSettled) {
+    $cargoArgs += @('--screenshot-when-settled', [System.IO.Path]::GetFullPath($ScreenshotWhenSettled))
+}
 
 & cargo @cargoArgs
 exit $LASTEXITCODE
