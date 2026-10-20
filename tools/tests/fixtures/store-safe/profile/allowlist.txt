@@ -1,0 +1,4 @@
+# Test profile for tools/tests/store-safe-check.bats.
+netflix.com             # suffix rule
+=lgtvsdp.com            # exact rule: the apex only
+us.lgtvsdp.com          # suffix rule under the apex

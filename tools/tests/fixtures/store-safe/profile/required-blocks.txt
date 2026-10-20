@@ -1,0 +1,3 @@
+# Test profile: firmware hosts.
+snu.lge.com
+su.lge.com  # comment

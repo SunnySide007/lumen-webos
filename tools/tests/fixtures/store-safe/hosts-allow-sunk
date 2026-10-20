@@ -1,0 +1,11 @@
+# A store-safe hosts file at stage 4 (synthetic).
+127.0.0.1	localhost
+::1	localhost ip6-localhost
+192.0.2.5	www.netflix.com
+0.0.0.0	snu.lge.com
+::	snu.lge.com
+0.0.0.0	su.lge.com
+  0.0.0.0   ADS.example.com   # mixed case and spaces
+0.0.0.0	us.rdx2.lgtvsdp.com
+0.0.0.0	notnetflix.com
+0.0.0.0	API.Netflix.com
