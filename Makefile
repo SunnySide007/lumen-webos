@@ -6,8 +6,8 @@
 # Talking to the TV (install, launch, logs, recon) is tools/tv.sh, which runs on
 # the host so it can use your SSH key.
 
-# Placeholder until the GitHub owner is chosen; becomes io.github.<owner>.lumen.shell.
-APP_ID  ?= com.lumen.shell
+# webOS app ID, reverse-DNS from the GitHub owner (github.com/SunnySide007).
+APP_ID  ?= io.github.sunnyside007.lumen.shell
 VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' shell/Cargo.toml | head -n 1)
 TARGET  := armv7-unknown-linux-gnueabi
 BIN     := shell/target/$(TARGET)/release/lumen-shell

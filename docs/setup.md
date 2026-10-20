@@ -48,13 +48,13 @@ identifiers removed, goes to `docs/device/`. Read it before committing it.
 
 ```sh
 tools/dev.sh make ipk
-tools/tv.sh install dist/com.lumen.shell_0.0.1_arm.ipk
-tools/tv.sh launch com.lumen.shell
+tools/tv.sh install dist/io.github.sunnyside007.lumen.shell_0.0.1_arm.ipk
+tools/tv.sh launch io.github.sunnyside007.lumen.shell
 tools/tv.sh log
 ```
 
 `hello-gles` shows the GPU name, GL version and live frame times on screen.
-Press BACK to leave it. `tools/tv.sh remove com.lumen.shell` uninstalls it.
+Press BACK to leave it. `tools/tv.sh remove io.github.sunnyside007.lumen.shell` uninstalls it.
 
 ## 5. TV settings that matter later
 

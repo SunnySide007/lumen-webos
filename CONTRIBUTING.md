@@ -21,7 +21,7 @@ correctness and reversibility first, features second.
 tools/dev.sh make check     # must pass before a pull request
 tools/dev.sh make ipk       # build dist/*.ipk
 pwsh tools/sim.ps1          # run the shell in a window on Windows
-tools/tv.sh install dist/<file>.ipk && tools/tv.sh launch com.lumen.shell
+tools/tv.sh install dist/<file>.ipk && tools/tv.sh launch io.github.sunnyside007.lumen.shell
 tools/tv.sh log             # what the shell logged on the TV
 ```
 
