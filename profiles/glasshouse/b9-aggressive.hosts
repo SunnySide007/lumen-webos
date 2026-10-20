@@ -1,0 +1,54 @@
+# b9-aggressive.hosts: Lumen's custom block list for Glasshouse on the B9
+# (OLED55B9PUA, webOS 4.10.2, US). Upload it in the dashboard's custom
+# blocking ("add" mode) or with tools/glasshouse-custom.sh. Glasshouse takes
+# hosts-format lines (a sinkhole address, then the name), at most 10,000 names.
+#
+# STATUS: CANDIDATES ONLY. Every entry below is commented out. Each comes from
+# public LG blocking research, not from this TV. Uncomment an entry only when
+# the 24 h capture (tools/capture/summarize.py, "candidate" rows) shows the
+# TV contacting it and it is not on allowlist.txt. Confirm with capture.
+#
+# tools/store-safe-check.sh checks every UNcommented entry is sinkholed and
+# that none of them is on allowlist.txt.
+#
+# Costs of the categories, accepted by the owner on 2026-10-20: voice search,
+# the ThinQ app and LG Channels stop working.
+
+# --- Ads and ad measurement (confirm with capture) ---
+# 0.0.0.0	us.ad.lgsmartad.com
+# 0.0.0.0	us.info.lgsmartad.com
+# 0.0.0.0	ad.lgsmartad.com
+# 0.0.0.0	info.lgsmartad.com
+# 0.0.0.0	us.ibs.lgappstv.com
+# 0.0.0.0	lgad.cjpowercast.com
+# 0.0.0.0	smartclip.net
+# 0.0.0.0	yumenetworks.com
+
+# --- Recommendations and home-screen content (confirm with capture) ---
+# 0.0.0.0	us.rdx2.lgtvsdp.com
+# 0.0.0.0	us.homeprv.lgtvcommon.com
+# 0.0.0.0	us.lgrecommends.lgappstv.com
+
+# --- ACR, "Live Plus" viewing data (confirm with capture) ---
+# 0.0.0.0	alphonso.tv
+# 0.0.0.0	api.alphonso.tv
+# 0.0.0.0	tkacrv2.alphonso.tv
+# 0.0.0.0	tkacrv3.alphonso.tv
+# 0.0.0.0	tkacrv4.alphonso.tv
+
+# --- Diagnostics and telemetry (confirm with capture) ---
+# 0.0.0.0	lgtvonline.lge.com
+# 0.0.0.0	ngfts.lge.com
+# 0.0.0.0	aic-ngfts.lge.com
+
+# --- ThinQ (cost: the ThinQ app; confirm with capture) ---
+# 0.0.0.0	aic-common.lgthinq.com
+# 0.0.0.0	aic-service.lgthinq.com
+# 0.0.0.0	common.lgthinq.com
+
+# --- Voice search and AI (cost: voice; names unverified, confirm with capture) ---
+# 0.0.0.0	us.voice.lgtvcommon.com
+# 0.0.0.0	aic-voice.lgthinq.com
+
+# --- LG Channels (cost: LG Channels; names unverified, confirm with capture) ---
+# 0.0.0.0	us.lgchannels.lgtvcommon.com

@@ -1,0 +1,62 @@
+# Names that must NEVER be sinkholed on the B9 (webOS 4.10, US store).
+#
+# tools/store-safe-check.sh fails if /etc/hosts sends any of these to 0.0.0.0,
+# 127.0.0.1, :: or ::1, and tools/capture/summarize.py marks them "allow".
+#
+# Format: one rule per line; text after # is a comment.
+#   name     matches the name and every name under it (netflix.com matches
+#            www.netflix.com but not notnetflix.com)
+#   =name    matches that exact name only
+#
+# Sources: "seed" is the Phase 1 research (docs/roadmap.md, decision 5) and
+# the owner's must-keep list (2026-10-20); "capture" will mark rules the 24 h
+# on-TV capture confirmed. Narrow or extend after reading the capture summary.
+
+# --- LG Content Store and app updates (webOS 4, US) ---
+us.lgtvsdp.com          # seed: Content Store (SDP), US country host
+=lgtvsdp.com            # seed: apex; the TV's clock sync and TLS checks use it.
+                        # Exact only: other *.lgtvsdp.com names (rdx2) may be ads
+us.lgeapi.com           # seed: LG account and store API
+a.lgappstv.com          # seed: store app downloads
+nextlgsdp.com           # seed: store-related SDP hosts; whole suffix until the
+                        # capture names the store ones
+gfts.lge.com            # seed: kept until proven unneeded (store/feature flags);
+                        # does not cover ngfts.lge.com or aic-ngfts.lge.com
+
+# --- DRM ---
+googleapis.com          # seed: Widevine provisioning and licences
+
+# --- Netflix ---
+netflix.com             # seed
+nflxext.com             # seed
+nflximg.net             # seed
+nflximg.com             # seed
+nflxso.net              # seed
+nflxvideo.net           # seed: video CDN (Open Connect)
+nflxsearch.net          # seed
+
+# --- Amazon Prime Video ---
+amazon.com              # seed: sign-in, catalogue, licences
+amazonvideo.com         # seed
+aiv-cdn.net             # seed: video CDN
+aiv-delivery.net        # seed: video CDN
+media-amazon.com        # seed: artwork
+amazonaws.com           # seed: AWS endpoints Prime Video and others use
+primevideo.com          # seed: Prime Video's own domain (research; confirm)
+
+# --- Plex (plx-native) ---
+plex.tv                 # seed: sign-in, QR link, server discovery
+plex.direct             # seed: TLS names for the owner's Plex server
+
+# --- Spotify (Spotify Connect from the Pixel) ---
+spotify.com             # seed
+scdn.co                 # seed: audio and artwork CDN
+spotifycdn.com          # seed
+spotifycdn.net          # seed
+
+# --- YouTube and casting from the Pixel ---
+youtube.com             # seed
+googlevideo.com         # seed: video CDN
+ytimg.com               # seed: thumbnails
+ggpht.com               # seed: channel art
+google.com              # seed: sign-in, casting

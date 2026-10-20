@@ -1,0 +1,16 @@
+# Names that MUST resolve to 0.0.0.0 on the B9: LG's firmware update servers.
+#
+# An LG firmware update can remove root and close the exploit that gave it
+# (docs/safety.md, rule 8). The Phase 0 survey found none of these in
+# /etc/hosts, although Homebrew Channel's webosbrew_block_updates flag was
+# set, so Glasshouse's "Block TV software updates" switch adds them and
+# tools/store-safe-check.sh fails until every one is sinkholed.
+#
+# One exact name per line; text after # is a comment. App updates come from
+# the Content Store (allowlist.txt), not from these hosts.
+
+snu.lge.com             # firmware update check
+su.lge.com              # firmware update
+su-ssl.lge.com          # firmware update over TLS
+su-dev.lge.com          # firmware update, developer channel
+nsu.lge.com             # firmware update, newer clients
