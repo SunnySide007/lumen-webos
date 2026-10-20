@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/lumen-shell"]
+members = ["crates/lumen-core", "crates/lumen-shell"]
 
 [workspace.package]
 version = "0.0.1"
@@ -10,6 +10,12 @@ rust-version = "1.99"
 
 [workspace.dependencies]
 libloading = "0.9"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
 
 [profile.release]
 opt-level = 3
