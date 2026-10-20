@@ -17,11 +17,10 @@ calmer `aurora-2160p-60s.mp4` and the second scene, `fireflies-2160p.mp4`,
 go the same way: copy each in turn as `loop.mp4`.
 
 ```sh
-tools/tv.sh run 'mkdir -p /tmp/lumen-hdr && cat > /tmp/lumen-hdr/loop.mp4' < dist/studio/aurora-2160p.mp4
-tools/tv.sh run 'ls -l /tmp/lumen-hdr'
+tools/tv.sh push dist/studio/aurora-2160p.mp4 /tmp/lumen-hdr/loop.mp4
 ```
 
-The size on the TV should match `ls -l dist/studio/aurora-2160p.mp4`.
+`push` makes the folder and checks that the size on the TV matches.
 
 ## 2. Play it and read the dynamic range
 
@@ -69,7 +68,7 @@ tools/tv.sh run 'rm -rf /tmp/lumen-hdr'
   but it is persistent, so run the last line whatever the result:
 
   ```sh
-  tools/tv.sh run 'mkdir -p /media/developer/temp/lumen-hdr && cat > /media/developer/temp/lumen-hdr/loop.mp4' < dist/studio/aurora-2160p.mp4
+  tools/tv.sh push dist/studio/aurora-2160p.mp4 /media/developer/temp/lumen-hdr/loop.mp4
   tools/tv.sh run 'LUMEN_HDR_DIR=/media/developer/temp/lumen-hdr sh -s' < studio/tv/hdr-check.sh
   tools/tv.sh run 'rm -rf /media/developer/temp/lumen-hdr'
   ```
@@ -82,7 +81,8 @@ tools/tv.sh run 'rm -rf /tmp/lumen-hdr'
 
   ```sh
   tools/studio.sh python3 studio/encode.py dist/studio/aurora-2160p --out dist/studio/aurora-2160p.mkv
-  tools/tv.sh run 'rm -f /tmp/lumen-hdr/loop.mp4 && cat > /tmp/lumen-hdr/loop.mkv' < dist/studio/aurora-2160p.mkv
+  tools/tv.sh run 'rm -f /tmp/lumen-hdr/loop.mp4'
+  tools/tv.sh push dist/studio/aurora-2160p.mkv /tmp/lumen-hdr/loop.mkv
   tools/tv.sh script studio/tv/hdr-check.sh
   ```
 

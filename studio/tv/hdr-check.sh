@@ -4,8 +4,8 @@
 #
 #   tools/tv.sh script studio/tv/hdr-check.sh
 #
-# after copying the loop to /tmp/lumen-hdr/loop.mp4 (or loop.mkv); the steps
-# are in studio/tv/README.md. It changes no setting: it closes and starts the
+# after `tools/tv.sh push <loop> /tmp/lumen-hdr/loop.mp4` (or loop.mkv); the
+# steps are in studio/tv/README.md. It changes no setting: it closes and starts the
 # player (com.webos.app.photovideo, the webOS 3-5 player) and reads the
 # picture settings, whose "dimension" says which dynamic range the panel is
 # in. /tmp is RAM, so a reboot leaves nothing behind. POSIX sh for busybox.
