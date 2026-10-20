@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 libloading.workspace = true
+lumen-core.workspace = true
 
 [lints]
 workspace = true

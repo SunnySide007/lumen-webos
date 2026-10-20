@@ -1,11 +1,12 @@
 //! Lumen shell: a native home screen for rooted LG webOS TVs.
 //!
-//! Phase 0 ships `hello-gles`: it proves the toolchain, SDL2 loading, a GLES2
-//! context and the frame budget on the real set before any UI is built on top.
+//! The tvOS-style home grid of docs/specs/shell-mvp.md: SDL2 and GL here, the
+//! logic (keys, focus, layout, motion, apps) in `lumen-core`.
 
 mod app;
 mod capture;
 mod compat;
+mod draw;
 mod font;
 mod frame_stats;
 mod gl;
@@ -36,7 +37,14 @@ fn main() -> ExitCode {
         args
     );
 
-    match app::run(app::Options::from_args(&args)) {
+    let opts = match app::Options::from_args(&args) {
+        Ok(opts) => opts,
+        Err(err) => {
+            info!("bad arguments: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match app::run(opts) {
         Ok(()) => {
             info!("clean exit");
             ExitCode::SUCCESS

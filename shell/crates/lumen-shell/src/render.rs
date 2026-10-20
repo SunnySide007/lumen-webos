@@ -1,6 +1,7 @@
 //! A batched rectangle renderer: every frame is a list of coloured quads in a
-//! fixed 1920x1080 space, uploaded once and drawn with one call. That is all
-//! hello-gles needs, and it is the shape the real UI's draw list will take.
+//! fixed 1920x1080 space, uploaded once and drawn with one call. On the B9 one
+//! such call of about 3,000 quads held 60 fps (hello-gles; OLED55B9PUA, webOS
+//! 4.10.2-31, firmware 05.50.00).
 
 use std::ffi::c_void;
 
@@ -9,8 +10,7 @@ use crate::gl::{self, Gl};
 
 /// The surface the UI is designed for. The TV's graphics plane is this size;
 /// on a PC it is letterboxed into the window.
-pub const SCREEN_W: f32 = 1920.0;
-pub const SCREEN_H: f32 = 1080.0;
+pub use lumen_core::layout::{SCREEN_H, SCREEN_W};
 
 const FLOATS_PER_VERTEX: usize = 6; // x, y, r, g, b, a
 const VERTICES_PER_QUAD: usize = 6;
@@ -26,7 +26,26 @@ impl Rgba {
     pub const fn alpha(self, a: f32) -> Self {
         Self(self.0, self.1, self.2, a)
     }
+
+    /// From `self` (t = 0) to `to` (t = 1), alpha included.
+    pub fn lerp(self, to: Self, t: f32) -> Self {
+        let mix = |a: f32, b: f32| a + (b - a) * t;
+        Self(
+            mix(self.0, to.0),
+            mix(self.1, to.1),
+            mix(self.2, to.2),
+            mix(self.3, to.3),
+        )
+    }
+
+    /// The colour times `k` (below 1 darker), alpha kept.
+    pub fn shade(self, k: f32) -> Self {
+        Self(self.0 * k, self.1 * k, self.2 * k, self.3)
+    }
 }
+
+/// Strips per rounded corner band, so a rounded rectangle is 13 quads.
+const CORNER_STRIPS: usize = 6;
 
 #[derive(Default)]
 pub struct Batch {
@@ -63,6 +82,41 @@ impl Batch {
 
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, c: Rgba) {
         self.gradient_rect(x, y, w, h, c, c);
+    }
+
+    /// A rectangle with corners of radius `r`, shaded from `top` to `bottom`.
+    /// Each corner band is `CORNER_STRIPS` horizontal strips inset to follow
+    /// the curve, plus one rectangle for the middle: 13 quads. Shader-drawn
+    /// corners come with textures (milestone B2).
+    // The same x, y, w, h as `gradient_rect`, plus a radius and two colours.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rounded_rect(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        r: f32,
+        top: Rgba,
+        bottom: Rgba,
+    ) {
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+        let at = |yy: f32| top.lerp(bottom, (yy - y) / h);
+        let band = r / CORNER_STRIPS as f32;
+        for i in 0..CORNER_STRIPS {
+            // How far the corner's circle is from the side, at the strip's middle.
+            let dy = r - (i as f32 + 0.5) * band;
+            let inset = r - (r * r - dy * dy).max(0.0).sqrt();
+            let upper = y + i as f32 * band;
+            let lower = y + h - (i as f32 + 1.0) * band;
+            for sy in [upper, lower] {
+                self.gradient_rect(x + inset, sy, w - 2.0 * inset, band, at(sy), at(sy + band));
+            }
+        }
+        self.gradient_rect(x, y + r, w, h - 2.0 * r, at(y + r), at(y + h - r));
     }
 
     /// Diagnostic text in the 5x7 font, each font pixel `scale` screen pixels.
@@ -211,6 +265,64 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn xs_and_ys(batch: &Batch) -> (Vec<f32>, Vec<f32>) {
+        batch
+            .verts
+            .chunks(FLOATS_PER_VERTEX)
+            .map(|v| (v[0], v[1]))
+            .unzip()
+    }
+
+    #[test]
+    fn a_rounded_rect_is_13_quads_inside_its_bounds() {
+        let mut batch = Batch::default();
+        let white = Rgba::rgb8(255, 255, 255);
+        batch.rounded_rect(100.0, 200.0, 320.0, 192.0, 12.0, white, white);
+        assert_eq!(batch.quad_count(), 2 * CORNER_STRIPS + 1);
+        let (xs, ys) = xs_and_ys(&batch);
+        assert!(xs.iter().all(|&x| (100.0..=420.0).contains(&x)));
+        assert!(ys.iter().all(|&y| (200.0..=392.0).contains(&y)));
+        // The outermost strips are inset most; the middle spans the full width.
+        let top_strip_left = batch.verts[0];
+        assert!(top_strip_left > 100.0 + 12.0 / 2.0);
+        assert!(xs.contains(&100.0) && xs.contains(&420.0));
+    }
+
+    #[test]
+    fn rounded_rect_clamps_its_radius_and_skips_empty_rects() {
+        let mut batch = Batch::default();
+        let c = Rgba::rgb8(1, 2, 3);
+        batch.rounded_rect(0.0, 0.0, 0.0, 10.0, 4.0, c, c);
+        assert_eq!(batch.quad_count(), 0);
+        batch.rounded_rect(0.0, 0.0, 40.0, 10.0, 50.0, c, c);
+        let (xs, ys) = xs_and_ys(&batch);
+        assert!(xs.iter().all(|&x| (0.0..=40.0).contains(&x)));
+        assert!(ys.iter().all(|&y| (0.0..=10.0).contains(&y)));
+    }
+
+    #[test]
+    fn rounded_rect_shades_from_top_to_bottom() {
+        let mut batch = Batch::default();
+        let (black, white) = (Rgba::rgb8(0, 0, 0), Rgba::rgb8(255, 255, 255));
+        batch.rounded_rect(0.0, 0.0, 100.0, 100.0, 10.0, black, white);
+        let first_red = batch.verts[2];
+        let reds: Vec<f32> = batch
+            .verts
+            .chunks(FLOATS_PER_VERTEX)
+            .map(|v| v[2])
+            .collect();
+        assert_eq!(first_red, 0.0);
+        assert!(reds.iter().any(|&r| (r - 1.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn colour_helpers() {
+        let a = Rgba(0.0, 0.2, 1.0, 0.0);
+        let b = Rgba(1.0, 0.4, 0.0, 1.0);
+        assert_eq!(a.lerp(b, 0.5), Rgba(0.5, 0.3, 0.5, 0.5));
+        assert_eq!(b.shade(0.5), Rgba(0.5, 0.2, 0.0, 1.0));
+    }
 
     #[test]
     fn a_rect_is_two_triangles() {

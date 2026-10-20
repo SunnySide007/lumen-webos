@@ -31,12 +31,13 @@ x=         80         440        800        1160       1520 (to 1840)
   content. It shows a gradient and, bottom left, the title of the focused
   app on row 0. It is not focusable in this phase.
 * **App grid:** rows of five tiles in launcher order. Each tile is a solid
-  colour picked from an 8-colour palette by a hash of the app's ID, with its
-  title centred on it in the 5x7 font. Icons and real text arrive in B2.
+  colour from an 8-colour palette, by its position in the list (so no two
+  neighbours match), with its title centred on it in the 5x7 font. Icons and
+  real text arrive in B2.
 * **Focus:** exactly one tile is focused. It is scaled up, gets a soft
   shadow, and draws above its neighbours.
 * **Status line:** a short message ("OPENING NETFLIX") in a dark pill at the
-  bottom right, shown for 2 s.
+  top right, over the Top Shelf while focus is on row 0, shown for 2 s.
 * **No apps:** "NO APPS" centred where row 0 would be; arrows do nothing.
 
 ## Keys
@@ -141,7 +142,7 @@ screen coordinates do not.
 | Shadow | 4 layers stepping out 6 px each, offset 18 px down at full lift, total opacity about 0.4 |
 | Title | 5x7 font at 3 px per font pixel, centred; cut to fit 16 px inside the tile, ending in `...` |
 | Top Shelf title | 5x7 font at 8 px, left at x 80, bottom 60 px above the shelf's lower edge |
-| Status pill | bottom right of the safe area, 5x7 font at 3 px |
+| Status pill | top right of the safe area, 5x7 font at 3 px |
 
 Checks the numbers pass (each becomes a unit test):
 

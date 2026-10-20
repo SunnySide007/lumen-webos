@@ -27,6 +27,7 @@ name = "lumen-shell"
 version = "0.0.1"
 dependencies = [
  "libloading",
+ "lumen-core",
 ]
 
 [[package]]
