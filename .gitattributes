@@ -1,0 +1,12 @@
+# Everything that runs on the TV must keep LF line endings: a CRLF shell
+# script or QML file fails there in confusing ways. Normalise all text to LF.
+* text=auto eol=lf
+
+# PowerShell runs on Windows only.
+*.ps1 text eol=crlf
+
+*.png binary
+*.ipk binary
+*.mp4 binary
+*.mov binary
+*.exr binary

@@ -1,0 +1,28 @@
+# Weekly dependency updates, with Conventional Commits titles. Dependabot bumps
+# only the base image in docker/Dockerfile: the SDK, Rust and Node pins there
+# stay manual (Rust also lives in shell/rust-toolchain.toml; keep both in step).
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /shell
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope

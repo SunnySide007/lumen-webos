@@ -1,0 +1,22 @@
+{
+  "name": "Lumen",
+  "build": {
+    "dockerfile": "../docker/Dockerfile",
+    "context": "../docker"
+  },
+  "workspaceFolder": "/work",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/work,type=bind",
+  "mounts": [
+    "source=lumen-cargo-registry,target=/usr/local/cargo/registry,type=volume",
+    "source=lumen-target,target=/work/shell/target,type=volume"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "timonwong.shellcheck",
+        "editorconfig.editorconfig"
+      ]
+    }
+  }
+}

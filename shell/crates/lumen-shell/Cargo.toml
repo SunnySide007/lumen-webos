@@ -1,0 +1,17 @@
+[package]
+name = "lumen-shell"
+description = "Lumen's native home screen for rooted LG webOS TVs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+libloading.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"

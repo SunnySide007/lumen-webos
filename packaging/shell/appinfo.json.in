@@ -1,0 +1,14 @@
+{
+  "id": "@APP_ID@",
+  "version": "@VERSION@",
+  "vendor": "Lumen",
+  "type": "native",
+  "main": "lumen-shell",
+  "title": "Lumen",
+  "appDescription": "A clean, fast home screen for rooted LG TVs (Phase 0: hello-gles)",
+  "icon": "icon80.png",
+  "largeIcon": "icon130.png",
+  "iconColor": "#0b0f1c",
+  "bgColor": "#000000",
+  "resolution": "1920x1080"
+}

@@ -1,0 +1,20 @@
+# Build output
+/shell/target/
+/shell/target-host/
+/dist/
+
+# Downloaded at first use (tools/sim.ps1)
+/third_party/
+
+# Local settings: TV address and key path (copy .env.example)
+/.env
+
+# Raw, unredacted recon output; only redacted copies go in docs/device/
+/tools/out/
+
+# Python bytecode from the tool tests
+__pycache__/
+
+# Logs and captures from local runs
+*.log
+lumen-shell.log

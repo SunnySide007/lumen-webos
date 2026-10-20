@@ -1,0 +1,5 @@
+# Keep in step with RUST_VERSION in docker/Dockerfile.
+[toolchain]
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
