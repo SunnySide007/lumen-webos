@@ -20,6 +20,8 @@ from what it measured.
 - [x] `hello-gles`: SDL2 at run time, GLES2, frame stats, remote keys, screenshots
 - [x] PC simulator (`tools/sim.ps1`), colour-accurate to the TV's framebuffer
 - [x] TV tools (`tools/tv.sh`) and read-only survey with redaction (`tools/recon.sh`)
-- [ ] SSH key on the TV and `.env` (owner)
-- [ ] Recon report for the B9 → `docs/device/b9.md`
-- [ ] `hello-gles` on the B9: renderer, frame times, BACK and HOME scancodes
+- [x] SSH key on the TV and `.env` (owner)
+- [x] Recon report for the B9 → `docs/device/b9.md`
+- [x] `hello-gles` on the B9: Mali-T820, a steady 60 fps; BACK is 482, and HOME
+  never reaches the app (the compositor takes it). Its BACK handling needs the
+  TV's SDL key-event layout, recorded in `docs/device/b9.md`.

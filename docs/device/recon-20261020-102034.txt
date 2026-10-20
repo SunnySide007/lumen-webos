@@ -1,0 +1,1591 @@
+
+===== identity =====
+$ date -u
+Tue Oct 20 10:20:31 UTC 2026
+$ uptime
+ 03:20:31 up 11 min,  0 users,  load average: 10.84, 10.22, 6.06
+$ uname -a
+Linux LGwebOSTV 4.4.84-169.gld4tv.5 #1 SMP PREEMPT Wed Aug 27 09:10:01 KST 2025 aarch64 GNU/Linux
+--- /etc/starfish-release
+Rockhopper release 4.10.2-31 (goldilocks2-grampians)
+--- /etc/os-release
+(absent)
+webos_name: webOS TV
+webos_release: 4.10.2
+webos_build_id: 31
+webos_imagename: lib32-starfish-atsc-secured
+webos_release_codename: goldilocks2-grampians
+core_os_kernel_version: 4.4.84-169.gld4tv.5
+$ luna com.webos.service.tv.systemproperty/getSystemInfo {"keys":["modelName","firmwareVersion","sdkVersion","boardType","otaId","UHD"]}
+{
+    "UHD": "true",
+    "modelName": "OLED55B9PUA",
+    "otaId": "HE_DTV_W19H_AFADATAA",
+    "firmwareVersion": "05.50.00",
+    "boardType": "M16P3_ATSC_KR",
+    "returnValue": true,
+    "sdkVersion": "4.10.0"
+}
+
+===== hardware =====
+--- /proc/cpuinfo
+processor	: 0
+BogoMIPS	: 48.00
+Features	: fp asimd evtstrm aes pmull sha1 sha2 crc32
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU variant	: 0x0
+CPU part	: 0xd03
+CPU revision	: 4
+
+processor	: 1
+BogoMIPS	: 48.00
+Features	: fp asimd evtstrm aes pmull sha1 sha2 crc32
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU variant	: 0x0
+CPU part	: 0xd03
+CPU revision	: 4
+
+processor	: 2
+BogoMIPS	: 48.00
+Features	: fp asimd evtstrm aes pmull sha1 sha2 crc32
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU variant	: 0x0
+CPU part	: 0xd03
+CPU revision	: 4
+
+processor	: 3
+BogoMIPS	: 48.00
+Features	: fp asimd evtstrm aes pmull sha1 sha2 crc32
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU variant	: 0x0
+CPU part	: 0xd03
+CPU revision	: 4
+
+$ free
+              total        used        free      shared  buff/cache   available
+Mem:        1688532     1260008       41496       41596      387028      334100
+Swap:        614396      196532      417864
+$ head /proc/meminfo
+MemTotal:        1688532 kB
+MemFree:           41380 kB
+MemAvailable:     333984 kB
+Buffers:           58356 kB
+Cached:           279364 kB
+SwapCached:        12084 kB
+Active:           344916 kB
+Inactive:         345772 kB
+$ lsmod (graphics)
+mali_kbase            397312  7 
+ump                    53248 15 mali_kbase,ump_ion_import,ump_lgfb_import
+kds                    16384  2 mali_kbase,ump
+galcore               630784  6 
+--- /sys/class/misc/mali0/device/gpuinfo
+Mali-T82x MP2 r1p0 0x0820
+--- /proc/lg/pm/temperature
+53
+
+===== storage =====
+$ df -h
+Filesystem                Size      Used Available Use% Mounted on
+/dev/root               784.8M    784.8M         0 100% /old_root
+devtmpfs                468.3M         0    468.3M   0% /old_root/dev
+/dev/mmcblk0p30          24.5M     24.5M         0 100% /old_root/mnt/bsppart
+overlay                  24.5M     24.5M         0 100% /
+devtmpfs                468.3M         0    468.3M   0% /dev
+tmp                     824.5M     15.1M    809.3M   2% /tmp
+tmpfs                   824.5M     19.8M    804.6M   2% /dev/shm
+/dev/mmcblk0p35         384.0K    384.0K         0 100% /mnt/license
+/dev/mmcblk0p32          32.0K     32.0K         0 100% /mnt/otycabi
+/dev/mmcblk0p31          26.1M     26.1M         0 100% /mnt/otncabi
+/dev/mmcblk0p33          68.2M     68.2M         0 100% /mnt/fonts
+/dev/mmcblk0p29          44.7M     44.7M         0 100% /mnt/tvservice
+/dev/mmcblk0p33          68.2M     68.2M         0 100% /usr/share/fonts
+/dev/mmcblk0p32          32.0K     32.0K         0 100% /usr/lib/nyx/modules
+/dev/mmcblk0p29          44.7M     44.7M         0 100% /mnt/lg/tvservice
+/dev/mmcblk0p51         104.5M     10.1M     86.5M  11% /mnt/lg/db8
+/dev/mmcblk0p53           4.2G      2.4G      1.8G  58% /mnt/lg/appstore
+/dev/mmcblk0p46           3.8M    242.0K      3.3M   7% /mnt/lg/uhdcp
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /mnt/lg/cmn_data
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /mnt/lg/flash/data
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /mnt/lg/user
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /var
+/dev/mmcblk0p51         104.5M     10.1M     86.5M  11% /var/db
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /home
+/dev/mmcblk0p53           4.2G      2.4G      1.8G  58% /media
+tmpfs                    80.0M     20.0K     80.0M   0% /var/db/temp
+/dev/mmcblk0p15           4.8M     37.0K      4.4M   1% /mnt/lg/ciplus/authcxt
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /mnt/lg/cache/flash
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /mnt/lg/cache/sdp
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /mnt/lg/cache/browser
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /mnt/lg/cache/webbrowser
+tmpfs                    90.0M     20.0K     90.0M   0% /var/db/epg
+/dev/loop0              847.3M    847.3M         0 100% /mnt/lg/appstore/preload/igallery/files/data
+cgroup_root              10.0M         0     10.0M   0% /sys/fs/cgroup
+tmpfs                   824.5M      4.0K    824.5M   0% /mnt/lg/cache/sdp/sdx/pkgs
+tmp                     824.5M     15.1M    809.3M   2% /var/palm/jail/netflix/tmp
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/netflix/lib
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/netflix/bin
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/netflix/usr/bin
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/netflix/usr/lib
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/netflix/usr/palm/frameworks
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/netflix/usr/share
+/dev/mmcblk0p33          68.2M     68.2M         0 100% /var/palm/jail/netflix/usr/share/fonts
+tmp                     824.5M     15.1M    809.3M   2% /var/palm/jail/netflix/var/run/pulse
+tmp                     824.5M     15.1M    809.3M   2% /var/palm/jail/netflix/var/run/luna-service2
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/netflix/usr/lib/qt5/plugins
+devtmpfs                468.3M         0    468.3M   0% /var/palm/jail/netflix/dev/snd
+tmpfs                   824.5M     19.8M    804.6M   2% /var/palm/jail/netflix/dev/shm
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/netflix/etc/ssl
+devtmpfs                468.3M         0    468.3M   0% /var/palm/jail/netflix/dev/logdir
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /var/palm/jail/netflix/var/luna/preferences
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/netflix/etc/fonts
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/netflix/etc/prefs/properties
+/dev/mmcblk0p53           4.2G      2.4G      1.8G  58% /var/palm/jail/netflix/media/internal
+/dev/mmcblk0p53           4.2G      2.4G      1.8G  58% /var/palm/jail/netflix/media/cryptofs/apps/usr/palm/services/netflix.service
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/netflix/mnt/lg/res/lglib
+/dev/mmcblk0p29          44.7M     44.7M         0 100% /var/palm/jail/netflix/mnt/lg/tvservice/res
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/netflix/mnt/lg/cache
+/dev/mmcblk0p15           4.8M     37.0K      4.4M   1% /var/palm/jail/netflix/mnt/lg/ciplus/authcxt
+tmp                     824.5M     15.1M    809.3M   2% /var/palm/jail/netflix/tmp/dbgfrwk
+devtmpfs                468.3M         0    468.3M   0% /var/palm/jail/netflix/dev/lg
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /var/palm/jail/netflix/mnt/lg/flash/data/nlpadapter
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /var/palm/jail/netflix/mnt/lg/flash/data/alibaba
+devtmpfs                468.3M         0    468.3M   0% /var/palm/jail/netflix/dev/input
+/dev/mmcblk0p29          44.7M     44.7M         0 100% /var/palm/jail/netflix/mnt/lg/tvservice/pqldb/dolby
+tmp                     824.5M     15.1M    809.3M   2% /var/palm/jail/com.webos.app.browser/tmp
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/com.webos.app.browser/lib
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/com.webos.app.browser/bin
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/com.webos.app.browser/usr/bin
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/com.webos.app.browser/usr/lib
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/com.webos.app.browser/usr/palm/frameworks
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/com.webos.app.browser/usr/share
+/dev/mmcblk0p33          68.2M     68.2M         0 100% /var/palm/jail/com.webos.app.browser/usr/share/fonts
+tmp                     824.5M     15.1M    809.3M   2% /var/palm/jail/com.webos.app.browser/var/run/pulse
+tmp                     824.5M     15.1M    809.3M   2% /var/palm/jail/com.webos.app.browser/var/run/luna-service2
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/com.webos.app.browser/usr/lib/qt5/plugins
+devtmpfs                468.3M         0    468.3M   0% /var/palm/jail/com.webos.app.browser/dev/snd
+tmpfs                   824.5M     19.8M    804.6M   2% /var/palm/jail/com.webos.app.browser/dev/shm
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/com.webos.app.browser/etc/ssl
+devtmpfs                468.3M         0    468.3M   0% /var/palm/jail/com.webos.app.browser/dev/logdir
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /var/palm/jail/com.webos.app.browser/var/luna/preferences
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/com.webos.app.browser/etc/fonts
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/com.webos.app.browser/etc/prefs/properties
+/dev/mmcblk0p53           4.2G      2.4G      1.8G  58% /var/palm/jail/com.webos.app.browser/media/internal
+/dev/mmcblk0p53           4.2G      2.4G      1.8G  58% /var/palm/jail/com.webos.app.browser/media/system/apps/usr/palm/services/com.webos.app.browser.service
+overlay                  24.5M     24.5M         0 100% /var/palm/jail/com.webos.app.browser/mnt/lg/res
+/dev/mmcblk0p29          44.7M     44.7M         0 100% /var/palm/jail/com.webos.app.browser/mnt/lg/tvservice/res
+devtmpfs                468.3M         0    468.3M   0% /var/palm/jail/com.webos.app.browser/dev/input
+devtmpfs                468.3M         0    468.3M   0% /var/palm/jail/com.webos.app.browser/dev/lg
+tmpfs                   824.5M      4.0K    824.5M   0% /mnt/lg/cmn_data/admanager/tmpData
+tmp                     824.5M     15.1M    809.3M   2% /etc/motd
+tmp                     824.5M     15.1M    809.3M   2% /etc/shadow
+tmp                     824.5M     15.1M    809.3M   2% /tmp/rdxd
+tmp                     824.5M     15.1M    809.3M   2% /tmp/uploadd
+tmp                     824.5M     15.1M    809.3M   2% /var/spool/rdxd
+tmp                     824.5M     15.1M    809.3M   2% /var/spool/uploadd/pending
+tmp                     824.5M     15.1M    809.3M   2% /var/spool/uploadd/uploaded
+/dev/loop1               56.0M     56.0M         0 100% /media/squashfs/apps/netflix
+overlay                   4.2G      2.4G      1.8G  58% /media/cryptofs/apps/usr/palm/applications/netflix
+overlay                   4.2G      2.4G      1.8G  58% /var/palm/jail/netflix/media/cryptofs/apps/usr/palm/applications/netflix
+$ df -h /media/developer
+Filesystem                Size      Used Available Use% Mounted on
+/dev/mmcblk0p53           4.2G      2.4G      1.8G  58% /mnt/lg/appstore
+$ df -h /mnt/lg/appstore
+Filesystem                Size      Used Available Use% Mounted on
+/dev/mmcblk0p53           4.2G      2.4G      1.8G  58% /mnt/lg/appstore
+$ df -h /mnt/lg/cmn_data
+Filesystem                Size      Used Available Use% Mounted on
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /mnt/lg/cmn_data
+$ df -h /home
+Filesystem                Size      Used Available Use% Mounted on
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /mnt/lg/cmn_data
+$ df -h /tmp
+Filesystem                Size      Used Available Use% Mounted on
+tmp                     824.5M     15.1M    809.3M   2% /tmp
+$ df -h /var
+Filesystem                Size      Used Available Use% Mounted on
+/dev/mmcblk0p52         525.3M    215.2M    271.6M  44% /mnt/lg/cmn_data
+
+===== graphics-and-media-libraries =====
+lrwxrwxrwx    1 root     root            20 Aug 26  2025 /usr/lib/libSDL2-2.0.so.0 -> libSDL2-2.0.so.0.4.1
+-rwxr-xr-x    1 root     root        648212 Aug 26  2025 /usr/lib/libSDL2-2.0.so.0.4.1
+lrwxrwxrwx    1 root     root            26 Aug 26  2025 /usr/lib/libSDL2_image-2.0.so.0 -> libSDL2_image-2.0.so.0.0.1
+-rwxr-xr-x    1 root     root         31208 Aug 26  2025 /usr/lib/libSDL2_image-2.0.so.0.0.1
+lrwxrwxrwx    1 root     root            26 Aug 26  2025 /usr/lib/libSDL2_mixer-2.0.so.0 -> libSDL2_mixer-2.0.so.0.0.1
+-rwxr-xr-x    1 root     root         44312 Aug 26  2025 /usr/lib/libSDL2_mixer-2.0.so.0.0.1
+lrwxrwxrwx    1 root     root            24 Aug 26  2025 /usr/lib/libSDL2_net-2.0.so.0 -> libSDL2_net-2.0.so.0.0.1
+-rwxr-xr-x    1 root     root         10904 Aug 26  2025 /usr/lib/libSDL2_net-2.0.so.0.0.1
+lrwxrwxrwx    1 root     root            25 Aug 26  2025 /usr/lib/libSDL2_ttf-2.0.so.0 -> libSDL2_ttf-2.0.so.0.14.0
+-rwxr-xr-x    1 root     root         20972 Aug 26  2025 /usr/lib/libSDL2_ttf-2.0.so.0.14.0
+lrwxrwxrwx    1 root     root            16 Aug 26  2025 /usr/lib/libGLESv2.so -> libGLESv2.so.2.0
+lrwxrwxrwx    1 root     root            16 Aug 26  2025 /usr/lib/libGLESv2.so.2 -> libGLESv2.so.2.0
+-rwxr-xr-x    1 root     root          5144 Aug 26  2025 /usr/lib/libGLESv2.so.2.0
+lrwxrwxrwx    1 root     root            13 Aug 26  2025 /usr/lib/libEGL.so -> libEGL.so.1.4
+lrwxrwxrwx    1 root     root            13 Aug 26  2025 /usr/lib/libEGL.so.1 -> libEGL.so.1.4
+-rwxr-xr-x    1 root     root          5140 Aug 26  2025 /usr/lib/libEGL.so.1.4
+lrwxrwxrwx    1 root     root            13 Aug 26  2025 /usr/lib/libEGLfk.so -> libEGLfk.so.2
+lrwxrwxrwx    1 root     root            17 Aug 26  2025 /usr/lib/libEGLfk.so.2 -> libEGLfk.so.2.4.0
+-rwxr-xr-x    1 root     root         13160 Aug 26  2025 /usr/lib/libEGLfk.so.2.4.0
+lrwxrwxrwx    1 root     root            26 Aug 26  2025 /usr/lib/libwayland-client.so.0 -> libwayland-client.so.0.3.0
+-rwxr-xr-x    1 root     root         33160 Aug 26  2025 /usr/lib/libwayland-client.so.0.3.0
+lrwxrwxrwx    1 root     root            28 Aug 26  2025 /usr/lib/libluna-service2++.so.3 -> libluna-service2++.so.3.21.2
+-rwxr-xr-x    1 root     root         31392 Aug 26  2025 /usr/lib/libluna-service2++.so.3.21.2
+lrwxrwxrwx    1 root     root            26 Aug 26  2025 /usr/lib/libluna-service2.so.3 -> libluna-service2.so.3.21.2
+-rwxr-xr-x    1 root     root        212976 Aug 26  2025 /usr/lib/libluna-service2.so.3.21.2
+lrwxrwxrwx    1 root     root            22 Aug 26  2025 /usr/lib/libplayerAPIs.so.1 -> libplayerAPIs.so.1.0.0
+-rwxr-xr-x    1 root     root        482556 Aug 26  2025 /usr/lib/libplayerAPIs.so.1.0.0
+lrwxrwxrwx    1 root     root            18 Aug 26  2025 /usr/lib/libAcbAPI.so.1 -> libAcbAPI.so.1.0.0
+-rwxr-xr-x    1 root     root        118732 Aug 26  2025 /usr/lib/libAcbAPI.so.1.0.0
+lrwxrwxrwx    1 root     root            18 Aug 26  2025 /usr/lib/libpf-1.0.so.1 -> libpf-1.0.so.1.0.0
+-rwxr-xr-x    1 root     root       1053272 Aug 26  2025 /usr/lib/libpf-1.0.so.1.0.0
+-rwxr-xr-x    1 root     root      92617276 Aug 26  2025 /usr/lib/libcbe.so
+
+===== qt-and-qml =====
+$ ls /usr/lib/qt5/qml
+CoverUI
+Eos
+Eros
+FpsCounter
+InputPicker
+KeyFilters
+PerformanceLog
+PmLog
+PmTrace
+Qt
+QtGraphicalEffects
+QtMultimedia
+QtQml
+QtQuick
+QtQuick.2
+QtSensors
+QtTest
+QuickSettings
+RdxLog
+RemoteUserList
+ScreenRemote
+ShellCommand
+StarfishComponents
+SystemUI
+SystemUIAssets
+TextFile
+Tips
+Voice
+WebOS
+WebOSServices
+YSM
+builtins.qmltypes
+iLib
+$ ls /usr/lib/qt5/qml/KeyFilters
+appLaunch.js
+easytv.js
+systemUi.js
+$ ls -d /usr/lib/qt5/qml/QtMultimedia
+/usr/lib/qt5/qml/QtMultimedia
+$ ls /usr/lib/qml
+ls: /usr/lib/qml: No such file or directory
+(exit 1)
+
+===== system-apps =====
+system apps: 80
+$ ls /usr/palm/applications
+airplay
+amazon.alexa.view
+com.lge.app.viewster
+com.palm.app.firstuse
+com.palm.app.settings
+com.webos.app.accessibility
+com.webos.app.acrcomponent
+com.webos.app.acrhdmi1
+com.webos.app.acrhdmi2
+com.webos.app.acrhdmi3
+com.webos.app.acrhdmi4
+com.webos.app.acroverlay
+com.webos.app.actionhandler
+com.webos.app.amazon-echo
+com.webos.app.beanbrowser
+com.webos.app.btspeakerapp
+com.webos.app.care365
+com.webos.app.channeledit
+com.webos.app.channelsetting
+com.webos.app.cheeringtv
+com.webos.app.cmp-client
+com.webos.app.connectionwizard
+com.webos.app.customersupport
+com.webos.app.dangbei-card
+com.webos.app.dangbei-overlay
+com.webos.app.dvrpopup
+com.webos.app.eula
+com.webos.app.externalinput.av1
+com.webos.app.externalinput.av2
+com.webos.app.externalinput.component
+com.webos.app.externalinput.scart
+com.webos.app.factorywin
+com.webos.app.fullhome
+com.webos.app.google-home
+com.webos.app.googleassistant
+com.webos.app.hdmi1
+com.webos.app.hdmi2
+com.webos.app.hdmi3
+com.webos.app.hdmi4
+com.webos.app.home
+com.webos.app.homeconnect
+com.webos.app.igallery
+com.webos.app.inputcommon
+com.webos.app.installation
+com.webos.app.iot-thirdparty-login
+com.webos.app.livedmost
+com.webos.app.liveibb
+com.webos.app.livemenu
+com.webos.app.livepick
+com.webos.app.livetv
+com.webos.app.magicnum
+com.webos.app.miracast
+com.webos.app.miracast-overlay
+com.webos.app.multiview
+com.webos.app.music
+com.webos.app.music-enact
+com.webos.app.naver-clova
+com.webos.app.notificationcenter
+com.webos.app.onetouchsoundtuning
+com.webos.app.photovideo
+com.webos.app.premium
+com.webos.app.recordings
+com.webos.app.remoteservice
+com.webos.app.remotesetting
+com.webos.app.scheduler
+com.webos.app.screensaver
+com.webos.app.self-diagnosis
+com.webos.app.softwareupdate
+com.webos.app.store-demo
+com.webos.app.sync-demo
+com.webos.app.systemmusic
+com.webos.app.tips
+com.webos.app.tvguide
+com.webos.app.tvhotkey
+com.webos.app.tvsimpleviewer
+com.webos.app.tvuserguide
+com.webos.app.voice
+com.webos.app.voiceagent
+com.webos.app.voiceview
+com.webos.app.webapphost
+
+-- home, launcher and screensaver apps (id: type)
+com.webos.app.fullhome: "type": "native"
+com.webos.app.google-home: "type": "web"
+com.webos.app.home: "type": "native"
+com.webos.app.homeconnect: "type": "web"
+com.webos.app.screensaver: "type": "qml"
+$ ls -la /usr/palm/applications/com.webos.app.screensaver
+total 1
+drwxr-xr-x    3 root     root            46 Aug 26  2025 .
+drwxr-xr-x   82 root     root          3173 Aug 26  2025 ..
+-rwxr-xr-x    1 root     root           384 Aug 26  2025 appinfo.json
+drwxr-xr-x    7 root     root           143 Aug 26  2025 qml
+$ ls -la /usr/palm/applications/com.webos.app.screensaver/qml
+total 5
+drwxr-xr-x    7 root     root           143 Aug 26  2025 .
+drwxr-xr-x    3 root     root            46 Aug 26  2025 ..
+drwxr-xr-x    2 root     root           142 Aug 26  2025 AppInitializer
+drwxr-xr-x    3 root     root           145 Aug 26  2025 Containers
+drwxr-xr-x    4 root     root           286 Aug 26  2025 Controllers
+drwxr-xr-x    2 root     root            60 Aug 26  2025 Debug
+drwxr-xr-x    2 root     root            63 Aug 26  2025 Utilities
+-rwxr-xr-x    1 root     root          4236 Aug 26  2025 main.qml
+-rwxr-xr-x    1 root     root           365 Aug 26  2025 main.qmlproject
+--- /usr/palm/applications/com.webos.app.screensaver/appinfo.json
+{
+    "id": "com.webos.app.screensaver",
+    "version": "2.0.0",
+    "vendor": "LG Electronics, Inc.",
+    "type": "qml",
+    "title": "Screen Saver",
+    "icon": "",
+    "main": "file:///usr/palm/applications/com.webos.app.screensaver/qml/main.qml",
+    "noSplashOnLaunch" : true,
+    "visible": false,
+    "supportRollingScreenMode" : true,
+    "defaultWindowType": "screenSaver"
+}
+--- /usr/palm/applications/com.webos.app.home/appinfo.json
+{
+    "id": "com.webos.app.home",
+    "version": "1.0.0",
+    "vendor": "LG Electronics",
+    "type": "native",
+    "main": "file:///usr/bin/com.webos.app.home",
+    "title": "Home",
+    "transparent": true,
+    "splashBackground": "assets/splash.png",
+    "icon": "assets/icon.png",
+    "noSplashOnLaunch" : true,
+    "mediumIcon": "assets/icon.png",
+    "largeIcon": "assets/icon.png",
+    "iconColor": "#1ec15f",
+    "visible": false,
+    "disableBackHistoryAPI": true,
+    "nativeLifeCycleInterfaceVersion": 2,
+    "lockable": false,
+    "supportQuickStart": false,
+    "hasPromotion": false,
+    "accessibility": {
+        "supportsAudioGuidance" : true
+    },
+    "defaultWindowType": "home",
+    "appCategory": ["home"]
+}
+
+===== installed-apps =====
+$ listApps (ids)
+(97 app ids, left out of the committed copy; the raw survey has them)
+$ ls /media/developer/apps/usr/palm/applications
+com.github.gprot42.webosterminal
+com.open.hidden.menu
+org.webosbrew.hbchannel
+$ luna com.webos.applicationManager/getForegroundAppInfo {}
+{
+    "appId": "org.webosbrew.hbchannel",
+    "returnValue": true,
+    "windowId": "",
+    "processId": "<redacted>"
+}
+
+===== compositor =====
+$ luna com.webos.service.config/getConfigs {"configNames":["com.webos.surfacemanager.keyFilters"]}
+{
+    "subscribed": false,
+    "configs": {
+        "com.webos.surfacemanager.keyFilters": [
+            {
+                "handler": "handleScreenSaver",
+                "file": "/usr/lib/qt5/qml/KeyFilters/systemUi.js"
+            },
+            {
+                "handler": "handleAccessibility",
+                "file": "/usr/lib/qt5/qml/KeyFilters/appLaunch.js"
+            },
+            {
+                "handler": "handleAvReset",
+                "file": "/usr/lib/qt5/qml/KeyFilters/appLaunch.js"
+            },
+            {
+                "handler": "handleLowSpeedDataBroadcast",
+                "file": "/usr/lib/qt5/qml/KeyFilters/appLaunch.js"
+            },
+            {
+                "handler": "handleSystemKeys",
+                "file": "/usr/lib/qt5/qml/KeyFilters/systemUi.js"
+            },
+            {
+                "handler": "handleHotkeys",
+                "file": "/usr/lib/qt5/qml/KeyFilters/appLaunch.js"
+            },
+            {
+                "handler": "handleCPHotkeys",
+                "file": "/usr/lib/qt5/qml/KeyFilters/appLaunch.js"
+            },
+            {
+                "handler": "handleFactoryKeys",
+                "file": "/usr/lib/qt5/qml/KeyFilters/appLaunch.js"
+            },
+            {
+                "handler": "handleTvhotkeyAppLaunch",
+                "file": "/usr/lib/qt5/qml/KeyFilters/appLaunch.js"
+            },
+            {
+                "handler": "handleLocalKeys",
+                "file": "/usr/lib/qt5/qml/KeyFilters/appLaunch.js"
+            },
+            {
+                "handler": "handleMagicNumber",
+                "file": "/usr/lib/qt5/qml/KeyFilters/systemUi.js"
+            }
+        ]
+    },
+    "returnValue": true
+}
+
+===== settings =====
+$ luna com.webos.settingsservice/getSystemSettings {"category":"picture"}
+{
+    "dimension": {
+        "pictureMode": "expert2",
+        "input": "default",
+        "_3dStatus": "2d",
+        "dynamicRange": "sdr"
+    },
+    "subscribed": false,
+    "category": "picture",
+    "method": "getSystemSettings",
+    "settings": {
+        "colorManagementLuminanceMagenta": "0",
+        "colorManagementSaturationYellow": "0",
+        "keyListForCopyCms": [
+            "colorManagementSaturationRed",
+            "colorManagementSaturationGreen",
+            "colorManagementSaturationBlue",
+            "colorManagementSaturationCyan",
+            "colorManagementSaturationMagenta",
+            "colorManagementSaturationYellow",
+            "colorManagementHueRed",
+            "colorManagementHueGreen",
+            "colorManagementHueBlue",
+            "colorManagementHueCyan",
+            "colorManagementHueMagenta",
+            "colorManagementHueYellow",
+            "colorManagementLuminanceRed",
+            "colorManagementLuminanceGreen",
+            "colorManagementLuminanceBlue",
+            "colorManagementLuminanceCyan",
+            "colorManagementLuminanceMagenta",
+            "colorManagementLuminanceYellow"
+        ],
+        "pictureMode": "expert2",
+        "hSharpness": "10",
+        "inputListForCopyWb": [
+            "dtv",
+            "atv",
+            "av1",
+            "av2",
+            "comp1",
+            "comp2",
+            "hdmi1",
+            "hdmi2",
+            "hdmi3",
+            "hdmi4",
+            "hdmi1_pc",
+            "hdmi2_pc",
+            "hdmi3_pc",
+            "hdmi4_pc",
+            "movie",
+            "photo",
+            "default",
+            "smhl",
+            "ip"
+        ],
+        "colorManagementSaturationGreen": "0",
+        "colorManagementLuminanceCyan": "0",
+        "colorManagementLuminanceBlue": "0",
+        "aiPictureReset": "off",
+        "energySavingModified": "true",
+        "aspectRatioHdmiCinema": "just_scan",
+        "whiteBalanceRedOffset": "0",
+        "oledPanelSettings": "off",
+        "colorTemperature": "0",
+        "hPosition": "0",
+        "avMode": "off",
+        "doNotShowAbcNotification": "false",
+        "expertPattern": "off",
+        "cinemaVPosition": "0",
+        "colorGamut": "auto",
+        "keyListForCopyPsm": [
+            "backlight",
+            "contrast",
+            "brightness",
+            "sharpness",
+            "color",
+            "tint"
+        ],
+        "vSize": "0",
+        "whiteBalanceRed": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "noiseReduction": "low",
+        "whiteBalanceColorTemperature": "warm2",
+        "hSize": "0",
+        "whiteBalanceApplyAllInputs": "off",
+        "captionZoomVPosition": "0",
+        "RGBWDotPatternOnOff": "off",
+        "colorManagementHueCyan": "0",
+        "colorManagementHueBlue": "0",
+        "pcMode": {
+            "hdmi2": false,
+            "hdmi3": false,
+            "hdmi4": false,
+            "hdmi1": true
+        },
+        "edgeEnhancer": "on",
+        "xvycc": "auto",
+        "hdrEffect": "off",
+        "whiteBalanceRedGain": "0",
+        "motionPro": "on",
+        "whiteBalanceGreen": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "whiteBalanceCodeValue": "21",
+        "adjustingLuminance10pt": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "dynamicColor": "off",
+        "colorManagementLuminanceGreen": "0",
+        "whiteBalanceIre10pt": "100",
+        "erpUserConfirm": false,
+        "whiteBalanceGreenOffset": "0",
+        "whiteBalanceBlueGain": "0",
+        "colorManagementSaturationMagenta": "0",
+        "whiteBalancePoint": "high",
+        "colorManagementColorSystem": "red",
+        "RGBWDotPatternMax": 223,
+        "truMotionBlur": "10",
+        "aspectRatio": "16x9",
+        "RGBWDotPatternMin": 31,
+        "truMotionJudder": 10,
+        "energySaving": "off",
+        "aspectRatioActive": "true",
+        "colorManagementLuminanceRed": "0",
+        "colorManagementSaturationRed": "0",
+        "wb22PointsGammaValue": {
+            "high1": [
+                0.000143,
+                0.000754,
+                0.001996,
+                0.003981,
+                0.010535,
+                0.021012,
+                0.035897,
+                0.055602,
+                0.080494,
+                0.110903,
+                0.147133,
+                0.189465,
+                0.238161,
+                0.29347,
+                0.355625,
+                0.42485,
+                0.501357,
+                0.58535,
+                0.677026,
+                0.776573,
+                0.884172,
+                1
+            ],
+            "high2": [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1
+            ],
+            "low": [
+                0.000904,
+                0.003373,
+                0.007288,
+                0.012589,
+                0.0272,
+                0.046985,
+                0.071794,
+                0.101515,
+                0.13606,
+                0.175353,
+                0.219333,
+                0.267943,
+                0.321136,
+                0.378868,
+                0.441098,
+                0.507792,
+                0.578917,
+                0.654442,
+                0.734338,
+                0.818579,
+                0.907141,
+                1
+            ],
+            "medium": [
+                0.000299,
+                0.001373,
+                0.003351,
+                0.00631,
+                0.015396,
+                0.028991,
+                0.047366,
+                0.07074,
+                0.0993,
+                0.133209,
+                0.172611,
+                0.217638,
+                0.26841,
+                0.325037,
+                0.387623,
+                0.456263,
+                0.531049,
+                0.612066,
+                0.699394,
+                0.79311,
+                0.893289,
+                1
+            ]
+        },
+        "skinColor": "0",
+        "colorManagementSaturationCyan": "0",
+        "whiteBalanceGreenGain": "0",
+        "colorManagementSaturationBlue": "0",
+        "captionZoomRatio": "0",
+        "isfMode": {
+            "expert2": "none",
+            "expert1": "none"
+        },
+        "vPosition": "0",
+        "mediaZoomRatio": "0",
+        "gamma": "high2",
+        "colorFilter": "off",
+        "localDimming": "medium",
+        "hdrDynamicToneMapping": "on",
+        "motionProOLED": "off",
+        "pictureTempKey": "off",
+        "colorManagementHueGreen": "0",
+        "skyColor": "0",
+        "inputListForCopyCms": [
+            "dtv",
+            "atv",
+            "av1",
+            "av2",
+            "comp1",
+            "comp2",
+            "hdmi1",
+            "hdmi2",
+            "hdmi3",
+            "hdmi4",
+            "movie",
+            "photo",
+            "default",
+            "smhl",
+            "ip"
+        ],
+        "doNotShowMecNotification": "false",
+        "colorManagementHueRed": "0",
+        "colorManagementHueMagenta": "0",
+        "psmListForExpert": [
+            "expert1",
+            "expert2",
+            "cinema",
+            "photo",
+            "hdrExternal",
+            "hdrCinema",
+            "dolbyHdrCinema",
+            "dolbyHdrDarkAmazon",
+            "dolbyHdrCinemaBright",
+            "technicolorHdrCinema",
+            "technicolor",
+            "hdrTechnicolor",
+            "technicolorHdrTechnicolor",
+            "game",
+            "hdrGame",
+            "dolbyHdrGame",
+            "technicolorHdrGame"
+        ],
+        "wssZoomVPosition": "0",
+        "whiteBalanceCodeValue10pt": "9",
+        "whiteBalanceActive": "true",
+        "peakBrightness": "high",
+        "vSharpness": "10",
+        "tint": "0",
+        "backlight": 100,
+        "whiteBalanceBlueOffset": "0",
+        "ambientLightCompensation": "off",
+        "mpegNoiseReduction": "low",
+        "motionEyeCare": "off",
+        "zoomVPosition": "0",
+        "sharpness": 10,
+        "pictureModeSettingsActive": "true",
+        "realCinema": "off",
+        "aspectRatioTv": "16x9",
+        "whiteBalanceLuminance": "130",
+        "contrast": 100,
+        "blackLevel": {
+            "palm": "auto",
+            "paln": "auto",
+            "ntsc": "auto",
+            "pal60": "auto",
+            "secam": "auto",
+            "unknown": "auto",
+            "ntsc443": "auto",
+            "pal": "auto"
+        },
+        "colorManagementLuminanceYellow": "0",
+        "zoomRatio": "0",
+        "wb10PointsGammaValue": {
+            "high1": [
+                0.003981,
+                0.021012,
+                0.055602,
+                0.110903,
+                0.189465,
+                0.29347,
+                0.42485,
+                0.58535,
+                0.776573,
+                1
+            ],
+            "high2": [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1
+            ],
+            "low": [
+                0.012589,
+                0.046985,
+                0.101515,
+                0.175353,
+                0.267943,
+                0.378868,
+                0.507792,
+                0.654442,
+                0.818579,
+                1
+            ],
+            "medium": [
+                0.00631,
+                0.028991,
+                0.07074,
+                0.133209,
+                0.217638,
+                0.325037,
+                0.456263,
+                0.612066,
+                0.79311,
+                1
+            ]
+        },
+        "externalPqlDbType": "none",
+        "whiteBalanceMethod": "2",
+        "whiteBalancePattern": "outer",
+        "mediaZoomVPosition": "0",
+        "inputListForCopyPsm": [
+            "dtv",
+            "atv",
+            "av1",
+            "av2",
+            "comp1",
+            "comp2",
+            "hdmi1",
+            "hdmi2",
+            "hdmi3",
+            "hdmi4",
+            "movie",
+            "photo",
+            "default",
+            "smhl",
+            "ip"
+        ],
+        "keyListForCopyWb": [
+            "whiteBalanceMethod",
+            "whiteBalancePoint",
+            "whiteBalanceRedGain",
+            "whiteBalanceGreenGain",
+            "whiteBalanceBlueGain",
+            "whiteBalanceRedOffset",
+            "whiteBalanceGreenOffset",
+            "whiteBalanceBlueOffset",
+            "whiteBalanceCodeValue",
+            "whiteBalanceIre",
+            "whiteBalanceLuminance",
+            "whiteBalanceRed",
+            "whiteBalanceGreen",
+            "whiteBalanceBlue",
+            "adjustingLuminance",
+            "whiteBalanceCodeValue10pt",
+            "whiteBalanceIre10pt",
+            "whiteBalanceRed10pt",
+            "whiteBalanceGreen10pt",
+            "whiteBalanceBlue10pt",
+            "adjustingLuminance10pt"
+        ],
+        "adjustingLuminance": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "colorManagementHueYellow": "0",
+        "brightness": "50",
+        "screenShift": "on",
+        "eyeComfortMode": "off",
+        "color": "50",
+        "whiteBalanceRed10pt": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "aiPicture": "off",
+        "grassColor": "0",
+        "whiteBalanceBlue": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "smoothGradation": "off",
+        "logoLuminanceAdjust": "light",
+        "whiteBalanceIre": "100",
+        "superResolution": "low",
+        "whiteBalanceBlue10pt": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "pictureSettingModified": {
+            "hdrCinema": false,
+            "technicolorHdrTechnicolor": false,
+            "technicolorHdrStandard": false,
+            "sports": false,
+            "bright": false,
+            "game": false,
+            "eyeq": false,
+            "dolbyHdrVivid": false,
+            "movie": false,
+            "eco": false,
+            "dolbyHdrStandard": true,
+            "hdrCinemaBright": true,
+            "natural": false,
+            "hdrVivid": false,
+            "hdrTechnicolor": false,
+            "cinema": false,
+            "hdrStandard": false,
+            "dolbyHdrCinemaBright": true,
+            "vivid": false,
+            "expert1": true,
+            "expert2": true,
+            "normal": true,
+            "technicolorHdrGame": false,
+            "hdrGame": true,
+            "tecnicolorHdrVivid": false,
+            "hdrEffect": false,
+            "technicolorHdrCinemaBright": false,
+            "technicolor": false,
+            "technicolorHdrCinema": false,
+            "dolbyHdrGame": false,
+            "dolbyHdrCinema": false,
+            "aps": false
+        },
+        "_14_9VPosition": "0",
+        "pictureControlLimitation": "false",
+        "dynamicContrast": "off",
+        "whiteBalanceGreen10pt": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "cinemaZoomRatio": "0"
+    },
+    "returnValue": true
+}
+$ luna com.webos.settingsservice/getSystemSettings {"category":"sound"}
+{
+    "dimension": {
+        "input": "default"
+    },
+    "subscribed": false,
+    "category": "sound",
+    "method": "getSystemSettings",
+    "settings": {
+        "avSyncSpeaker": "0",
+        "sound": "on",
+        "slidingSpeaker": "openPowerOn",
+        "soundOptimizer": "normal",
+        "soundOutputDigital": "pcm",
+        "avSync": "off",
+        "analogOut": "headphone",
+        "startupSound": "on",
+        "userEqualizer": "off",
+        "btDotAutoScan": "on",
+        "_3dSoundZooming": "off",
+        "avSyncWisa": "0",
+        "digitalAudioPriority": "auto",
+        "volumeControl": "medium",
+        "coSoundOutputState": "off",
+        "btDotSignalStrength": "high",
+        "magicSpaceSound": "standard",
+        "soundEffect": "on",
+        "supportATMOS": "on",
+        "coSoundOutput": "off",
+        "avSyncBypass": "off",
+        "smartSoundMode": "off",
+        "eArcSupport": "on",
+        "audioLanguageSecond": "spa",
+        "audioLanguageFirst": "eng",
+        "inputAudioFormatHDMI2": "bitstream",
+        "hdmiArcMode": "off",
+        "inputAudioFormatHDMI4": "bitstream",
+        "virtualSurround": "on",
+        "soundModeModified": "true",
+        "audioBalance": 0,
+        "inputAudioFormatHDMI3": "bitstream",
+        "inputAudioFormatHDMI1": "bitstream",
+        "autoVolume": "off",
+        "soundMode": "standard",
+        "magicSoundModified": "true",
+        "avSyncBypassInput": "off",
+        "slidingSpeakerMelody": "on",
+        "lgSoundSync": "off",
+        "soundOutput": "tv_external_speaker",
+        "audioDescription": "off",
+        "soundOutputs": [
+            "tv_speaker"
+        ],
+        "btSpeakerMode": "off",
+        "clearVoice": "off",
+        "userEqualizerValues": [
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "avSyncSpdif": "0",
+        "aiSound": "off",
+        "volumeStep": 1,
+        "tvPowerSound": "off",
+        "wooferLevel": "10",
+        "visualImpaired": "off",
+        "magicSoundTime": 1749350343,
+        "audioDescriptionVolume": "10",
+        "wisaSpeakerChannelType": "5.1"
+    },
+    "returnValue": true
+}
+$ luna com.webos.settingsservice/getSystemSettings {"category":"general"}
+{
+    "subscribed": false,
+    "category": "general",
+    "method": "getSystemSettings",
+    "settings": {
+        "homeAutoLaunch": "off",
+        "absenceRecognition": "off",
+        "lastInputApp": "com.webos.app.hdmi3",
+        "physicalLastInputApp": "com.webos.app.hdmi3",
+        "alwaysOnDisableEndMinute": "0",
+        "checkHomeAutoLaunchValue": "user",
+        "screenSaverEnabled": "on",
+        "voiceLongDistance": "on",
+        "homeEffect": "off",
+        "globalConditions": "off",
+        "powerOnScreen": "todays",
+        "nativeConsentAd": [
+        ],
+        "defaultApps": {
+            "home": "com.webos.app.home"
+        },
+        "alwaysOn": "off",
+        "tvOnSound": "low",
+        "alwaysOnDisableEndHour": "6",
+        "screenSaverAd": "off",
+        "personalRecommend": {
+            "changedByUser": false,
+            "value": "off"
+        },
+        "noSignalGuideArea": "on",
+        "adCookie": "<redacted>",
+        "homeAutoLaunchMode": "full",
+        "alwaysOnDisableStartHour": "1",
+        "lmt": "on",
+        "launchEulaByHome": false,
+        "tvOnScreen": "effect",
+        "aiNudge": "off",
+        "homePromotion": "off",
+        "alwaysOnDisableStartMinute": "0",
+        "blueToothSpeakerMode": "on",
+        "avmsd": "off",
+        "noSignalScreenSaver": "on",
+        "customizedAd": "off",
+        "welcomeFeature": "on"
+    },
+    "returnValue": true
+}
+$ luna com.webos.settingsservice/getSystemSettings {"category":"option"}
+{
+    "subscribed": false,
+    "category": "option",
+    "method": "getSystemSettings",
+    "settings": {
+        "enabling3dSettingsMenu": "off",
+        "avatar": "off",
+        "storeLogo": "0",
+        "phlCitySelection": "0",
+        "appUpdateMode": "auto",
+        "focusedItemEnlarged": "off",
+        "livePlus": "off",
+        "pstreamerUser": "off",
+        "usbBuiltInVideo": "on",
+        "demoMode": "on",
+        "modeSelectFlag": "off",
+        "storeModeVideo": "off",
+        "audioGuidancePitch": "medium",
+        "ibb": "off",
+        "enableIpControl": "off",
+        "miracastOverlayAdRecovery": "off",
+        "promotionPeriodStart": "0",
+        "additionalAudioSelection": "none",
+        "curDemoFile": "undefined",
+        "estreamerMinimalMode": "off",
+        "standByLight": "off",
+        "speakToTv": "off",
+        "helpOnSettings": "on",
+        "channelplus": "on",
+        "logoLight": "off",
+        "hddEcoMode": "on",
+        "IPControlSecureKey": "",
+        "ohtv": "on",
+        "enableToastPopup": "on",
+        "virtualSetTop": "off",
+        "freeviewplay": "off",
+        "demoFileList": "undefined",
+        "pointerSpeed": "fast",
+        "setId": 1,
+        "_3dModeEstreamer": "off",
+        "password_ipcontrol": "<redacted>",
+        "interactivity": "off",
+        "dataService": "mheg",
+        "supplementaryAudio": "off",
+        "hbbTvDnt": "off",
+        "promotionStreamer": "off",
+        "firstTvSignalStatus": "none",
+        "japanCitySelection": "Tokyo",
+        "hbbTV": "off",
+        "freeviewMode": "off",
+        "irBlaster": "off",
+        "magicNumHelpShow": true,
+        "eStreamerPosition": "all",
+        "teletextLanguageFirst": "eng",
+        "menuTransparency": "on",
+        "subdivisionCodeOfServiceCountry": "",
+        "promotionOriginEnd": "undefined",
+        "searchAppTTS": "off",
+        "webOSPromotionVideo": "on",
+        "channelplusPopup": "off",
+        "backupPsm": {
+            "backupPsm2d": "hdrStandard",
+            "backupPsm3d": "hdrStandard"
+        },
+        "syncModeTvCondition": "none",
+        "orbit": "off",
+        "autoSmartServiceCountry": "on",
+        "inputDevicesSupportStatus": {
+            "keyboard": true,
+            "motionSensor": true,
+            "pointer": true,
+            "voice": true,
+            "touch": true
+        },
+        "googleAssistantTTS": "on",
+        "hbbTvDeviceId": "<redacted>",
+        "quickStartMode": "off",
+        "epgPipMode": "off",
+        "audioGuidance": "off",
+        "cicNumber": [
+            {
+                "number": "none",
+                "country": "default",
+                "shortName": "default",
+                "_id": "361977"
+            }
+        ],
+        "ibbDnt": "off",
+        "broadcastInfoNoti": "off",
+        "appInstallDevice": {
+            "deviceId": "<redacted>",
+            "driveId": ""
+        },
+        "turnOnByVoice": "off",
+        "countryRegion": "other",
+        "smartServiceCountryCode2": "US",
+        "smartServiceCountryCode3": "USA",
+        "storeHDR": "on",
+        "teletextLanguageSecond": "eng",
+        "motionRecognition": "off",
+        "magicNum1": {
+            "id": "",
+            "params": {
+            }
+        },
+        "magicNum2": {
+            "id": "",
+            "params": {
+            }
+        },
+        "mhegGuide": "off",
+        "magicNum3": {
+            "id": "",
+            "params": {
+            }
+        },
+        "magicNum5": {
+            "id": "",
+            "params": {
+            }
+        },
+        "magicNum6": {
+            "id": "",
+            "params": {
+            }
+        },
+        "powerOnLight": "off",
+        "addressInfo": [
+            "not_defined",
+            "not_defined",
+            "not_defined",
+            "not_defined"
+        ],
+        "subtitleLanguageSecond": "eng",
+        "magicNum7": {
+            "id": "",
+            "params": {
+            }
+        },
+        "magicNum8": {
+            "id": "",
+            "params": {
+            }
+        },
+        "smartSoundDemo": "on",
+        "pointerAlignment": "off",
+        "voiceRecognitionLanguage": "eng",
+        "vsn": "N/A",
+        "enableSDDP": "off",
+        "pointerSize": "small",
+        "watchedListCollection": "on",
+        "magicNum4": {
+            "id": "",
+            "params": {
+            }
+        },
+        "autoComplete": false,
+        "bannerPosition": "none",
+        "subtitleLanguageFirst": "eng",
+        "animationGuide": "on",
+        "magicNum9": {
+            "id": "com.webos.app.self-diagnosis",
+            "params": {
+                "from": "magicNum"
+            }
+        },
+        "play8kVideoOnApps": "off",
+        "liveMenuLaunched": false,
+        "multiViewStatus": "off",
+        "audioGuidanceSpeed": "medium",
+        "zipcode": "<redacted>",
+        "storeMode": "home",
+        "country": "USA",
+        "storeMode2": "on",
+        "wakeUpword": "LGTV",
+        "syncMode": "off",
+        "screenRotation": "off",
+        "hybridCast": "off",
+        "promotionPeriodEnd": "0",
+        "backupPsmDolby": {
+            "backupPsm2d": "dolbyHdrDark",
+            "backupPsm3d": "dolbyHdrDark"
+        },
+        "countryGroup": "US",
+        "virtualKeyboardLanguage": [
+            "en-US"
+        ],
+        "highContrast": "off",
+        "menuLanguage": "eng",
+        "audioGuidanceVolume": "medium",
+        "miracastOverlayStatus": "off",
+        "pointerShape": "auto",
+        "baloonHelp": "on",
+        "promotionOriginStart": "undefined",
+        "emergencyAlert": "on",
+        "ismMethod": "normal",
+        "estreamerStatus": "off",
+        "localeCountryGroup": "langSelUS"
+    },
+    "returnValue": true
+}
+
+===== content-store-host =====
+
+===== homebrew =====
+$ ls -la /var/lib/webosbrew/init.d
+total 8
+drwxr-xr-x    2 root     root          4096 Oct 20 00:40 .
+drwxr-xr-x    4 root     root          4096 Oct 20 03:10 ..
+$ ls /var/luna/preferences (homebrew-related)
+devmode_enabled
+webosbrew_block_updates
+webosbrew_sshd_enabled
+webosbrew_telnet_disabled
+glasshouse: not installed
+$ mounts
+/dev/root /old_root squashfs ro,relatime 0 0
+devtmpfs /old_root/dev devtmpfs rw,relatime,size=479488k,nr_inodes=119872,mode=755 0 0
+none /old_root/dev/pts devpts rw,nosuid,noexec,relatime,mode=600 0 0
+none /old_root/proc proc rw,nosuid,nodev,noexec,relatime 0 0
+none /old_root/sys sysfs rw,nosuid,nodev,noexec,relatime 0 0
+/dev/mmcblk0p30 /old_root/mnt/bsppart squashfs ro,relatime 0 0
+overlay / overlay ro,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+devtmpfs /dev devtmpfs rw,relatime,size=479488k,nr_inodes=119872,mode=755 0 0
+none /dev/pts devpts rw,relatime,mode=600 0 0
+none /proc proc rw,relatime 0 0
+sys /sys sysfs rw,relatime 0 0
+tmp /tmp tmpfs rw,relatime 0 0
+tmpfs /dev/shm tmpfs rw,relatime 0 0
+/dev/mmcblk0p35 /mnt/license squashfs ro,relatime 0 0
+/dev/mmcblk0p32 /mnt/otycabi squashfs ro,relatime 0 0
+/dev/mmcblk0p31 /mnt/otncabi squashfs ro,relatime 0 0
+/dev/mmcblk0p33 /mnt/fonts squashfs ro,relatime 0 0
+/dev/mmcblk0p29 /mnt/tvservice squashfs ro,relatime 0 0
+/dev/mmcblk0p33 /usr/share/fonts squashfs ro,relatime 0 0
+/dev/mmcblk0p32 /usr/lib/nyx/modules squashfs ro,relatime 0 0
+/dev/mmcblk0p29 /mnt/lg/tvservice squashfs ro,relatime 0 0
+ramfs /tmp/var/log ramfs rw,relatime 0 0
+/dev/mmcblk0p51 /mnt/lg/db8 ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p53 /mnt/lg/appstore ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p46 /mnt/lg/uhdcp ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p52 /mnt/lg/cmn_data ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p52 /mnt/lg/flash/data ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p52 /mnt/lg/user ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p52 /var ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p51 /var/db ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p52 /home ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p53 /media ext4 rw,nosuid,relatime,data=ordered 0 0
+tmpfs /var/db/temp tmpfs rw,relatime,size=81920k,mode=700 0 0
+/dev/mmcblk0p15 /mnt/lg/ciplus/authcxt ext4 rw,relatime,data=ordered 0 0
+/dev/mmcblk0p52 /mnt/lg/cache/flash ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p52 /mnt/lg/cache/sdp ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p52 /mnt/lg/cache/browser ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p52 /mnt/lg/cache/webbrowser ext4 rw,nosuid,relatime,data=ordered 0 0
+tmpfs /var/db/epg tmpfs rw,relatime,size=92160k,mode=700 0 0
+/dev/loop0 /mnt/lg/appstore/preload/igallery/files/data squashfs ro,relatime 0 0
+cgroup_root /sys/fs/cgroup tmpfs rw,nosuid,nodev,noexec,relatime,size=10240k,mode=755 0 0
+cpuset /sys/fs/cgroup/cpuset cgroup rw,nosuid,nodev,noexec,relatime,cpuset 0 0
+cpu /sys/fs/cgroup/cpu cgroup rw,nosuid,nodev,noexec,relatime,cpu 0 0
+cpuacct /sys/fs/cgroup/cpuacct cgroup rw,nosuid,nodev,noexec,relatime,cpuacct 0 0
+blkio /sys/fs/cgroup/blkio cgroup rw,nosuid,nodev,noexec,relatime,blkio 0 0
+devices /sys/fs/cgroup/devices cgroup rw,nosuid,nodev,noexec,relatime,devices 0 0
+freezer /sys/fs/cgroup/freezer cgroup rw,nosuid,nodev,noexec,relatime,freezer 0 0
+perf_event /sys/fs/cgroup/perf_event cgroup rw,nosuid,nodev,noexec,relatime,perf_event 0 0
+debug /sys/fs/cgroup/debug cgroup rw,nosuid,nodev,noexec,relatime,debug 0 0
+tmpfs /mnt/lg/cache/sdp/sdx/pkgs tmpfs rw,relatime 0 0
+tmp /var/palm/jail/netflix/tmp tmpfs rw,relatime 0 0
+overlay /var/palm/jail/netflix/lib overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+overlay /var/palm/jail/netflix/bin overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+overlay /var/palm/jail/netflix/usr/bin overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+overlay /var/palm/jail/netflix/usr/lib overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+overlay /var/palm/jail/netflix/usr/palm/frameworks overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+overlay /var/palm/jail/netflix/usr/share overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+/dev/mmcblk0p33 /var/palm/jail/netflix/usr/share/fonts squashfs ro,nosuid,relatime 0 0
+none /var/palm/jail/netflix/proc proc rw,relatime 0 0
+tmp /var/palm/jail/netflix/var/run/pulse tmpfs rw,relatime 0 0
+tmp /var/palm/jail/netflix/var/run/luna-service2 tmpfs rw,relatime 0 0
+ramfs /var/palm/jail/netflix/var/log/crashd ramfs rw,relatime 0 0
+overlay /var/palm/jail/netflix/usr/lib/qt5/plugins overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+devtmpfs /var/palm/jail/netflix/dev/snd devtmpfs rw,relatime,size=479488k,nr_inodes=119872,mode=755 0 0
+tmpfs /var/palm/jail/netflix/dev/shm tmpfs rw,relatime 0 0
+overlay /var/palm/jail/netflix/etc/ssl overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+devtmpfs /var/palm/jail/netflix/dev/logdir devtmpfs ro,nosuid,relatime,size=479488k,nr_inodes=119872,mode=755 0 0
+/dev/mmcblk0p52 /var/palm/jail/netflix/var/luna/preferences ext4 ro,nosuid,relatime,data=ordered 0 0
+overlay /var/palm/jail/netflix/etc/fonts overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+overlay /var/palm/jail/netflix/etc/prefs/properties overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+/dev/mmcblk0p53 /var/palm/jail/netflix/media/internal ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p53 /var/palm/jail/netflix/media/cryptofs/apps/usr/palm/services/netflix.service ext4 rw,nosuid,relatime,data=ordered 0 0
+overlay /var/palm/jail/netflix/mnt/lg/res/lglib overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+/dev/mmcblk0p29 /var/palm/jail/netflix/mnt/lg/tvservice/res squashfs ro,nosuid,relatime 0 0
+overlay /var/palm/jail/netflix/mnt/lg/cache overlay ro,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+/dev/mmcblk0p15 /var/palm/jail/netflix/mnt/lg/ciplus/authcxt ext4 rw,relatime,data=ordered 0 0
+tmp /var/palm/jail/netflix/tmp/dbgfrwk tmpfs rw,relatime 0 0
+none /var/palm/jail/netflix/dev/pts devpts rw,relatime,mode=600 0 0
+devtmpfs /var/palm/jail/netflix/dev/lg devtmpfs rw,relatime,size=479488k,nr_inodes=119872,mode=755 0 0
+/dev/mmcblk0p52 /var/palm/jail/netflix/mnt/lg/flash/data/nlpadapter ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p52 /var/palm/jail/netflix/mnt/lg/flash/data/alibaba ext4 rw,nosuid,relatime,data=ordered 0 0
+sys /var/palm/jail/netflix/sys/devices sysfs ro,nosuid,relatime 0 0
+sys /var/palm/jail/netflix/sys/class/net sysfs ro,nosuid,relatime 0 0
+sys /var/palm/jail/netflix/sys/dev sysfs ro,nosuid,relatime 0 0
+devtmpfs /var/palm/jail/netflix/dev/input devtmpfs ro,nosuid,relatime,size=479488k,nr_inodes=119872,mode=755 0 0
+/dev/mmcblk0p29 /var/palm/jail/netflix/mnt/lg/tvservice/pqldb/dolby squashfs ro,relatime 0 0
+tmp /var/palm/jail/com.webos.app.browser/tmp tmpfs rw,relatime 0 0
+overlay /var/palm/jail/com.webos.app.browser/lib overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+overlay /var/palm/jail/com.webos.app.browser/bin overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+overlay /var/palm/jail/com.webos.app.browser/usr/bin overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+overlay /var/palm/jail/com.webos.app.browser/usr/lib overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+overlay /var/palm/jail/com.webos.app.browser/usr/palm/frameworks overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+overlay /var/palm/jail/com.webos.app.browser/usr/share overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+/dev/mmcblk0p33 /var/palm/jail/com.webos.app.browser/usr/share/fonts squashfs ro,nosuid,relatime 0 0
+none /var/palm/jail/com.webos.app.browser/proc proc rw,relatime 0 0
+tmp /var/palm/jail/com.webos.app.browser/var/run/pulse tmpfs rw,relatime 0 0
+tmp /var/palm/jail/com.webos.app.browser/var/run/luna-service2 tmpfs rw,relatime 0 0
+ramfs /var/palm/jail/com.webos.app.browser/var/log/crashd ramfs rw,relatime 0 0
+overlay /var/palm/jail/com.webos.app.browser/usr/lib/qt5/plugins overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+devtmpfs /var/palm/jail/com.webos.app.browser/dev/snd devtmpfs rw,relatime,size=479488k,nr_inodes=119872,mode=755 0 0
+tmpfs /var/palm/jail/com.webos.app.browser/dev/shm tmpfs rw,relatime 0 0
+overlay /var/palm/jail/com.webos.app.browser/etc/ssl overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+devtmpfs /var/palm/jail/com.webos.app.browser/dev/logdir devtmpfs ro,nosuid,relatime,size=479488k,nr_inodes=119872,mode=755 0 0
+/dev/mmcblk0p52 /var/palm/jail/com.webos.app.browser/var/luna/preferences ext4 ro,nosuid,relatime,data=ordered 0 0
+overlay /var/palm/jail/com.webos.app.browser/etc/fonts overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+overlay /var/palm/jail/com.webos.app.browser/etc/prefs/properties overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+/dev/mmcblk0p53 /var/palm/jail/com.webos.app.browser/media/internal ext4 rw,nosuid,relatime,data=ordered 0 0
+/dev/mmcblk0p53 /var/palm/jail/com.webos.app.browser/media/system/apps/usr/palm/services/com.webos.app.browser.service ext4 rw,nosuid,relatime,data=ordered 0 0
+overlay /var/palm/jail/com.webos.app.browser/mnt/lg/res overlay ro,nosuid,relatime,lowerdir=/mnt/bsppart/bsp:/ 0 0
+/dev/mmcblk0p29 /var/palm/jail/com.webos.app.browser/mnt/lg/tvservice/res squashfs ro,nosuid,relatime 0 0
+sys /var/palm/jail/com.webos.app.browser/sys/class/input sysfs ro,nosuid,relatime 0 0
+sys /var/palm/jail/com.webos.app.browser/sys/devices sysfs ro,nosuid,relatime 0 0
+devtmpfs /var/palm/jail/com.webos.app.browser/dev/input devtmpfs ro,nosuid,relatime,size=479488k,nr_inodes=119872,mode=755 0 0
+devtmpfs /var/palm/jail/com.webos.app.browser/dev/lg devtmpfs rw,relatime,size=479488k,nr_inodes=119872,mode=755 0 0
+tmpfs /mnt/lg/cmn_data/admanager/tmpData tmpfs rw,relatime 0 0
+tmp /etc/motd tmpfs rw,relatime 0 0
+tmp /etc/shadow tmpfs rw,relatime 0 0
+tmp /tmp/rdxd tmpfs ro,relatime 0 0
+tmp /tmp/uploadd tmpfs ro,relatime 0 0
+tmp /var/spool/rdxd tmpfs ro,relatime 0 0
+tmp /var/spool/uploadd/pending tmpfs ro,relatime 0 0
+tmp /var/spool/uploadd/uploaded tmpfs ro,relatime 0 0
+/dev/loop1 /media/squashfs/apps/netflix squashfs ro,relatime 0 0
+overlay /media/cryptofs/apps/usr/palm/applications/netflix overlay rw,relatime,lowerdir=/media/squashfs/apps/netflix/usr/palm/applications/netflix,upperdir=/media/cryptofs/apps/usr/palm/applications/netflix,workdir=/media/squashfs/work/netflix 0 0
+overlay /var/palm/jail/netflix/media/cryptofs/apps/usr/palm/applications/netflix overlay rw,relatime,lowerdir=/media/squashfs/apps/netflix/usr/palm/applications/netflix,upperdir=/media/cryptofs/apps/usr/palm/applications/netflix,workdir=/media/squashfs/work/netflix 0 0
+
+===== hosts =====
+$ wc -l /etc/hosts
+8
+$ head -n 40 /etc/hosts
+127.0.0.1	localhost.localdomain		localhost
+
+# The following lines are desirable for IPv6 capable hosts
+::1     localhost ip6-localhost ip6-loopback
+fe00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+
+===== runtime =====
+$ node -v
+v0.12.2
+init: upstart
+
+===== end =====
+recon complete
