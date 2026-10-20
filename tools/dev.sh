@@ -26,6 +26,14 @@ if ! docker image inspect "$image" >/dev/null 2>&1; then
     docker build -t "$image" -f "$ROOT/docker/Dockerfile" "$ROOT/docker"
 fi
 
+# One target volume per checkout: worktrees all mount at /work, so a shared
+# volume would let cargo reuse another tree's build output.
+if command -v sha256sum >/dev/null 2>&1; then
+    checkout=$(printf '%s' "$HOST_ROOT" | sha256sum | cut -c1-8)
+else
+    checkout=$(printf '%s' "$HOST_ROOT" | shasum -a 256 | cut -c1-8)
+fi
+
 tty=""
 if [ -t 0 ] && [ -t 1 ]; then tty="-it"; fi
 [ $# -gt 0 ] || set -- bash
@@ -36,6 +44,6 @@ export MSYS_NO_PATHCONV=1
 exec docker run --rm $tty \
     -v "$HOST_ROOT:/work" \
     -v lumen-cargo-registry:/usr/local/cargo/registry \
-    -v lumen-target:/work/shell/target \
+    -v "lumen-target-$checkout:/work/shell/target" \
     -w /work \
     "$image" "$@"

@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tools/dev.sh make *)",
+      "Bash(sh tools/dev.sh make *)",
+      "Bash(pwsh tools/sim.ps1 *)",
+      "Bash(pwsh tools/sim.ps1)",
+      "PowerShell(pwsh tools/sim.ps1 *)",
+      "PowerShell(pwsh tools/sim.ps1)"
+    ],
+    "ask": [
+      "Bash(tools/tv.sh *)",
+      "Bash(./tools/tv.sh *)",
+      "Bash(sh tools/tv.sh *)",
+      "Bash(bash tools/tv.sh *)",
+      "Bash(tools/recon.sh *)",
+      "Bash(./tools/recon.sh *)",
+      "Bash(sh tools/recon.sh *)",
+      "Bash(bash tools/recon.sh *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "PowerShell(sh tools/tv.sh *)",
+      "PowerShell(bash tools/tv.sh *)",
+      "PowerShell(sh tools/recon.sh *)",
+      "PowerShell(bash tools/recon.sh *)",
+      "PowerShell(ssh *)",
+      "PowerShell(scp *)"
+    ]
+  }
+}

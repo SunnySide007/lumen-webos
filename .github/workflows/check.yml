@@ -1,11 +1,19 @@
 # Runs `make check` in the build container, through tools/dev.sh, exactly as a
-# contributor does before opening a pull request.
+# contributor does before opening a pull request. It runs on pull requests and
+# release tags only: pushes are checked locally by .githooks/pre-push, and work
+# lands in batches, one pull request per milestone.
 name: check
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# A newer push to the same pull request replaces a run still in progress.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

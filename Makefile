@@ -42,7 +42,7 @@ lint:
 	cd shell && cargo fmt --check
 	cd shell && cargo clippy --all-targets -- -D warnings
 	cd shell && cargo clippy --release --target $(TARGET) --all-targets -- -D warnings
-	shellcheck tools/*.sh tools/recon/*.sh
+	shellcheck tools/*.sh tools/recon/*.sh .githooks/pre-push
 
 check: lint test
 

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Runs `make check` in the build container before anything is pushed. CI runs
+# only on pull requests and release tags, so this is the gate for everything
+# else. Turn it on once per clone (worktrees share the setting):
+#
+#   git config core.hooksPath .githooks
+set -eu
+
+# Git passes one line per ref being pushed. A push that only deletes refs
+# sends an all-zero object name and has nothing to check.
+pushes_commits=no
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    case $local_sha in
+        *[!0]*) pushes_commits=yes ;;
+    esac
+done
+[ "$pushes_commits" = yes ] || exit 0
+
+cd "$(git rev-parse --show-toplevel)"
+echo "pre-push: tools/dev.sh make check" >&2
+exec sh tools/dev.sh make check

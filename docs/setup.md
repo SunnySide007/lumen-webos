@@ -9,6 +9,13 @@
 * Optional, for the simulator on Windows: Rust (rustup) and the Visual Studio
   C++ Build Tools. `tools/sim.ps1` downloads the official SDL2 release on first use.
 
+Then, in the clone, turn on the pre-push hook that runs `make check` before
+each push:
+
+```sh
+git config core.hooksPath .githooks
+```
+
 ## 2. SSH access to the TV
 
 Lumen talks to the TV over SSH with a key, never a password. With Homebrew

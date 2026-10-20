@@ -17,6 +17,13 @@ correctness and reversibility first, features second.
 
 ## Development loop
 
+Once per clone, turn on the pre-push hook, which runs `make check` before every
+push (CI runs only on pull requests and release tags):
+
+```sh
+git config core.hooksPath .githooks
+```
+
 ```sh
 tools/dev.sh make check     # must pass before a pull request
 tools/dev.sh make ipk       # build dist/*.ipk
@@ -39,6 +46,9 @@ tools/tv.sh log             # what the shell logged on the TV
 
 Conventional Commits (`feat(shell): …`, `fix(tools): …`). One logical change per
 pull request, with how it was tested, and on which TV, in the description.
+
+Work lands in batches: commit on a branch, open one pull request per milestone
+(CI runs once), merge, and tag `v0.<phase>.0` when a roadmap phase is done.
 
 ## Licensing
 
