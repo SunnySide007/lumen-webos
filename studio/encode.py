@@ -99,6 +99,8 @@ def ffmpeg_command(out, width, height, fps, params, crf, preset):
 BAND = 256
 # A grading worker's memory: the frame as read (half and float32) plus a band.
 GRADE_BYTES_PER_PIXEL = 32
+# x265's own memory at preset slow, about 2 GB for 4K, kept free of workers.
+X265_BYTES_PER_PIXEL = 240
 
 
 def _bands(height, band):
@@ -185,14 +187,23 @@ def _progress(done, count, started):
         print(f'  {done}/{count} frames, {time.monotonic() - started:.0f} s', file=sys.stderr)
 
 
-def _encode(executor, window, paths, out, cmd):
-    """Pipes the graded frames to ffmpeg, which writes to `out` + a partial name.
+def _write_json(path, data):
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+        f.write('\n')
 
-    The video appears under its own name only once ffmpeg has finished it; on
-    any failure ffmpeg is stopped and the partial file removed.
+
+def _encode(executor, window, paths, out, cmd, describe):
+    """Pipes the graded frames to ffmpeg, which writes a partial file, and
+    returns the record describe(size, seconds) makes for the finished video.
+
+    The video and its record (<out>.json) replace any earlier pair only once
+    ffmpeg has finished; on any failure ffmpeg is stopped, the partial file
+    removed, and an earlier video and record are left as they were.
     """
     base, ext = os.path.splitext(out)
     partial = f'{base}.partial{ext}'
+    record, partial_record = f'{out}.json', f'{out}.json.partial'
     cmd = cmd[:-1] + [partial]
     started = time.monotonic()
     ffmpeg = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -210,7 +221,10 @@ def _encode(executor, window, paths, out, cmd):
             pass  # ffmpeg stopped early; its exit status and messages explain why
         if ffmpeg.wait():
             sys.exit(f'ffmpeg failed with status {ffmpeg.returncode}')
+        info = describe(os.path.getsize(partial), time.monotonic() - started)
+        _write_json(partial_record, info)
         os.replace(partial, out)
+        os.replace(partial_record, record)
         finished = True
     finally:
         if ffmpeg.poll() is None:
@@ -223,20 +237,19 @@ def _encode(executor, window, paths, out, cmd):
                 ffmpeg.stdin.close()
             except BrokenPipeError:
                 pass
-        if not finished and os.path.exists(partial):
-            os.remove(partial)
-    return time.monotonic() - started
+        if not finished:
+            for name in (partial, partial_record):
+                if os.path.exists(name):
+                    os.remove(name)
+    return info
 
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     manifest, paths = _load_frames(args.frames)
     width, height, fps, count = manifest['width'], manifest['height'], manifest['fps'], manifest['frames']
-    record = args.out + '.json'
-    if os.path.exists(record):
-        os.remove(record)  # describes a video this run replaces
-
-    workers = args.workers or pool.default_workers(GRADE_BYTES_PER_PIXEL * width * height)
+    workers = args.workers or pool.default_workers(GRADE_BYTES_PER_PIXEL * width * height,
+                                                   reserve=X265_BYTES_PER_PIXEL * width * height)
     with pool.executor(workers) as frames:
         try:
             started = time.monotonic()
@@ -247,25 +260,24 @@ def main(argv=None):
             master = hdr.master_display(MASTER_PRIMARIES, MASTER_PEAK_NITS, MASTER_BLACK_NITS)
             params = hdr.x265_params(max_cll, max_fall, master, x265_extra(width, height, fps))
             cmd = ffmpeg_command(args.out, width, height, fps, params, args.crf, args.preset)
-            encoded = _encode(frames, 2 * workers, paths, args.out, cmd)
+
+            def describe(size, encoded):
+                return {
+                    'video': os.path.basename(args.out), 'scene': manifest['scene'], 'width': width,
+                    'height': height, 'fps': fps, 'frames': count, 'max_cll': max_cll, 'max_fall': max_fall,
+                    'master_display': master, 'x265_params': params, 'crf': args.crf, 'preset': args.preset,
+                    'bytes': size, 'mbit_per_second': round(size * 8 / (count / fps) / 1e6, 2),
+                    'workers': workers,
+                    'seconds': {'render': manifest['render']['wall_seconds'], 'measure': round(measured, 1),
+                                'encode': round(encoded, 1)},
+                }
+
+            info = _encode(frames, 2 * workers, paths, args.out, cmd, describe)
         except BaseException:
             frames.shutdown(wait=True, cancel_futures=True)
             raise
-
-    size = os.path.getsize(args.out)
-    info = {
-        'video': os.path.basename(args.out), 'scene': manifest['scene'], 'width': width, 'height': height,
-        'fps': fps, 'frames': count, 'max_cll': max_cll, 'max_fall': max_fall, 'master_display': master,
-        'x265_params': params, 'crf': args.crf, 'preset': args.preset, 'bytes': size,
-        'mbit_per_second': round(size * 8 / (count / fps) / 1e6, 2), 'workers': workers,
-        'seconds': {'render': manifest['render']['wall_seconds'], 'measure': round(measured, 1),
-                    'encode': round(encoded, 1)},
-    }
-    with open(record, 'w') as f:
-        json.dump(info, f, indent=2)
-        f.write('\n')
-    print(f'{args.out}: {size / 1e6:.1f} MB, {info["mbit_per_second"]} Mbit/s, encoded in {encoded:.1f} s',
-          file=sys.stderr)
+    print(f'{args.out}: {info["bytes"] / 1e6:.1f} MB, {info["mbit_per_second"]} Mbit/s, '
+          f'encoded in {info["seconds"]["encode"]} s', file=sys.stderr)
 
 
 if __name__ == '__main__':

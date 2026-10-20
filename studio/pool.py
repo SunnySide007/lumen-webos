@@ -11,19 +11,28 @@ import os
 
 
 def memory_bytes():
-    """The machine's memory (in Docker, the VM's), or None if unknown."""
+    """Memory free for new work: Linux's MemAvailable (in Docker, the VM's,
+    which every running container shares), else all memory, else None."""
+    try:
+        with open('/proc/meminfo') as f:
+            for line in f:
+                if line.startswith('MemAvailable:'):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        pass
     try:
         return os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
     except (AttributeError, OSError, ValueError):
         return None
 
 
-def default_workers(bytes_per_worker, share=0.6, cap=8):
-    """One worker per CPU, at most `cap`, and only as many as fit in `share` of memory."""
+def default_workers(bytes_per_worker, reserve=0, share=0.6, cap=8):
+    """One worker per CPU, at most `cap`, and only as many as fit in `share`
+    of the free memory left after `reserve` bytes for other work."""
     workers = min(os.cpu_count() or 1, cap)
-    total = memory_bytes()
-    if total:
-        workers = min(workers, max(1, int(total * share // bytes_per_worker)))
+    free = memory_bytes()
+    if free:
+        workers = min(workers, max(1, int(max(free - reserve, 0) * share // bytes_per_worker)))
     return workers
 
 

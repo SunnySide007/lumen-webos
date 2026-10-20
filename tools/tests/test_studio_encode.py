@@ -215,6 +215,18 @@ class EndToEndTest(unittest.TestCase):
             quietly(encode.main, [self.path('flat'), '--workers', '1', '--preset', 'nonsense'])
         self.assertEqual(sorted(os.listdir(self.tmp.name)), ['flat'])
 
+    def test_a_failed_encode_keeps_the_previous_video_and_its_record(self):
+        write_frames(self.path('flat'), 2)
+        quietly(encode.main, [self.path('flat'), '--workers', '1'])
+        with open(self.path('flat.mp4.json')) as f:
+            before = json.load(f)
+        with self.assertRaises(SystemExit):
+            quietly(encode.main, [self.path('flat'), '--workers', '1', '--preset', 'nonsense'])
+        self.assertEqual(sorted(os.listdir(self.tmp.name)), ['flat', 'flat.mp4', 'flat.mp4.json'])
+        with open(self.path('flat.mp4.json')) as f:
+            self.assertEqual(json.load(f), before)
+        self.assertEqual(os.path.getsize(self.path('flat.mp4')), before['bytes'])
+
     def test_an_unfinished_render_is_refused(self):
         write_frames(self.path('flat'), 2, finished=False)
         with self.assertRaises(SystemExit):
