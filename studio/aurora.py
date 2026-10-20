@@ -16,10 +16,9 @@ import math
 import numpy as np
 
 import hdr
+from scenekit import PEAK_NITS, TAU, harmonic, soft_clip, splat  # noqa: F401 (tests use harmonic)
 
 PRIMARIES = hdr.P3_D65
-PEAK_NITS = 800.0  # highlights roll off to this, just above the B9's peak
-TAU = 2.0 * math.pi
 
 WATERLINE = 0.78  # where the lake meets the mountains, from the top
 STAR_SIGMA = 0.0005  # star size (Gaussian sigma), in picture heights
@@ -31,31 +30,6 @@ PINK = (1.00, 0.25, 0.80)  # nitrogen, the lower fringe of active curtains
 AIRGLOW = (0.25, 1.00, 0.55)
 STAR_COLOURS = ((0.70, 0.80, 1.00), (0.90, 0.93, 1.00), (1.00, 0.95, 0.85), (1.00, 0.80, 0.60))
 STAR_COLOUR_WEIGHTS = (0.25, 0.35, 0.25, 0.15)
-
-
-def harmonic(rate_hz, seconds):
-    """The whole number of cycles per loop nearest rate_hz, at least one.
-
-    Rounding every rate to whole cycles is what makes the loop seamless; the
-    sign gives the direction of travel.
-    """
-    cycles = max(1, int(round(abs(rate_hz) * seconds)))
-    return cycles if rate_hz >= 0 else -cycles
-
-
-def erf(x):
-    """Error function, Abramowitz and Stegun 7.1.26 (error under 1.5e-7)."""
-    sign = np.sign(x)
-    x = np.abs(x)
-    t = 1.0 / (1.0 + 0.3275911 * x)
-    poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))))
-    return sign * (1.0 - poly * np.exp(-x * x))
-
-
-def soft_clip(nits, knee, peak):
-    """Leaves values below knee alone and rolls those above smoothly to peak."""
-    over = np.maximum(nits - knee, 0.0)
-    return np.where(nits > knee, knee + (peak - knee) * np.tanh(over / (peak - knee)), nits)
 
 
 class Waves:
@@ -185,26 +159,10 @@ class Aurora:
         depth, fade_phase = self.star_fade
         peak = (self.star_peak * (1.0 - amount * (0.5 - 0.5 * np.sin(cycles * theta + phase)))
                 * (1.0 - depth * (0.5 - 0.5 * np.cos(theta + fade_phase))))
-        sigma = STAR_SIGMA * self.height
-        radius = int(math.ceil(3.5 * sigma)) + 1
-        offsets = np.arange(-radius, radius + 1)
         # Centred on pixels, so a star's brightest pixel is its peak at any size.
         px = np.floor(self.star_x * self.height) + 0.5
         py = np.floor(self.star_y * self.height) + 0.5
-        cols = np.floor(px).astype(int)[:, None] + offsets
-        rows = np.floor(py).astype(int)[:, None] + offsets
-        # Each pixel gets the star's light that falls on its square.
-        s = sigma * math.sqrt(2.0)
-        wx = 0.5 * (erf((cols + 1 - px[:, None]) / s) - erf((cols - px[:, None]) / s))
-        wy = 0.5 * (erf((rows + 1 - py[:, None]) / s) - erf((rows - py[:, None]) / s))
-        centre = float(erf(np.array(0.5 / s))) ** 2  # a star centred on a pixel peaks at `peak`
-        weight = (peak / centre)[:, None, None] * wy[:, :, None] * wx[:, None, :]
-        r = np.broadcast_to(rows[:, :, None], weight.shape)
-        c = np.broadcast_to(cols[:, None, :], weight.shape)
-        inside = (r >= 0) & (r < sky.shape[0]) & (c >= 0) & (c < sky.shape[1])
-        for ch in range(3):
-            np.add.at(sky[:, :, ch], (r[inside], c[inside]),
-                      (weight * self.star_colour[:, ch, None, None])[inside].astype(np.float32))
+        splat(sky, px, py, peak, self.star_colour, STAR_SIGMA * self.height)
 
     def _reflect(self, sky, theta):
         """The lake: the sky and mountains mirrored, rippled and darkened."""

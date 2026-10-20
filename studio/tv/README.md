@@ -12,7 +12,9 @@ in Git Bash, with `.env` set up ([docs/setup.md](../../docs/setup.md)).
 ## 1. Copy a loop to the TV
 
 The loops are in `dist/studio/` (`tools/studio.sh python3 studio/verify.py
-<loop>` checks one first). `aurora-2160p.mp4` is 4K, 30 s and 8 MB.
+<loop>` checks one first). `aurora-2160p.mp4` is 4K, 30 s and 8 MB; the
+calmer `aurora-2160p-60s.mp4` and the second scene, `fireflies-2160p.mp4`,
+go the same way: copy each in turn as `loop.mp4`.
 
 ```sh
 tools/tv.sh run 'mkdir -p /tmp/lumen-hdr && cat > /tmp/lumen-hdr/loop.mp4' < dist/studio/aurora-2160p.mp4

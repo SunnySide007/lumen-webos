@@ -1,16 +1,20 @@
 # studio: HDR content pipeline (Phase 2)
 
 Original screensaver loops, made for an OLED panel and released under
-CC BY-SA 4.0. The first is `aurora`: green curtains with pink lower fringes
-over a starfield, a black mountain ridge, and a lake that mirrors the lowest
-of them.
+CC BY-SA 4.0. Two scenes so far (`render.py --scene`):
+
+* `aurora`: green curtains with pink lower fringes over a starfield, a black
+  mountain ridge, and a lake that mirrors the lowest of them.
+* `fireflies`: warm points of light drifting and flashing over a meadow, in
+  front of a black treeline under a faint deep-blue sky.
 
 * **Design for the panel:** near-black scenes with low average light and small
   highlights. An OLED dims large bright areas (ABL), but a small highlight can
   reach the B9's ~700–800 nit peak next to perfect black. Think aurora,
   starfields, bioluminescence, ink in water, neon rain.
 * **OLED care:** everything bright moves or fades. Stars twinkle, and the
-  brightest dim through the loop, so no highlight sits still at full power.
+  brightest dim through the loop; fireflies wander and flash. No highlight
+  sits still at full power.
 
 ## Making a loop
 
@@ -24,7 +28,8 @@ tools/studio.sh python3 studio/encode.py dist/studio/aurora-1080p        # HDR10
 tools/studio.sh python3 studio/verify.py dist/studio/aurora-1080p.mp4    # checks, previews
 ```
 
-1. **Render** (`render.py`, scene in `aurora.py`): procedural frames as
+1. **Render** (`render.py`; scenes in `aurora.py` and `fireflies.py`, shared
+   timing and highlight helpers in `scenekit.py`): procedural frames as
    half-float linear EXR in Display P3, 1.0 = 100 cd/m². The EXR header says
    so (`chromaticities`, `whiteLuminance`). Every motion runs a whole number
    of cycles per loop, so frame N is frame 0 again: the loop has no seam. An

@@ -22,10 +22,12 @@ import time
 
 import aurora
 import exr
+import fireflies
 import pool
+import scenekit
 
-SCENES = {'aurora': aurora.Aurora}
-PRIMARIES = {'aurora': ('P3_D65', aurora.PRIMARIES)}
+SCENES = {'aurora': aurora.Aurora, 'fireflies': fireflies.Fireflies}
+PRIMARIES = {'aurora': ('P3_D65', aurora.PRIMARIES), 'fireflies': ('P3_D65', fireflies.PRIMARIES)}
 WHITE_NITS = 100.0  # an EXR value of 1.0
 PATTERN = 'frame_%06d.exr'
 FRAME_FILE = re.compile(r'frame_\d{6}\.exr(\.partial)?')
@@ -65,9 +67,13 @@ def parse_args(argv):
 
 
 def scene_version(scene):
-    """A hash of the scene's source, so frames from older code are not reused."""
-    with open(sys.modules[SCENES[scene].__module__].__file__, 'rb') as f:
-        return hashlib.sha256(f.read()).hexdigest()[:12]
+    """A hash of the scene's source and the helpers it shares, so frames
+    from older code are not reused."""
+    digest = hashlib.sha256()
+    for path in (sys.modules[SCENES[scene].__module__].__file__, scenekit.__file__):
+        with open(path, 'rb') as f:
+            digest.update(f.read())
+    return digest.hexdigest()[:12]
 
 
 def _write_json(path, data):

@@ -1,4 +1,4 @@
-"""Tests for studio/aurora.py, studio/exr.py and studio/render.py.
+"""Tests for the studio scenes (studio/aurora.py, fireflies.py, scenekit.py), exr.py and render.py.
 
 They need numpy and OpenEXR, so they skip in the build container and run in
 the studio container:
@@ -22,59 +22,95 @@ try:
 except ImportError:
     np = None
 else:
-    import aurora  # noqa: E402
     import exr  # noqa: E402
     import hdr  # noqa: E402
     import render  # noqa: E402
+    import scenekit  # noqa: E402
 
 NEEDS_STUDIO = unittest.skipUnless(np, 'needs numpy and OpenEXR: run it with tools/studio.sh')
 
 
 @NEEDS_STUDIO
-class AuroraTest(unittest.TestCase):
+class SceneTest(unittest.TestCase):
+    """Every scene: seamless, made for an OLED, reproducible, the same at any size."""
+
+    SCENES = sorted(render.SCENES.items()) if np else []
+
     def test_last_frame_meets_the_first(self):
-        scene = aurora.Aurora(160, 90, frames=48, fps=24)
-        first = scene.render(0)
-        # Every motion must run whole cycles: phase 2π is phase 0 again. (render()
-        # takes the index modulo the loop, so it cannot show this.)
-        self.assertTrue(np.allclose(scene.frame_at(aurora.TAU), scene.frame_at(0.0), atol=1e-3))
-        step = np.abs(scene.render(1) - first).mean()
-        seam = np.abs(first - scene.render(47)).mean()
-        self.assertGreater(step, 0.0, 'the scene should move')
-        self.assertLess(seam, 2.0 * step)
+        for name, make in self.SCENES:
+            with self.subTest(scene=name):
+                scene = make(160, 90, frames=48, fps=24)
+                first = scene.render(0)
+                # Every motion must run whole cycles: phase 2π is phase 0 again.
+                # (render() takes the index modulo the loop, so it cannot show this.)
+                self.assertTrue(np.allclose(scene.frame_at(scenekit.TAU), scene.frame_at(0.0), atol=1e-3))
+                step = np.abs(scene.render(1) - first).mean()
+                seam = np.abs(first - scene.render(47)).mean()
+                self.assertGreater(step, 0.0, 'the scene should move')
+                self.assertLess(seam, 2.0 * step)
 
     def test_made_for_oled(self):
-        scene = aurora.Aurora(320, 180, frames=24, fps=24)
-        for index in (0, 8, 16):
-            frame = scene.render(index)
-            self.assertEqual(frame.shape, (180, 320, 3))
-            self.assertEqual(frame.dtype, np.float32)
-            self.assertTrue(np.isfinite(frame).all())
-            self.assertGreaterEqual(frame.min(), 0.0)
-            brightest = frame.max(axis=2)
-            self.assertLessEqual(brightest.max(), aurora.PEAK_NITS)
-            self.assertLess(brightest.mean(), 25.0, 'average light stays low')
-            self.assertGreater((brightest < 1.0).mean(), 0.4, 'most of the screen is near black')
+        for name, make in self.SCENES:
+            with self.subTest(scene=name):
+                scene = make(320, 180, frames=24, fps=24)
+                for index in (0, 8, 16):
+                    frame = scene.render(index)
+                    self.assertEqual(frame.shape, (180, 320, 3))
+                    self.assertEqual(frame.dtype, np.float32)
+                    self.assertTrue(np.isfinite(frame).all())
+                    self.assertGreaterEqual(frame.min(), 0.0)
+                    brightest = frame.max(axis=2)
+                    self.assertLessEqual(brightest.max(), scenekit.PEAK_NITS)
+                    self.assertLess(brightest.mean(), 25.0, 'average light stays low')
+                    self.assertGreater((brightest < 1.0).mean(), 0.4, 'most of the screen is near black')
 
     def test_highlights_reach_toward_the_panel_peak(self):
-        scene = aurora.Aurora(640, 360, frames=24, fps=24)
-        self.assertGreater(max(scene.render(i).max() for i in (0, 12)), 500.0)
+        # At 1080p, the size these loops are made for, or larger: smaller
+        # pictures blur the brightest points into their neighbours.
+        for name, make in self.SCENES:
+            with self.subTest(scene=name):
+                scene = make(1920, 1080, frames=24, fps=24)
+                self.assertGreater(max(scene.render(i).max() for i in range(0, 24, 4)), 500.0)
 
     def test_frames_are_reproducible(self):
-        a = aurora.Aurora(160, 90, frames=24, fps=24).render(5)
-        b = aurora.Aurora(160, 90, frames=24, fps=24).render(5)
-        self.assertTrue(np.array_equal(a, b))
+        for name, make in self.SCENES:
+            with self.subTest(scene=name):
+                a = make(160, 90, frames=24, fps=24).render(5)
+                b = make(160, 90, frames=24, fps=24).render(5)
+                self.assertTrue(np.array_equal(a, b))
 
     def test_the_look_does_not_depend_on_resolution(self):
-        small = aurora.Aurora(320, 180, frames=24, fps=24).render(3).mean()
-        large = aurora.Aurora(640, 360, frames=24, fps=24).render(3).mean()
-        self.assertAlmostEqual(small / large, 1.0, delta=0.15)
+        for name, make in self.SCENES:
+            with self.subTest(scene=name):
+                small = make(320, 180, frames=24, fps=24).render(3).mean()
+                large = make(640, 360, frames=24, fps=24).render(3).mean()
+                self.assertAlmostEqual(small / large, 1.0, delta=0.15)
 
     def test_harmonics_are_whole_cycles_per_loop(self):
-        self.assertEqual(aurora.harmonic(0.05, 10.0), 1)
-        self.assertEqual(aurora.harmonic(0.05, 30.0), 2)
-        self.assertEqual(aurora.harmonic(-0.1, 30.0), -3)
-        self.assertEqual(aurora.harmonic(0.001, 10.0), 1)
+        self.assertEqual(scenekit.harmonic(0.05, 10.0), 1)
+        self.assertEqual(scenekit.harmonic(0.05, 30.0), 2)
+        self.assertEqual(scenekit.harmonic(-0.1, 30.0), -3)
+        self.assertEqual(scenekit.harmonic(0.001, 10.0), 1)
+
+    def test_splat_puts_a_centred_point_at_its_peak(self):
+        image = np.zeros((9, 9, 3), dtype=np.float32)
+        scenekit.splat(image, np.array([4.5]), np.array([4.5]), np.array([700.0]),
+                       np.array([[1.0, 0.5, 0.25]]), np.array([1.2]))
+        self.assertAlmostEqual(float(image[4, 4, 0]), 700.0, places=2)
+        self.assertAlmostEqual(float(image[4, 4, 2]), 175.0, places=2)
+        # All its light lands in the image, bar the far tails the image edge cuts.
+        self.assertAlmostEqual(float(image[..., 0].sum()), 700.0 / scenekit.erf(np.array(0.5 / (1.2 * 2 ** 0.5))) ** 2,
+                               delta=7.0)
+
+    def test_a_resolved_peak_keeps_a_points_light_at_any_size(self):
+        big = scenekit.resolved_peak(700.0, 4.0)
+        self.assertAlmostEqual(float(big), 700.0, delta=7.0)
+        for sigma in (0.2, 0.5, 1.0, 3.0):
+            image = np.zeros((41, 41, 3), dtype=np.float32)
+            scenekit.splat(image, np.array([20.5]), np.array([20.5]), np.array([scenekit.resolved_peak(1.0, sigma)]),
+                           np.ones((1, 3)), np.array([sigma]))
+            # A Gaussian of peak 1 holds 2πσ² of light, in pixel units.
+            self.assertAlmostEqual(float(image[..., 0].sum()), 2 * np.pi * sigma ** 2, delta=0.01, msg=sigma)
 
 
 @NEEDS_STUDIO
