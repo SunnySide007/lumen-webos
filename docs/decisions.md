@@ -73,3 +73,39 @@ is never blocked, and `tools/store-safe-check.sh` proves it after each change.
 
 **Cost.** Voice search, the ThinQ app and LG Channels stop working, and that is
 documented where the profile is applied.
+
+## 6. Glasshouse pinned, its dashboard on localhost, and an on-TV capture (proposed)
+
+**Status.** Proposed on 2026-10-20, before any of it ran on the TV. It
+becomes accepted, with any changes, after Phase 1's checks pass on the B9
+([runbook](runbooks/phase1-tv.md)).
+
+**Context.** Decision 4 makes Glasshouse the system layer and decision 5 asks
+for a block list measured from the TV. Glasshouse moves fast (0.118.0 came
+out on 2026-10-19), its dashboard has no password and listens on every
+interface by default (`"host": "0.0.0.0"`), and neither Glasshouse nor
+webosbrew logs DNS. The TV resolves through a connman proxy on 127.0.0.1, so
+a capture on the PC or the router misses which app asked, and the router (a
+Google Nest Wifi) cannot log queries.
+
+**Decision.**
+
+- Pin Glasshouse at **0.118.0**, installed only from the release IPK whose
+  SHA-256 matches GitHub's published digest (`287f1a5c…8e2a`,
+  profiles/glasshouse/PINNED.md). A newer version is taken only after the
+  same checks pass again.
+- Run the dashboard **on localhost only** (`"host": "127.0.0.1"` in
+  `/var/lib/tvweb/config.json`) and reach it with `tools/tv.sh tunnel`, an
+  SSH forward bound to the PC's loopback. Never port-forward it.
+- **Capture on the TV** with a static tcpdump (4.99.7, libpcap 1.10.7, built
+  from signed, hash-pinned sources by `tools/capture/build.sh`), filtered to
+  DNS, TCP SYNs, TLS ClientHellos and QUIC long headers, time-boxed with
+  `timeout`, size-capped in a 500 MB ring under `/media/developer/temp`, and
+  never started at boot. `tools/capture/summarize.py` turns it into the host
+  table the block list is written from.
+
+**Cost.** Upgrading Glasshouse is a deliberate task, not a click. Using the
+dashboard needs a PC with the SSH key, and Glasshouse's phone setup link
+still opens on the LAN during setup. The capture puts a root packet sniffer
+on the TV for a day at a time; it holds names and addresses, not content,
+and its files never leave `tools/out/`, which git ignores.

@@ -25,3 +25,31 @@ from what it measured.
 - [x] `hello-gles` on the B9: Mali-T820, a steady 60 fps; BACK is 482, and HOME
   never reaches the app (the compositor takes it). Its BACK handling needs the
   TV's SDL key-event layout, recorded in `docs/device/b9.md`.
+
+## Phase 1 checklist
+
+Off the TV (Stage A):
+
+- [ ] On-TV capture: `tools/capture.sh` and a static tcpdump build
+  (`make capture-tools`)
+- [ ] Capture summary: `tools/capture/summarize.py`
+- [ ] `profiles/glasshouse`: allowlist, firmware blocks, candidate list,
+  recipe, pinned versions
+- [ ] `tools/store-safe-check.sh`, `tools/uninstall-all.sh`,
+  `tools/glasshouse-custom.sh`, `tools/tv.sh push` and `tunnel`
+
+On the TV ([runbook](runbooks/phase1-tv.md)):
+
+- [ ] plx-native 0.8.0 installed from the verified IPK; signed in, plays from Plex
+- [ ] 24 h baseline capture, fetched and summarised
+- [ ] `b9-aggressive.hosts` and `allowlist.txt` refined from the capture (owner reviewed)
+- [ ] Glasshouse 0.118.0 installed (owner confirmed), dashboard on 127.0.0.1 only
+- [ ] Stage 1, ads & telemetry tier: store-safe check and app checklist pass
+- [ ] Stage 2, privacy toggles and LG services: check and checklist pass
+- [ ] Stage 3, TV software updates blocked: firmware hosts resolve to 0.0.0.0
+- [ ] Stage 4, custom list uploaded: check and checklist pass
+- [ ] Cold boot: everything reapplied; check and checklist pass again
+- [ ] Costs confirmed: voice search, ThinQ and LG Channels fail; nothing else does
+- [ ] Second 24 h capture with blocking on: no allowlisted name blocked
+- [ ] `uninstall-all.sh` dry run reviewed; its Lumen-only part run for real
+- [ ] Decision 6 accepted; b9.md notes (resolver, tools on the TV)
