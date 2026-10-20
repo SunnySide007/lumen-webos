@@ -57,6 +57,8 @@ pub struct TileView<'a> {
     /// 0 resting, 1 fully lifted.
     pub lift: f32,
     pub focused: bool,
+    /// Position in the launcher's list.
+    pub index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -295,22 +297,24 @@ impl Home {
     pub fn view(&self) -> View<'_> {
         let scroll = self.scroll.value();
         let focused = self.focus.index();
-        let mut tiles = Vec::with_capacity(4 * layout::COLUMNS);
+        // At most four rows show at once; a frame mid-scroll can touch five.
+        let mut tiles = Vec::with_capacity(5 * layout::COLUMNS);
         let mut front = None;
         for (i, app) in self.apps.iter().enumerate() {
-            if !layout::row_on_screen(layout::row_of(i), scroll) {
-                continue;
-            }
             let lift = self.lifts[i].value();
             let mut rect = layout::lifted(layout::tile_rect(i), lift).offset(0.0, -scroll);
             if i == self.bump_owner {
                 rect = rect.offset(self.bump_x.value(), self.bump_y.value());
+            }
+            if !layout::tile_on_screen(rect, lift) {
+                continue;
             }
             let tile = TileView {
                 app,
                 rect,
                 lift,
                 focused: focused == Some(i),
+                index: i,
             };
             if tile.focused {
                 front = Some(tile);
@@ -645,6 +649,21 @@ mod tests {
         sim.press(RIGHT);
         sim.press(RIGHT);
         assert_eq!(sim.home.focused(), Some(2));
+    }
+
+    #[test]
+    fn rows_entirely_off_screen_are_not_in_the_view() {
+        let apps: Vec<App> = mock_apps().into_iter().cycle().take(40).collect();
+        let mut sim = Sim::new(apps, BackAtTop::Exit);
+        for _ in 0..3 {
+            sim.press(DOWN);
+        }
+        sim.settle();
+        let view = sim.home.view();
+        assert_eq!(view.tiles.len(), 20, "rows 2 to 5");
+        for tile in &view.tiles {
+            assert!(tile.rect.bottom() > 0.0 && tile.rect.y < layout::SCREEN_H);
+        }
     }
 
     #[test]

@@ -82,9 +82,6 @@ pub const SHELF_TITLE_SCALE: f32 = 8.0;
 pub const SHELF_TITLE_GAP: f32 = 60.0;
 pub const STATUS_SCALE: f32 = 3.0;
 
-/// Room a row needs beyond its resting tiles: the lift, its shadow, a bump.
-const ROW_MARGIN: f32 = 80.0;
-
 pub const fn row_of(index: usize) -> usize {
     index / COLUMNS
 }
@@ -122,11 +119,16 @@ pub fn scroll_for_row(row: usize) -> f32 {
     }
 }
 
-/// Whether any part of `row`, lifted, shadowed or bumped, is on screen.
-pub fn row_on_screen(row: usize, scroll: f32) -> bool {
-    let top = row_y(row) - scroll - ROW_MARGIN;
-    let bottom = row_y(row) + TILE_H - scroll + ROW_MARGIN;
-    bottom > 0.0 && top < SCREEN_H
+/// Whether a tile drawn at `rect` (on screen: lifted, bumped and scrolled)
+/// shows at all, counting its shadow when it is lifted.
+pub fn tile_on_screen(rect: Rect, lift: f32) -> bool {
+    let (above, below) = if lift > 0.0 {
+        let spread = SHADOW_LAYERS as f32 * SHADOW_STEP;
+        (spread, spread + SHADOW_OFFSET)
+    } else {
+        (0.0, 0.0)
+    };
+    rect.bottom() + below > 0.0 && rect.y - above < SCREEN_H
 }
 
 /// How far below a tile's resting edge a fully lifted tile's shadow reaches.
@@ -189,16 +191,29 @@ mod tests {
     }
 
     #[test]
-    fn rows_off_screen_are_culled() {
+    fn tiles_off_screen_are_culled() {
+        let resting = |row: usize, scroll: f32| {
+            let r = tile_rect(row * COLUMNS).offset(0.0, -scroll);
+            tile_on_screen(r, 0.0)
+        };
         // Scrolled to the top: rows 0 and 1 show, row 2 starts below the edge.
-        assert!(row_on_screen(0, 0.0));
-        assert!(row_on_screen(1, 0.0));
-        assert!(!row_on_screen(2, 0.0));
-        // Focus on row 3: row 0 is far above, rows 2 to 5 show.
+        assert!(resting(0, 0.0) && resting(1, 0.0));
+        assert!(!resting(2, 0.0));
+        // Focus on row 3: row 1 ends just above the screen, rows 2 to 5 show.
         let scroll = scroll_for_row(3);
-        assert!(!row_on_screen(0, scroll));
-        assert!((2..=5).all(|r| row_on_screen(r, scroll)));
-        assert!(!row_on_screen(6, scroll));
+        assert!(!resting(1, scroll));
+        assert!((2..=5).all(|r| resting(r, scroll)));
+        assert!(!resting(6, scroll));
+    }
+
+    #[test]
+    fn a_lifted_tiles_shadow_keeps_it_on_screen() {
+        let above = Rect::new(80.0, -TILE_H - 10.0, TILE_W, TILE_H);
+        assert!(!tile_on_screen(above, 0.0));
+        assert!(tile_on_screen(above, 1.0), "its shadow reaches down");
+        let below = Rect::new(80.0, SCREEN_H + 10.0, TILE_W, TILE_H);
+        assert!(tile_on_screen(below, 1.0), "its shadow spreads up");
+        assert!(!tile_on_screen(below.offset(0.0, 30.0), 1.0));
     }
 
     #[test]
