@@ -63,12 +63,21 @@ check_app_id() {
     esac
 }
 
+# Over SSH, luna-send -f prints nothing unless its stdin is /dev/null, so every
+# luna-send below gets /dev/null.
 cmd_check() {
     # Single quotes on purpose: this expands on the TV, not here.
     # shellcheck disable=SC2016
     tv_ssh 'echo "connected as $(id -un) to $(uname -n)";
         luna-send -n 1 -f luna://com.webos.service.tv.systemproperty/getSystemInfo \
-            "{\"keys\":[\"modelName\",\"firmwareVersion\",\"sdkVersion\"]}" 2>&1'
+            "{\"keys\":[\"modelName\",\"firmwareVersion\",\"sdkVersion\"]}" </dev/null 2>&1'
+}
+
+# `sh -s` reads the script from stdin as it runs, so a command in the script
+# that reads stdin would swallow the rest of it. Inside braces, sh parses the
+# whole script before running anything, and the commands get /dev/null.
+cmd_script() {
+    { echo '{'; cat "$1"; printf '\n} </dev/null\n'; } | tv_ssh 'sh -s'
 }
 
 cmd_install() {
@@ -107,12 +116,12 @@ EOF
 cmd_luna_app() {
     method=$1
     check_app_id "${2:-}"
-    tv_ssh "luna-send -n 1 -f luna://com.webos.applicationManager/$method '{\"id\":\"$2\"}'"
+    tv_ssh "luna-send -n 1 -f luna://com.webos.applicationManager/$method '{\"id\":\"$2\"}' </dev/null"
 }
 
 cmd_remove() {
     check_app_id "${1:-}"
-    tv_ssh "luna-send-pub -n 1 -f luna://com.webos.appInstallService/dev/remove '{\"id\":\"$1\"}'"
+    tv_ssh "luna-send-pub -n 1 -f luna://com.webos.appInstallService/dev/remove '{\"id\":\"$1\"}' </dev/null"
 }
 
 # A native app may run inside webOS's jail, which gives it a private /tmp.
@@ -137,7 +146,7 @@ case $command in
     check) cmd_check ;;
     shell) tv_ssh -t ;;
     run) need_arg "${1:-}"; tv_ssh "$1" ;;
-    script) need_arg "${1:-}"; [ -f "$1" ] || die "no such file: $1"; tv_ssh 'sh -s' < "$1" ;;
+    script) need_arg "${1:-}"; [ -f "$1" ] || die "no such file: $1"; cmd_script "$1" ;;
     install) cmd_install "${1:-}" ;;
     launch) cmd_luna_app launch "${1:-}" ;;
     close) cmd_luna_app closeByAppId "${1:-}" ;;
