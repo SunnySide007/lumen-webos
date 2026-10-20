@@ -147,7 +147,7 @@ def _drop_numa_noise(stream):
     # refuses; libnuma reports each refusal. Pass everything else through.
     for line in stream:
         if b'set_mempolicy: Operation not permitted' not in line:
-            sys.stderr.buffer.write(line)
+            sys.stderr.write(line.decode(errors='replace'))
             sys.stderr.flush()
 
 
@@ -193,18 +193,23 @@ def _write_json(path, data):
         f.write('\n')
 
 
+def partial_path(out):
+    """Where ffmpeg writes `out` until it is finished; keeps the extension,
+    from which ffmpeg picks the container."""
+    base, ext = os.path.splitext(out)
+    return f'{base}.partial{ext}'
+
+
 def _encode(executor, window, paths, out, cmd, describe):
-    """Pipes the graded frames to ffmpeg, which writes a partial file, and
-    returns the record describe(size, seconds) makes for the finished video.
+    """Pipes the graded frames to `cmd`, an ffmpeg writing partial_path(out),
+    and returns the record describe(size, seconds) makes for the video.
 
     The video and its record (<out>.json) replace any earlier pair only once
     ffmpeg has finished; on any failure ffmpeg is stopped, the partial file
     removed, and an earlier video and record are left as they were.
     """
-    base, ext = os.path.splitext(out)
-    partial = f'{base}.partial{ext}'
+    partial = partial_path(out)
     record, partial_record = f'{out}.json', f'{out}.json.partial'
-    cmd = cmd[:-1] + [partial]
     started = time.monotonic()
     ffmpeg = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     noise = threading.Thread(target=_drop_numa_noise, args=(ffmpeg.stderr,), daemon=True)
@@ -259,7 +264,7 @@ def main(argv=None):
                   file=sys.stderr)
             master = hdr.master_display(MASTER_PRIMARIES, MASTER_PEAK_NITS, MASTER_BLACK_NITS)
             params = hdr.x265_params(max_cll, max_fall, master, x265_extra(width, height, fps))
-            cmd = ffmpeg_command(args.out, width, height, fps, params, args.crf, args.preset)
+            cmd = ffmpeg_command(partial_path(args.out), width, height, fps, params, args.crf, args.preset)
 
             def describe(size, encoded):
                 return {

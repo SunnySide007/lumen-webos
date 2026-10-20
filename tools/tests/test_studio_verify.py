@@ -94,6 +94,16 @@ class VerifyTest(unittest.TestCase):
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             verify.main([self.path('nothing.mp4')])
 
+    def test_a_record_missing_fields_says_which(self):
+        with open(self.path('old.mp4'), 'wb') as f:
+            f.write(b'')
+        with open(self.path('old.mp4.json'), 'w') as f:
+            json.dump({'width': 16, 'height': 16, 'fps': 8, 'frames': 2}, f)
+        err = io.StringIO()
+        with self.assertRaises(SystemExit) as stop, contextlib.redirect_stderr(err):
+            verify.main([self.path('old.mp4'), '--previews', ''])
+        self.assertIn('max_cll', str(stop.exception.code))
+
     def test_an_unreadable_video_fails_without_a_traceback(self):
         with open(self.path('junk.mp4'), 'wb') as f:
             f.write(b'not a video')

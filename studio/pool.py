@@ -10,11 +10,11 @@ import concurrent.futures
 import os
 
 
-def memory_bytes():
+def memory_bytes(meminfo='/proc/meminfo'):
     """Memory free for new work: Linux's MemAvailable (in Docker, the VM's,
     which every running container shares), else all memory, else None."""
     try:
-        with open('/proc/meminfo') as f:
+        with open(meminfo) as f:
             for line in f:
                 if line.startswith('MemAvailable:'):
                     return int(line.split()[1]) * 1024
