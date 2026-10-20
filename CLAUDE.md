@@ -16,6 +16,10 @@ Builds and checks run in the Docker build container (Git Bash on Windows):
 - `pwsh tools/sim.ps1`: the shell in a window on Windows. Layout only;
   frame rates come from the TV.
 
+The HDR loop pipeline (studio/README.md) has its own container,
+`tools/studio.sh`. `make check` skips its numpy tests; run them with
+`tools/studio.sh python3 -I -m unittest discover -s tools/tests -p 'test_studio*.py'`.
+
 `tools/tv.sh` and `tools/recon.sh` run on the host and act on the TV over
 SSH as root. Ask before running any of them.
 
