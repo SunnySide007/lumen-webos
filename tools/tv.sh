@@ -11,6 +11,11 @@
 #   tools/tv.sh close <app id>      stop an app
 #   tools/tv.sh remove <app id>     uninstall an app
 #   tools/tv.sh log                 print the Lumen shell's log from its last run
+#   tools/tv.sh push <local> <remote>
+#                                   upload a file; <remote> must be under
+#                                   /media/developer/temp/ or /tmp/
+#   tools/tv.sh tunnel [port]       forward 127.0.0.1:<port> (default 8080) here
+#                                   to the TV's Glasshouse dashboard; Ctrl-C ends it
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -132,12 +137,53 @@ cmd_log() {
         if [ -n "$f" ] && [ -f "$f" ]; then echo "# $f"; tail -n 200 "$f"; else echo "no lumen-shell.log yet"; fi'
 }
 
+# Uploads go only to scratch space: never over system or app files. The path
+# also lands in a remote command line, so it is kept to plain characters.
+check_push_args() {
+    need_arg "${1:-}"
+    need_arg "${2:-}"
+    [ -f "$1" ] || die "no such file: $1"
+    case $2 in
+        *[!A-Za-z0-9._/-]*) die "remote path has unsupported characters: $2" ;;
+        */../* | */.. | */./* | */. | *//*) die "remote path must be plain: $2" ;;
+        /media/developer/temp/?* | /tmp/?*) ;;
+        *) die "remote path must be under /media/developer/temp/ or /tmp/: $2" ;;
+    esac
+    case $2 in */) die "remote path must name a file: $2" ;; esac
+}
+
+cmd_push() {
+    remote_dir=$(dirname "$2")
+    tv_ssh "mkdir -p '$remote_dir' && cat > '$2'" < "$1"
+    want=$(wc -c < "$1" | tr -d ' ')
+    got=$(tv_ssh "wc -c < '$2'" </dev/null | tr -d ' \r')
+    [ "$got" = "$want" ] || die "upload of $1 is $got bytes on the TV, expected $want"
+    echo "pushed $1 to $2 ($want bytes)"
+}
+
+check_port() {
+    case $1 in
+        '' | *[!0-9]* | ??????*) die "not a port number: $1" ;;
+    esac
+    if [ "$1" -lt 1 ] || [ "$1" -gt 65535 ]; then
+        die "not a port number: $1"
+    fi
+}
+
+# The dashboard has no login, so the local end listens on loopback only.
+cmd_tunnel() {
+    echo "Glasshouse dashboard: http://127.0.0.1:$1/ (Ctrl-C to close the tunnel)"
+    tv_ssh -N -o ExitOnForwardFailure=yes -L "127.0.0.1:$1:127.0.0.1:8080"
+}
+
 command=${1:-help}
 [ $# -gt 0 ] && shift
 
 case $command in
     help | -h | --help) usage; exit 0 ;;
     check | shell | run | script | install | launch | close | remove | log) ;;
+    push) check_push_args "${1:-}" "${2:-}" ;;
+    tunnel) port=${1:-8080}; check_port "$port" ;;
     *) usage >&2; die "unknown command: $command" ;;
 esac
 
@@ -152,4 +198,6 @@ case $command in
     close) cmd_luna_app closeByAppId "${1:-}" ;;
     remove) cmd_remove "${1:-}" ;;
     log) cmd_log ;;
+    push) cmd_push "$1" "$2" ;;
+    tunnel) cmd_tunnel "$port" ;;
 esac
