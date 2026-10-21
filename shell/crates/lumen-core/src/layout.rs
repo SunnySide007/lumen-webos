@@ -67,20 +67,27 @@ pub const FOCUS_ROW_Y: f32 = 340.0;
 /// How much a fully lifted tile grows, about its centre.
 pub const FOCUS_SCALE: f32 = 1.15;
 
-/// The soft shadow under a lifted tile: layers stepping out, offset down.
-pub const SHADOW_LAYERS: usize = 4;
-pub const SHADOW_STEP: f32 = 6.0;
+/// The soft shadow under a lifted tile, offset down and fading out over
+/// `SHADOW_BLUR` pixels either side of the tile's edge.
+pub const SHADOW_BLUR: f32 = 24.0;
 pub const SHADOW_OFFSET: f32 = 18.0;
 pub const SHADOW_OPACITY: f32 = 0.4;
 
-/// Text sizes, in screen pixels per 5x7-font pixel, and spacing.
-pub const TITLE_SCALE: f32 = 3.0;
-/// Space kept clear between a title and the tile's sides.
-pub const TITLE_PAD: f32 = 16.0;
-pub const SHELF_TITLE_SCALE: f32 = 8.0;
-/// Gap from the bottom of the Top Shelf title to the shelf's lower edge.
+/// A tile's icon: its longer side, at rest. It grows with the tile.
+pub const ICON_SIZE: f32 = 120.0;
+/// The first letter of the title, on a tile with no icon, at rest.
+pub const LETTER_PX: f32 = 96.0;
+
+/// Text sizes in pixels to the em (Inter SemiBold), and spacing.
+pub const TITLE_PX: f32 = 30.0;
+/// From a lifted tile's lower edge to the top of the capitals of its title.
+pub const TITLE_GAP: f32 = 14.0;
+pub const SHELF_TITLE_PX: f32 = 72.0;
+pub const SHELF_CAPTION_PX: f32 = 24.0;
+/// From the Top Shelf title's baseline to the shelf's lower edge.
 pub const SHELF_TITLE_GAP: f32 = 60.0;
-pub const STATUS_SCALE: f32 = 3.0;
+pub const STATUS_PX: f32 = 28.0;
+pub const EMPTY_PX: f32 = 48.0;
 
 pub const fn row_of(index: usize) -> usize {
     index / COLUMNS
@@ -123,18 +130,27 @@ pub fn scroll_for_row(row: usize) -> f32 {
 /// shows at all, counting its shadow when it is lifted.
 pub fn tile_on_screen(rect: Rect, lift: f32) -> bool {
     let (above, below) = if lift > 0.0 {
-        let spread = SHADOW_LAYERS as f32 * SHADOW_STEP;
-        (spread, spread + SHADOW_OFFSET)
+        (SHADOW_BLUR, SHADOW_BLUR + SHADOW_OFFSET)
     } else {
         (0.0, 0.0)
     };
     rect.bottom() + below > 0.0 && rect.y - above < SCREEN_H
 }
 
+/// How far a fully lifted tile grows past its resting edge, top and bottom.
+fn lift_growth() -> f32 {
+    TILE_H * (FOCUS_SCALE - 1.0) / 2.0
+}
+
 /// How far below a tile's resting edge a fully lifted tile's shadow reaches.
 pub fn shadow_reach() -> f32 {
-    let growth = TILE_H * (FOCUS_SCALE - 1.0) / 2.0;
-    growth + SHADOW_OFFSET + SHADOW_LAYERS as f32 * SHADOW_STEP
+    lift_growth() + SHADOW_OFFSET + SHADOW_BLUR
+}
+
+/// How far below a tile's resting edge the focused title's line can reach:
+/// a whole em below the top of its capitals bounds the descenders too.
+pub fn title_reach() -> f32 {
+    lift_growth() + TITLE_GAP + TITLE_PX
 }
 
 #[cfg(test)]
@@ -168,6 +184,18 @@ mod tests {
         let gap = ROW_PITCH - TILE_H;
         assert!(close(shadow_reach(), 56.4));
         assert!(shadow_reach() < gap);
+    }
+
+    #[test]
+    fn the_focused_title_stays_inside_the_row_gap() {
+        let gap = ROW_PITCH - TILE_H;
+        assert!(close(title_reach(), 58.4));
+        assert!(title_reach() < gap);
+    }
+
+    #[test]
+    fn an_icon_and_a_letter_fit_inside_a_resting_tile() {
+        const { assert!(ICON_SIZE < TILE_H && LETTER_PX < TILE_H) };
     }
 
     #[test]

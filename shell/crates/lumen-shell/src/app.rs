@@ -435,6 +435,7 @@ fn run_surface(sdl: &Sdl, opts: &Options) -> Result<(), String> {
     );
 
     let renderer = Renderer::new(gl)?;
+    let mut assets = draw::Assets::new()?;
     let mut batch = Batch::default();
     let mut stats = FrameStats::new(Duration::from_secs(1));
     let mut burst = Burst::default();
@@ -445,7 +446,7 @@ fn run_surface(sdl: &Sdl, opts: &Options) -> Result<(), String> {
     if let Some(step) = opts.fixed_dt {
         info!("fixed clock: {:.3} ms a frame", step.as_secs_f64() * 1000.0);
     }
-    let mut shell = Shell::new(MockLauncher::default(), clock.now());
+    let mut shell = Shell::new(mock_launcher(), clock.now());
 
     loop {
         // A settled screenshot that is ready must not wait for an event; one
@@ -534,7 +535,8 @@ fn run_surface(sdl: &Sdl, opts: &Options) -> Result<(), String> {
 
         // SAFETY: the window is live; see above.
         drawable = unsafe { sdl.drawable_size(surface.window) };
-        draw::home(&mut batch, &shell.home.view());
+        draw::home(&mut batch, &shell.home.view(), &mut assets);
+        renderer.upload(&assets.atlas.take_uploads());
         renderer.draw(&batch, drawable);
         if now >= SCREENSHOT_AFTER
             && let Some(path) = screenshot.take()
@@ -576,6 +578,26 @@ fn run_surface(sdl: &Sdl, opts: &Options) -> Result<(), String> {
     }
     drop(surface);
     Ok(())
+}
+
+/// The simulator's apps, with its placeholder icons when it can find them:
+/// in `LUMEN_MOCK_ICONS`, or a `mock-icons` folder beside the binary (the IPK
+/// carries one until the TV's own launcher, milestone B3).
+fn mock_launcher() -> MockLauncher {
+    let dir = std::env::var_os("LUMEN_MOCK_ICONS")
+        .map(PathBuf::from)
+        .or_else(|| Some(std::env::current_exe().ok()?.parent()?.join("mock-icons")));
+    match dir {
+        Some(dir) if dir.is_dir() => {
+            info!("mock icons from {}", dir.display());
+            MockLauncher::default().with_icons_in(&dir)
+        }
+        Some(dir) => {
+            info!("no mock icons at {}: letter tiles", dir.display());
+            MockLauncher::default()
+        }
+        None => MockLauncher::default(),
+    }
 }
 
 /// Every scripted key has been pressed and released.

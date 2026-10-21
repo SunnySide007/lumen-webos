@@ -33,6 +33,8 @@ ipk: build-tv
 	install -m 0755 $(BIN) $(STAGE)/lumen-shell
 	install -m 0644 packaging/shell/icon80.png packaging/shell/icon130.png $(STAGE)/
 	install -m 0644 shell/assets/fonts/Inter-LICENSE.txt $(STAGE)/
+	install -d $(STAGE)/mock-icons
+	install -m 0644 shell/assets/mock-icons/*.png $(STAGE)/mock-icons/
 	sed -e 's/@APP_ID@/$(APP_ID)/' -e 's/@VERSION@/$(VERSION)/' \
 	    packaging/shell/appinfo.json.in > $(STAGE)/appinfo.json
 	ares-package --no-minify --outdir dist $(STAGE)

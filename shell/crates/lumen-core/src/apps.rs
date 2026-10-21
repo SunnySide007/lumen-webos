@@ -2,6 +2,7 @@
 //! (luna, milestone B3) and the simulator's `MockLauncher` share one trait.
 
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 /// A webOS app ID, such as `netflix` or `com.webos.app.hdmi1`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -35,6 +36,13 @@ pub struct App {
     pub id: AppId,
     pub title: String,
     pub kind: AppKind,
+    /// A PNG to draw on the tile. webOS gives each app one (its appinfo's
+    /// `icon` or `largeIcon`); without one, or if it will not load, the tile
+    /// shows the title's first letter.
+    pub icon: Option<PathBuf>,
+    /// The tile's colour as RGB (webOS's `iconColor`); without one, a colour
+    /// from the shell's palette.
+    pub color: Option<[u8; 3]>,
 }
 
 impl App {
@@ -43,7 +51,19 @@ impl App {
             id: AppId::new(id),
             title: title.to_owned(),
             kind,
+            icon: None,
+            color: None,
         }
+    }
+
+    pub fn with_icon(mut self, path: impl Into<PathBuf>) -> Self {
+        self.icon = Some(path.into());
+        self
+    }
+
+    pub fn with_color(mut self, rgb: [u8; 3]) -> Self {
+        self.color = Some(rgb);
+        self
     }
 }
 
@@ -108,6 +128,25 @@ impl MockLauncher {
         }
     }
 
+    /// Gives the apps the simulator's placeholder pictograms from `dir`
+    /// (shell/assets/mock-icons): a play button for video, a note for music,
+    /// and so on. Plex and Disney+ keep none, to show the letter tiles.
+    pub fn with_icons_in(mut self, dir: &Path) -> Self {
+        for app in &mut self.apps {
+            let icon = match app.id.as_str() {
+                "netflix" | "amazon" | "youtube.leanback.v4" | "com.apple.appletv" => "play",
+                "spotify-beehive" => "note",
+                "com.webos.app.livetv" => "tv",
+                "com.webos.app.browser" => "globe",
+                "com.palm.app.settings" => "gear",
+                _ if app.kind == AppKind::Input => "input",
+                _ => continue,
+            };
+            app.icon = Some(dir.join(format!("{icon}.png")));
+        }
+        self
+    }
+
     /// Makes launching `id` fail, for tests of the error path.
     pub fn failing_on(mut self, id: &str) -> Self {
         self.failing = Some(AppId::new(id));
@@ -148,6 +187,38 @@ mod tests {
         assert_eq!(apps[0].title, "Netflix");
         let inputs = apps.iter().filter(|a| a.kind == AppKind::Input).count();
         assert_eq!(inputs, 2);
+    }
+
+    #[test]
+    fn mock_apps_have_no_icons_until_given_a_folder() {
+        let plain = MockLauncher::default().list().unwrap();
+        assert!(plain.iter().all(|a| a.icon.is_none() && a.color.is_none()));
+
+        let dir = Path::new("assets/mock-icons");
+        let apps = MockLauncher::default().with_icons_in(dir).list().unwrap();
+        let icon = |id: &str| {
+            apps.iter()
+                .find(|a| a.id.as_str() == id)
+                .and_then(|a| a.icon.clone())
+        };
+        assert_eq!(icon("netflix"), Some(dir.join("play.png")));
+        assert_eq!(icon("com.webos.app.hdmi2"), Some(dir.join("input.png")));
+        assert_eq!(icon("com.palm.app.settings"), Some(dir.join("gear.png")));
+        assert_eq!(icon("plx-native"), None, "a letter tile");
+        assert_eq!(icon("com.disney.disneyplus-prod"), None, "a letter tile");
+        assert_eq!(apps.iter().filter(|a| a.icon.is_some()).count(), 10);
+    }
+
+    #[test]
+    fn apps_take_an_icon_and_a_colour() {
+        let app = App::new("x", "X", AppKind::App)
+            .with_icon("/usr/palm/applications/x/icon.png")
+            .with_color([1, 2, 3]);
+        assert_eq!(
+            app.icon.as_deref(),
+            Some(Path::new("/usr/palm/applications/x/icon.png"))
+        );
+        assert_eq!(app.color, Some([1, 2, 3]));
     }
 
     #[test]

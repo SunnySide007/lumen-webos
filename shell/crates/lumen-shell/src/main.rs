@@ -4,15 +4,17 @@
 //! logic (keys, focus, layout, motion, apps) in `lumen-core`.
 
 mod app;
+mod atlas;
 mod capture;
 mod compat;
 mod draw;
-mod font;
 mod frame_stats;
 mod gl;
+mod icons;
 mod log;
 mod render;
 mod sdl;
+mod text;
 
 use std::process::ExitCode;
 

@@ -7,7 +7,6 @@ pub const NO_ERROR: u32 = 0;
 pub const COLOR_BUFFER_BIT: u32 = 0x4000;
 pub const TRIANGLES: u32 = 0x0004;
 pub const BLEND: u32 = 0x0BE2;
-pub const SRC_ALPHA: u32 = 0x0302;
 pub const ONE_MINUS_SRC_ALPHA: u32 = 0x0303;
 pub const VENDOR: u32 = 0x1F00;
 pub const RENDERER: u32 = 0x1F01;
@@ -24,6 +23,16 @@ pub const LINK_STATUS: u32 = 0x8B82;
 pub const INFO_LOG_LENGTH: u32 = 0x8B84;
 pub const RGBA: u32 = 0x1908;
 pub const UNSIGNED_BYTE: u32 = 0x1401;
+pub const ONE: u32 = 1;
+pub const TEXTURE_2D: u32 = 0x0DE1;
+pub const TEXTURE0: u32 = 0x84C0;
+pub const TEXTURE_MAG_FILTER: u32 = 0x2800;
+pub const TEXTURE_MIN_FILTER: u32 = 0x2801;
+pub const TEXTURE_WRAP_S: u32 = 0x2802;
+pub const TEXTURE_WRAP_T: u32 = 0x2803;
+pub const LINEAR: i32 = 0x2601;
+pub const CLAMP_TO_EDGE: i32 = 0x812F;
+pub const UNPACK_ALIGNMENT: u32 = 0x0CF5;
 
 pub struct Gl {
     pub clear_color: unsafe extern "C" fn(f32, f32, f32, f32),
@@ -48,6 +57,15 @@ pub struct Gl {
     pub get_attrib_location: unsafe extern "C" fn(u32, *const c_char) -> i32,
     pub get_uniform_location: unsafe extern "C" fn(u32, *const c_char) -> i32,
     pub uniform2f: unsafe extern "C" fn(i32, f32, f32),
+    pub uniform1i: unsafe extern "C" fn(i32, i32),
+    pub gen_textures: unsafe extern "C" fn(i32, *mut u32),
+    pub bind_texture: unsafe extern "C" fn(u32, u32),
+    pub active_texture: unsafe extern "C" fn(u32),
+    pub tex_parameteri: unsafe extern "C" fn(u32, u32, i32),
+    pub pixel_storei: unsafe extern "C" fn(u32, i32),
+    pub tex_image_2d: unsafe extern "C" fn(u32, i32, i32, i32, i32, i32, u32, u32, *const c_void),
+    pub tex_sub_image_2d:
+        unsafe extern "C" fn(u32, i32, i32, i32, i32, i32, u32, u32, *const c_void),
     pub gen_buffers: unsafe extern "C" fn(i32, *mut u32),
     pub bind_buffer: unsafe extern "C" fn(u32, u32),
     pub buffer_data: unsafe extern "C" fn(u32, isize, *const c_void, u32),
@@ -108,6 +126,14 @@ impl Gl {
                 get_attrib_location: load_fn(l, c"glGetAttribLocation")?,
                 get_uniform_location: load_fn(l, c"glGetUniformLocation")?,
                 uniform2f: load_fn(l, c"glUniform2f")?,
+                uniform1i: load_fn(l, c"glUniform1i")?,
+                gen_textures: load_fn(l, c"glGenTextures")?,
+                bind_texture: load_fn(l, c"glBindTexture")?,
+                active_texture: load_fn(l, c"glActiveTexture")?,
+                tex_parameteri: load_fn(l, c"glTexParameteri")?,
+                pixel_storei: load_fn(l, c"glPixelStorei")?,
+                tex_image_2d: load_fn(l, c"glTexImage2D")?,
+                tex_sub_image_2d: load_fn(l, c"glTexSubImage2D")?,
                 gen_buffers: load_fn(l, c"glGenBuffers")?,
                 bind_buffer: load_fn(l, c"glBindBuffer")?,
                 buffer_data: load_fn(l, c"glBufferData")?,

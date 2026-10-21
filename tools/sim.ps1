@@ -52,6 +52,7 @@ if (-not (Test-Path $sdlDll)) {
 
 $env:LUMEN_SDL2 = $sdlDll
 $env:LUMEN_LOG = Join-Path $root 'shell/target-host/lumen-shell.log'
+$env:LUMEN_MOCK_ICONS = Join-Path $root 'shell/assets/mock-icons'
 $env:CARGO_TARGET_DIR = Join-Path $root 'shell/target-host'
 
 $cargoArgs = @('run', '--manifest-path', (Join-Path $root 'shell/Cargo.toml'))

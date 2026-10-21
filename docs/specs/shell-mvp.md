@@ -31,15 +31,20 @@ x=         80         440        800        1160       1520 (to 1840)
 * **Top Shelf:** a full-width placeholder band, 1920x640 at the top of the
   content. It shows a gradient and, bottom left, the title of the focused
   app on row 0. It is not focusable in this phase.
-* **App grid:** rows of five tiles in launcher order. Each tile is a solid
-  colour from an 8-colour palette, by its position in the list (so no two
-  neighbours match), with its title centred on it in the 5x7 font. Icons and
-  real text arrive in B2.
+* **App grid:** rows of five tiles in launcher order. Each tile is its app's
+  colour (webOS's `iconColor`) or, without one, a colour from an 8-colour
+  palette by its position in the list (so no two neighbours match). The
+  app's icon sits in the middle; an app without one, or whose icon will not
+  load, shows the first letter of its title instead.
 * **Focus:** exactly one tile is focused. It is scaled up, gets a soft
-  shadow, and draws above its neighbours.
-* **Status line:** a short message ("OPENING NETFLIX") in a dark pill at the
+  shadow, draws above its neighbours, and its title appears below it, as on
+  tvOS. Unfocused tiles show no title.
+* **Status line:** a short message ("Opening Netflix") in a dark pill at the
   top right, over the Top Shelf while focus is on row 0, shown for 2 s.
-* **No apps:** "NO APPS" centred where row 0 would be; arrows do nothing.
+* **No apps:** "No apps" centred where row 0 would be; arrows do nothing.
+* **Text:** Inter SemiBold (4.1, OFL), built into the binary. It is not
+  kerned yet: fontdue reads kerning only from a `kern` table, and Inter keeps
+  its kerning in GPOS.
 
 ## Keys
 
@@ -140,18 +145,23 @@ screen coordinates do not.
 | Row 0 | content y 700 |
 | Row pitch | 280 (row gap 88) |
 | Focus scale | 1.15 about the tile's centre: 368 x 221 |
-| Shadow | 4 layers stepping out 6 px each, offset 18 px down at full lift, total opacity about 0.4 |
-| Title | 5x7 font at 3 px per font pixel, centred; cut to fit 16 px inside the tile, ending in `...` |
-| Top Shelf title | 5x7 font at 8 px, left at x 80, bottom 60 px above the shelf's lower edge |
-| Status pill | top right of the safe area, 5x7 font at 3 px |
+| Shadow | one shader-drawn shadow in the tile's shape, offset 18 px down at full lift, its edge fading over 24 px either side, opacity 0.4 |
+| Icon | longer side 120 px at rest, centred, growing with the tile |
+| Letter (no icon) | the title's first letter, 96 px at rest, centred, growing with the tile |
+| Title | 30 px, below the focused tile only: capitals 14 px under its lifted edge, centred, fading in with the lift; cut to the lifted width (368 px), ending in `…` |
+| Top Shelf title | 72 px, left at x 80, baseline 60 px above the shelf's lower edge; the caption "TOP SHELF" (24 px, dim) above it |
+| Status pill | top right of the safe area, 28 px |
+| No apps | 48 px |
 
 Checks the numbers pass (each becomes a unit test):
 
 * A lifted tile grows 24 px each side, leaving 16 px to its neighbour, and
   about 14 px top and bottom, leaving 74 px to the next row; its shadow ends
-  about 56 px below the tile's resting edge, inside the 88 px gap. Lifted
+  about 56 px below the tile's resting edge, inside the 88 px gap, and so does
+  its title, whose line ends at most about 58 px below that edge. Lifted
   edge tiles reach 24 px into the side margins, which is allowed: the safe
-  area bounds the resting layout.
+  area bounds the resting layout. Icons and letters fit inside a resting
+  tile.
 * **Scrolling:** with row 0 focused the scroll is 0. With row r of 1 or more
   focused, the content scrolls so that row sits at screen y 340: scroll =
   360 + 280r. At row 1 that is 640, which lifts the Top Shelf exactly off
@@ -159,18 +169,23 @@ Checks the numbers pass (each becomes a unit test):
   visible and the next row peeks in below.
 * Rows entirely off screen are not drawn.
 
-### Draw-list size
+### Draw cost
 
 On the B9, hello-gles held a steady 60.0 fps (average 16.67 ms, worst
-17–19 ms) drawing about 3,000 quads in one batched call, on a Mali-T820 MP2
-reporting OpenGL ES 3.2 at 1920x1080 with vsync. B1 aims to stay at or below
-that size, so that measurement remains the reference until the grid itself
-is measured:
+17–19 ms) drawing about 3,000 flat quads in one batched call, on a Mali-T820
+MP2 reporting OpenGL ES 3.2 at 1920x1080 with vsync, and the B1 grid (856 to
+1,631 quads, rounded corners made of strips, a pixel font) held 60 fps too.
+B2 keeps one draw call a frame with far fewer quads:
 
-* Rounded corners use 6 strips per corner band (13 quads a tile).
-* The 5x7 font costs one quad per lit pixel, about 130 quads for a typical
-  title; with 12 visible tiles, the Top Shelf title and the status line, a
-  frame comes to roughly 2,000–2,500 quads.
+* Every rounded rectangle and every shadow is one quad, cut out by the
+  fragment shader (the distance to a rounded box, with a one-pixel soft
+  edge; a shadow's edge is 24 px wide either side).
+* Icons and glyphs come from one 2048x1024 RGBA atlas (8 MB of graphics
+  memory), one quad each. The start screen is 45 quads in the simulator.
+* The cost moves from vertices to pixels: the shape shader runs over every
+  pixel of every tile, pill and shadow, in high precision where the GPU has
+  it. Whether the grid still holds 60 fps on the B9 is measured at B2's TV
+  run; until then the B1 figures are the last measured.
 * The vertex list is reused from frame to frame, never reallocated. Memory
   is tight on the B9 (about 330 MB free of 1.6 GB, with swap in use).
 
@@ -231,7 +246,13 @@ focus rule is what stops the drawing there.
 ## Apps and launching
 
 ```rust
-pub struct App { pub id: AppId, pub title: String, pub kind: AppKind } // App or Input
+pub struct App {
+    pub id: AppId,
+    pub title: String,
+    pub kind: AppKind,              // App or Input
+    pub icon: Option<PathBuf>,      // a PNG (webOS's icon or largeIcon)
+    pub color: Option<[u8; 3]>,     // webOS's iconColor
+}
 
 pub trait Launcher {
     fn list(&mut self) -> Result<Vec<App>, LaunchError>;
@@ -244,7 +265,20 @@ pub trait Launcher {
 * `MockLauncher` serves the simulator and tests: a fixed list of 12 entries
   modelled on the B9's apps and HDMI inputs (rows of 5, 5 and 2, so the short
   last row gets exercised). It records every launch, and a test can make one
-  ID fail.
+  ID fail. `with_icons_in(dir)` gives its apps the placeholder pictograms in
+  `shell/assets/mock-icons` (play, note, tv, input, globe, gear; drawn by
+  `tools/mock-icons.py`), leaving Plex and Disney+ as letter tiles. The
+  simulator finds them through `LUMEN_MOCK_ICONS`, which `tools/sim.ps1`
+  sets; the TV build looks for a `mock-icons` folder beside its binary,
+  which the IPK carries until B3.
+* On the TV the icon paths will come from other apps' appinfo, so an icon
+  is read only from a regular file of at most 1 MB, opened without blocking
+  (a FIFO or a device cannot hang the shell), and decoded only if it is at
+  most 512 px a side, within 4 MB of decoder memory. One larger than 160 px
+  is halved until it fits, since a tile draws it at most 138 px; that keeps
+  a frame's icons well inside the atlas and about 100 KB of memory each. A
+  failure is logged once, with the path escaped, and the tile shows its
+  letter.
 * If `list` fails, the shell shows the empty state and puts the error in the
   status line and the log.
 
@@ -268,10 +302,14 @@ pub trait Launcher {
 * **`lumen-shell`:** `sdl.rs` decodes key-down and key-up in both layouts,
   window and app-lifecycle events, logs the first raw events, and binds
   `SDL_WaitEventTimeout`; `app.rs` runs the loop above and turns effects into
-  launcher calls; a new drawing module turns `home`'s view into a
-  `render::Batch` (which gains a rounded rectangle made of horizontal
-  strips). The hello-gles scene goes; the GL details it showed stay in the log.
-* No new crates.io dependencies in B1.
+  launcher calls; `draw.rs` turns `home`'s view into a `render::Batch`. The
+  hello-gles scene goes; the GL details it showed stay in the log.
+* B2 adds `atlas.rs` (the shelf packer and pending uploads), `text.rs`
+  (Inter through fontdue, a glyph cache, fitting with an ellipsis) and
+  `icons.rs` (PNG decoding with limits, premultiplied); `render.rs` gains the
+  shape shader and the atlas texture. The 5x7 font goes.
+* No new crates.io dependencies in B1. B2 adds `png` 0.18 and `fontdue` 0.9
+  (`std` only), both approved by the owner.
 
 ## Simulator automation
 
@@ -291,7 +329,7 @@ work on the TV, which makes them usable for smoke tests there later.
 
 ## Milestones
 
-### B1: the home grid in the simulator (this branch)
+### B1: the home grid in the simulator (done)
 
 1. `lumen-core` with the modules above, each unit-tested.
 2. `lumen-shell` reads keys in both SDL layouts, draws the grid from `home`,
@@ -306,22 +344,20 @@ and a launch's status line, with the log showing "idle" after each settle.
 The TV build is then ready for the main session to run, which also captures
 the raw event log. That run was on 2026-10-20 ("Measured on the B9").
 
-### B2: icons and text (when the owner says so)
+### B2: icons and text (this branch)
 
 Textured quads in the renderer, app icons, real text for titles,
-shader-drawn rounded corners and soft shadows. Two ways to decode images and
-draw text; the owner picks one:
+shader-drawn rounded corners and soft shadows. Of the two ways to decode
+images and draw text, the owner chose the Rust crates (`png`, `fontdue`) over
+LG's SDL2_image and SDL2_ttf on 2026-10-20: the simulator then shows exactly
+what the TV draws, and nothing depends on LG's `SDL_Surface` layout. Titles
+show under the focused tile only, as on tvOS (also the owner's choice).
 
-| | Rust crates (a PNG decoder and a font rasteriser, for example `png` and `fontdue`) | LG's SDL2_image and SDL2_ttf, loaded at run time like SDL2 |
-|---|---|---|
-| On the B9 | compiled in | already in `/usr/lib` (2.0.x) |
-| Dependencies | new crates, for the owner to approve | none; the simulator downloads pinned Windows DLLs for both, as it does SDL2 |
-| PC and TV match | same code, same pixels | different FreeType builds may draw text slightly differently |
-| Risk | binary size | both hand back `SDL_Surface` structs, whose field offsets would need checking on the TV, since LG's SDL already differs from upstream |
-
-Recommendation: the crates, because the simulator then shows exactly what
-the TV draws, and nothing depends on LG's struct layouts. Inter, the planned
-typeface, is OFL-licensed and goes into THIRD-PARTY.md either way.
+**Done when:** `make check` is green; the reviews leave no critical or high
+findings; and simulator screenshots show the start screen, focus moved along
+row 0, row 1 with the Top Shelf scrolled off, a launch's status line, and
+letter tiles for apps without icons. Then the TV run: the frame time while
+moving, now that the cost is in the fragment shader.
 
 ### B3: the TV launcher (after the TV recon)
 
@@ -331,6 +367,18 @@ routes exist on the B9: `luna-send` works, and `libluna-service2.so.3`
 no FFI, and moves to the library only if a launch time measured on the TV
 calls for it. `MockLauncher` stays for the simulator. The first run on the TV
 is by hand, as an ordinary app, with no takeover (docs/safety.md, rule 3).
+
+Feeding other apps' data into the shell, B3 also:
+
+* Confines each icon path to its app's own folder: resolve it against that
+  folder, canonicalise it, and refuse it unless it is still inside. Today
+  root would read and draw any small PNG an app names.
+* Caps title lengths when it parses appinfo; fitting a title is linear in
+  its length.
+* Loads icons off the frame path, or a few a frame: the first decode of
+  each is synchronous today, a cost not yet measured on the TV.
+* Drops the mock icons from the TV build: the IPK's `mock-icons` folder, and
+  the binary's search for one.
 
 ## Measured on the B9
 
