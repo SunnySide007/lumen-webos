@@ -324,6 +324,8 @@ pub trait Launcher {
   its `Value` API, no derive), which the owner chose on 2026-10-20 over a
   parser of our own: luna's replies carry other apps' data. `lumen-core`
   stays std only and gains `clean_title` and a `Launcher` impl for `Box`.
+  `luna.rs` loads libluna-service2 and glib through `libloading`, as
+  `sdl.rs` loads SDL, so the cross-compile still links no TV library.
 
 ## Simulator automation
 
@@ -375,15 +377,53 @@ moving, now that the cost is in the fragment shader.
 
 ### B3: the TV launcher (this branch)
 
-A `Launcher` backed by luna: list apps and inputs, and launch them. Both
-routes exist on the B9: `luna-send` works, and `libluna-service2.so.3`
-(3.21.2) can be loaded at run time. B3 starts with `luna-send`, which needs
-no FFI, and moves to the library only if a launch time measured on the TV
-calls for it. `MockLauncher` stays for the simulator. The first run on the TV
-is by hand, as an ordinary app, with no takeover (docs/safety.md, rule 3).
+A `Launcher` backed by luna: list apps and inputs, and launch them, through
+`libluna-service2.so.3` (3.21.2 on the B9), loaded at run time.
+`MockLauncher` stays for the simulator. The first run on the TV is by hand,
+as an ordinary app, with no takeover (docs/safety.md, rule 3).
 
-**What the B9 answers** (queried over SSH on 2026-10-20; trimmed copies with
-generic input names are the tests' fixtures, in
+**Why the library and not `luna-send`.** B3 started with `luna-send`, which
+needs no FFI. Its first TV run (2026-10-21, OLED55B9PUA, firmware 05.50.00,
+started with `tools/tv.sh launch`) answered the question this section had
+left open: from inside the app's jail, `/usr/bin/luna-send` cannot be
+executed. All three calls failed with `Permission denied (os error 13)`
+within 2 ms, and the shell listed 0 apps. (Over SSH, as root, `luna-send`
+works, which is how the replies below were taken; why the jail refuses it,
+file mode or mount, was not checked.) The routes weighed:
+
+| Route | Verdict |
+|---|---|
+| libluna-service2 through `dlopen`, as an anonymous client | **Taken.** The jail mounts `/usr/lib`, which holds the library (the shell's SDL, EGL and GLES load from it), and the hub's socket directory, `/var/run/luna-service2`. plx-native, a jailed native app, measured on webOS 4.10.2 (2026-09-04, `rust-modules/platform/src/webos.rs`, module `ls2`) that the hub accepts `LSRegister(NULL)` from the jail and answers that client's `applicationManager/getForegroundAppInfo` and `launch` calls, and that it refuses `LSRegisterApplicationService(NULL, appId)` (`Can not find service "" permissions`). moonlight-tv launches LG's Home from its jail too, through LG's libhelpers, which wraps the same library. Needs no root and writes nothing on the TV. |
+| `luna-send` | Not executable in the jail (above). |
+| Homebrew Channel's `luna://org.webosbrew.hbchannel.service/exec`, running `luna-send` | Would answer everything, but runs the command as root, and the shell would still need the bus to reach it. Not needed: the hub answers the library route (below). Anything through it needs the owner's OK first (docs/safety.md). |
+| `applicationManager/dev/listApps`, the developer-mode call Homebrew Channel uses without root | Lists developer-mode apps only, not LG's Home bar or its order. |
+| `requiredACG` in appinfo.json | Not needed here. `ares-package` warns that it is missing for any `tv` profile, but LG's ACG guide says webOS TV 25 and older do not support ACG; it is testable on 26 and required from 27. The B9 runs webOS 4.5, so appinfo.json stays as it is. (The guide puts `launch` in the `application.launcher` group and lists none of the three list calls.) |
+
+What a jailed client may call is the hub's decision: by default a
+non-system app reaches only public methods (webosbrew's "Luna service bus"
+page), and plx-native's evidence covers `launch` only. A refusal would come
+back as a reply with `returnValue: false`, whose `errorText` the log records.
+
+**The library build on the B9** (2026-10-21, OLED55B9PUA, firmware
+05.50.00; branch `claude/shell-ls2`, started with `tools/tv.sh launch` with
+the owner at the TV): the hub answered all three calls from the jail,
+`getAllInputStatus` in 9 ms, `listLaunchPoints` in 44 ms and `listApps` in
+50 ms, run at once, so the tiles were ready 55 ms after the calls began.
+That gave 30 tiles: LG's 26 launch points other than Lumen, then the 4
+connected inputs (AV, unconnected, left out). The owner confirmed that the
+grid matched LG's Home bar, with plx-native first. Launching a tile was not
+tried, so the launch time is still owed.
+
+**Only 4 of the 30 tiles had icons.** The app's jail mounts `/media/developer`
+but not `/usr/palm/applications`, `/media/cryptofs/apps` or
+`/usr/palm/plugins/inputapps` (its `/proc/mounts`, read on the same run).
+Apart from Lumen, the B9 has exactly 4 developer-mode apps (plx-native,
+Homebrew Channel, a webOS terminal and `com.open.hidden.menu`), which
+accounts for the 4. The other icon paths don't resolve inside the jail, so
+confinement drops them and those tiles show their letters, inputs included.
+
+**What the B9 answers** (queried over SSH as root on 2026-10-20; trimmed
+copies with generic input names are the tests' fixtures, in
 `shell/crates/lumen-shell/fixtures/luna/`):
 
 | Call | Gives |
@@ -403,11 +443,18 @@ visible app):
 3. The inputs with something connected, by port, titled with the owner's
    names (`Game console`), unless LG's bar already has them.
 
-The three calls run at once, each through `/usr/bin/luna-send -n 1 -f`
-(never one found on `PATH`, since the shell runs as root) with stdin from
-`/dev/null` and its stderr the shell's, and at most 4 MB of reply read. The
-reply must be in, and luna-send gone, within 5 s, even if something keeps
-its pipe open; past that it is killed. Each call is timed in the log.
+The three calls run at once, each on a thread of its own and through an
+anonymous client of its own (`LSRegister` with no name), attached to a glib
+context of its own, so no handle or context is shared between threads: the
+one-process-a-call shape `luna-send` had. A call is `LSCallOneReply`; its
+thread dispatches the context without blocking, sleeping 1 ms whenever
+nothing came in, until the reply is in or 5 s have passed, and a call still
+open then is cancelled. The client is then unregistered and its context
+freed. If the cancel or the unregister is refused, what the library may
+still use (the reply's slot, the context) is leaked rather than freed under
+it. A reply over 4 MB is refused. Each call is timed in the log, and a
+refusal from the library logs its own message. If the library cannot be
+loaded, every call fails with the reason.
 Without launch points the shell shows its empty state and the error.
 Without `listApps` no icon can be confined, so every tile shows its letter.
 Without the inputs there are only apps. Launching calls
@@ -438,8 +485,11 @@ Feeding other apps' data into the shell, B3 also:
 **Done when:** `make check` is green and the reviews leave no critical or
 high findings. Then the TV run, by hand: the list matches LG's Home bar with
 plx-native first, every tile launches, the inputs switch, and the log shows
-how long the three calls and each launch take. Whether `luna-send` may run
-from inside an app's jail is the first thing that run answers.
+how long the three calls and each launch take. On 2026-10-21 the first run
+showed that `luna-send` may not run inside the app's jail, and the second,
+through the library, that the list works and matches LG's Home bar (above).
+Still owed: the launches, the inputs switching, and icons for apps outside
+`/media/developer`.
 
 ## Measured on the B9
 
@@ -484,6 +534,16 @@ Still open:
    foreground events): the log records only the first event of each kind.
 3. What the u32 at bytes 12–15 means. Another input (a USB keyboard, LG's
    phone app) may show a different value.
+4. Where the shell gets icons for apps whose folders the jail doesn't mount:
+   LG's own apps, store apps and the inputs (B3, 2026-10-21). Only
+   developer-mode apps' icons resolve inside the jail. Reaching the others
+   needs root, for example a copy made through Homebrew Channel's `exec`,
+   so it needs the owner's OK first.
+5. Why keys stopped reaching the shell after `tools/tv.sh launch`
+   (2026-10-21): none arrived until the Magic Remote's pointer was woken,
+   and the shell sometimes lost focus to LG's UI. In the library build's run
+   it lost focus about two minutes after launch, with no key pressed. B1's
+   run, opened by hand from LG's app list, got keys from the start.
 
 ## Not in this spec
 

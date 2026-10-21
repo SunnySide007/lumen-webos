@@ -1,5 +1,7 @@
 //! The TV's launcher: the apps and inputs LG's Home shows, from luna (webOS's
-//! service bus) through `luna-send` (docs/specs/shell-mvp.md, "B3").
+//! service bus) through `libluna-service2`, loaded at run time
+//! (docs/specs/shell-mvp.md, "B3"). The shell runs in the app's jail, where
+//! `/usr/bin/luna-send` cannot be executed.
 //!
 //! * `listLaunchPoints` is LG's Home bar: its apps in its order, with titles,
 //!   colours and absolute icon paths. On the B9 it holds no inputs.
@@ -10,13 +12,13 @@
 //! are checked, cleaned and confined here before the shell sees them.
 
 use std::collections::{HashMap, HashSet};
-use std::io::{self, Read};
+use std::ffi::{CStr, CString, c_char, c_int, c_ulong, c_void};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::ScopedJoinHandle;
 use std::time::{Duration, Instant};
 
+use libloading::Library;
 use lumen_core::apps::{App, AppId, AppKind, LaunchError, Launcher, clean_title};
 use serde_json::{Value, json};
 
@@ -31,12 +33,16 @@ pub const PINNED: &[&str] = &["com.beb.plxnative"];
 const INPUT_ICONS: &str = "/usr/palm/plugins/inputapps";
 /// How long one call may take before it counts as failed.
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
-/// The largest reply read. `listApps` is 170 KB on the B9.
+/// The largest reply kept. `listApps` is 170 KB on the B9.
 const MAX_REPLY: usize = 4 << 20;
 /// The longest app ID kept: an app's folder is named after its ID, so it is
 /// no longer than a file name.
 const MAX_ID_BYTES: usize = 255;
-const LUNA_SEND: &str = "/usr/bin/luna-send";
+/// luna-service2 (3.21.2 on the B9), and the glib its replies arrive through.
+const LIBRARY: &str = "libluna-service2.so.3";
+const GLIB: &str = "libglib-2.0.so.0";
+/// How long a call waiting for its reply sleeps when nothing came in.
+const POLL: Duration = Duration::from_millis(1);
 
 const LIST_LAUNCH_POINTS: &str = "luna://com.webos.applicationManager/listLaunchPoints";
 const LIST_APPS: &str = "luna://com.webos.applicationManager/listApps";
@@ -48,100 +54,324 @@ pub trait Bus: Sync {
     fn call(&self, uri: &str, payload: &Value) -> Result<Value, String>;
 }
 
-/// The bus through `luna-send`, one process a call.
-pub struct LunaSend {
-    program: PathBuf,
-    /// Arguments ahead of luna-send's own; tests run a shell script this way.
-    prefix: Vec<String>,
+// libluna-service2's types, as lunaservice.h declares them.
+type LsHandle = c_void;
+type LsMessage = c_void;
+type LsMessageToken = c_ulong;
+type GMainContext = c_void;
+type FilterFunc = unsafe extern "C" fn(*mut LsHandle, *mut LsMessage, *mut c_void) -> bool;
+
+/// `LSError`: initialised, filled in and freed by the library.
+#[repr(C)]
+struct LsError {
+    error_code: c_int,
+    message: *mut c_char,
+    file: *const c_char,
+    line: c_int,
+    func: *const c_char,
+    padding: *mut c_void,
+    magic: c_ulong,
+}
+
+impl LsError {
+    fn empty() -> Self {
+        Self {
+            error_code: 0,
+            message: std::ptr::null_mut(),
+            file: std::ptr::null(),
+            line: 0,
+            func: std::ptr::null(),
+            padding: std::ptr::null_mut(),
+            magic: 0,
+        }
+    }
+
+    /// The library's message, on one line, and its code.
+    fn text(&self) -> String {
+        if self.message.is_null() {
+            return format!("error {}", self.error_code);
+        }
+        // SAFETY: a set LSError's message is a NUL-terminated string, owned
+        // by the error until LSErrorFree.
+        let message = unsafe { CStr::from_ptr(self.message) }.to_string_lossy();
+        let message: String = message
+            .trim()
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect();
+        format!("{message} (error {})", self.error_code)
+    }
+}
+
+/// The functions of libluna-service2 and glib that the bus calls.
+struct Api {
+    error_init: unsafe extern "C" fn(*mut LsError) -> bool,
+    error_free: unsafe extern "C" fn(*mut LsError),
+    register: unsafe extern "C" fn(*const c_char, *mut *mut LsHandle, *mut LsError) -> bool,
+    unregister: unsafe extern "C" fn(*mut LsHandle, *mut LsError) -> bool,
+    attach: unsafe extern "C" fn(*mut LsHandle, *mut GMainContext, *mut LsError) -> bool,
+    call_one_reply: unsafe extern "C" fn(
+        *mut LsHandle,
+        *const c_char,
+        *const c_char,
+        FilterFunc,
+        *mut c_void,
+        *mut LsMessageToken,
+        *mut LsError,
+    ) -> bool,
+    cancel: unsafe extern "C" fn(*mut LsHandle, LsMessageToken, *mut LsError) -> bool,
+    payload: unsafe extern "C" fn(*mut LsMessage) -> *const c_char,
+    context_new: unsafe extern "C" fn() -> *mut GMainContext,
+    context_iteration: unsafe extern "C" fn(*mut GMainContext, c_int) -> c_int,
+    context_unref: unsafe extern "C" fn(*mut GMainContext),
+    /// Held so every function above stays valid; none in tests.
+    _libs: Vec<Library>,
+}
+
+/// Copies a symbol out of `lib`, which is `file`, as a function pointer.
+///
+/// # Safety
+/// `T` must be the exact `extern "C"` function-pointer type of `name`.
+unsafe fn sym<T: Copy>(lib: &Library, file: &str, name: &[u8]) -> Result<T, String> {
+    // SAFETY: forwarded from the caller: T matches the symbol's real type.
+    unsafe { lib.get::<T>(name) }.map(|s| *s).map_err(|e| {
+        let shown = String::from_utf8_lossy(name.strip_suffix(b"\0").unwrap_or(name));
+        format!("{file} has no {shown}: {e}")
+    })
+}
+
+impl Api {
+    fn load() -> Result<Self, String> {
+        let open = |file: &str| {
+            // SAFETY: loading either library runs only its own initialisers,
+            // which have no preconditions. glib is luna's own dependency, so
+            // it is already loaded by then.
+            unsafe { Library::new(file) }.map_err(|e| format!("{file}: {e}"))
+        };
+        let luna = open(LIBRARY)?;
+        let glib = open(GLIB)?;
+        let (l, g) = (LIBRARY, GLIB);
+        // SAFETY: each type below is the C prototype of the named function,
+        // from luna-service2 3.21's lunaservice.h and glib's gmain.h.
+        unsafe {
+            Ok(Self {
+                error_init: sym(&luna, l, b"LSErrorInit\0")?,
+                error_free: sym(&luna, l, b"LSErrorFree\0")?,
+                register: sym(&luna, l, b"LSRegister\0")?,
+                unregister: sym(&luna, l, b"LSUnregister\0")?,
+                attach: sym(&luna, l, b"LSGmainContextAttach\0")?,
+                call_one_reply: sym(&luna, l, b"LSCallOneReply\0")?,
+                cancel: sym(&luna, l, b"LSCallCancel\0")?,
+                payload: sym(&luna, l, b"LSMessageGetPayload\0")?,
+                context_new: sym(&glib, g, b"g_main_context_new\0")?,
+                context_iteration: sym(&glib, g, b"g_main_context_iteration\0")?,
+                context_unref: sym(&glib, g, b"g_main_context_unref\0")?,
+                _libs: vec![luna, glib],
+            })
+        }
+    }
+
+    /// Runs one library function with a fresh `LSError`, turning a failure
+    /// into the library's message.
+    fn checked(&self, what: &str, op: impl FnOnce(*mut LsError) -> bool) -> Result<(), String> {
+        let mut error = LsError::empty();
+        // SAFETY: `error` is an LSError for the library to initialise.
+        unsafe { (self.error_init)(&mut error) };
+        let result = if op(&mut error) {
+            Ok(())
+        } else {
+            Err(format!("{what} failed: {}", error.text()))
+        };
+        // SAFETY: initialised above; this frees its message, if it has one.
+        unsafe { (self.error_free)(&mut error) };
+        result
+    }
+}
+
+/// An anonymous client on the bus, dispatched on a glib context of its own,
+/// and unregistered on drop. Anonymous is the registration the hub takes
+/// from an app's jail on webOS 4.10 (plx-native measured it; see the spec).
+struct Client<'a> {
+    api: &'a Api,
+    handle: *mut LsHandle,
+    context: *mut GMainContext,
+}
+
+impl<'a> Client<'a> {
+    fn register(api: &'a Api) -> Result<Self, String> {
+        // SAFETY: no arguments; the new context is owned here.
+        let context = unsafe { (api.context_new)() };
+        if context.is_null() {
+            return Err("no glib context".to_owned());
+        }
+        let mut handle = std::ptr::null_mut();
+        let registered = api.checked("registering on the bus", |error| {
+            // SAFETY: a null name asks for an anonymous client; `handle` and
+            // `error` are valid for the library to write.
+            unsafe { (api.register)(std::ptr::null(), &mut handle, error) }
+        });
+        if let Err(e) = registered {
+            // SAFETY: the context is ours, and nothing is attached to it.
+            unsafe { (api.context_unref)(context) };
+            return Err(e);
+        }
+        let client = Self {
+            api,
+            handle,
+            context,
+        };
+        api.checked("attaching to glib", |error| {
+            // SAFETY: the handle and the context are live, and both this
+            // client's.
+            unsafe { (api.attach)(handle, context, error) }
+        })?;
+        Ok(client)
+    }
+}
+
+impl Drop for Client<'_> {
+    fn drop(&mut self) {
+        let api = self.api;
+        let unregistered = api.checked("unregistering", |error| {
+            // SAFETY: the handle is live, and used from this thread only.
+            unsafe { (api.unregister)(self.handle, error) }
+        });
+        match unregistered {
+            Ok(()) => {
+                // SAFETY: unregistering detached the handle, so nothing uses
+                // the context any more.
+                unsafe { (api.context_unref)(self.context) };
+            }
+            // The handle may still be attached to it: the context is leaked.
+            Err(e) => info!("luna: {e}; leaking its glib context"),
+        }
+    }
+}
+
+/// Where `on_reply` leaves a call's reply, through the call's `ctx`.
+struct Slot {
+    payload: unsafe extern "C" fn(*mut LsMessage) -> *const c_char,
+    reply: Option<Result<Vec<u8>, String>>,
+}
+
+/// The `LSFilterFunc` of a one-reply call: copies the reply into its slot.
+///
+/// # Safety
+/// `ctx` is a live `Slot` that nothing else touches during the call, and
+/// `message` a live message.
+unsafe extern "C" fn on_reply(_: *mut LsHandle, message: *mut LsMessage, ctx: *mut c_void) -> bool {
+    // SAFETY: forwarded from the caller.
+    let slot = unsafe { &mut *ctx.cast::<Slot>() };
+    // SAFETY: forwarded from the caller.
+    let payload = unsafe { (slot.payload)(message) };
+    let reply = if payload.is_null() {
+        Err("a reply without a payload".to_owned())
+    } else {
+        // SAFETY: a message's payload is a NUL-terminated string that lives
+        // as long as the message.
+        let bytes = unsafe { CStr::from_ptr(payload) }.to_bytes();
+        if bytes.len() > MAX_REPLY {
+            Err(format!("a reply over {MAX_REPLY} bytes"))
+        } else {
+            Ok(bytes.to_vec())
+        }
+    };
+    if slot.reply.is_none() {
+        slot.reply = Some(reply);
+    }
+    true
+}
+
+/// The bus through libluna-service2: one anonymous client a call, like the
+/// one process a call `luna-send` would have been.
+pub struct Ls2 {
+    /// The library, or why it could not be loaded.
+    api: Result<Api, String>,
     timeout: Duration,
 }
 
-impl LunaSend {
-    /// The TV's `luna-send`; never one found on `PATH`, since the shell runs
-    /// as root.
+impl Ls2 {
+    /// The TV's library, loaded once. Without it, every call fails with the
+    /// reason.
     pub fn system() -> Self {
+        let api = Api::load();
+        match &api {
+            Ok(_) => info!("luna through {LIBRARY}"),
+            Err(e) => info!("no luna: {e}"),
+        }
         Self {
-            program: PathBuf::from(LUNA_SEND),
-            prefix: Vec::new(),
+            api,
             timeout: CALL_TIMEOUT,
         }
     }
 }
 
-/// A running `luna-send`, killed and reaped however `call` returns, so none
-/// is left running or as a zombie.
-struct Reaped(Child);
-
-impl Drop for Reaped {
-    fn drop(&mut self) {
-        // Neither does anything to one that has exited and been waited for.
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-/// Reads `from` to its end, keeping one byte more than `MAX_REPLY` to tell a
-/// reply that is too long from one that fits; the rest is drained and dropped.
-fn read_capped(mut from: impl Read) -> io::Result<Vec<u8>> {
-    let mut out = Vec::new();
-    from.by_ref()
-        .take(MAX_REPLY as u64 + 1)
-        .read_to_end(&mut out)?;
-    io::copy(&mut from, &mut io::sink())?;
-    Ok(out)
-}
-
-impl Bus for LunaSend {
+impl Bus for Ls2 {
     fn call(&self, uri: &str, payload: &Value) -> Result<Value, String> {
-        let child = Command::new(&self.program)
-            .args(&self.prefix)
-            .args(["-n", "1", "-f", uri, &payload.to_string()])
-            // Over SSH, luna-send -f prints nothing unless its stdin is
-            // /dev/null (docs/device/b9.md); nothing should read the shell's.
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            // Its complaints (no bus, no permission) go where the shell's go.
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| format!("{}: {e}", self.program.display()))?;
-        let mut child = Reaped(child);
-        let stdout = child.0.stdout.take().ok_or("luna-send has no stdout")?;
-        // Read on a thread of its own, which hands the reply over when the
-        // pipe closes: a reply bigger than the pipe would otherwise stall
-        // luna-send, and anything holding the pipe open would stall this.
-        let (done, reply) = mpsc::sync_channel(1);
-        std::thread::Builder::new()
-            .name("luna-send".to_owned())
-            .spawn(move || {
-                let _ = done.send(read_capped(stdout));
-            })
-            .map_err(|e| format!("no thread to read luna-send's reply: {e}"))?;
-        let started = Instant::now();
+        let api = self.api.as_ref().map_err(String::clone)?;
+        let uri = CString::new(uri).map_err(|_| "a URI with a NUL byte".to_owned())?;
+        // serde_json writes a NUL inside a string as \u0000, so this holds.
+        let payload = CString::new(payload.to_string())
+            .map_err(|_| "a payload with a NUL byte".to_owned())?;
+        let client = Client::register(api)?;
+        let slot = Box::into_raw(Box::new(Slot {
+            payload: api.payload,
+            reply: None,
+        }));
+        let mut token: LsMessageToken = 0;
+        let sent = api.checked("calling", |error| {
+            // SAFETY: the handle is live; the library copies the URI and the
+            // payload; `on_reply` is an LSFilterFunc, and its `ctx`, the
+            // slot, stays valid until the reply is in or the call cancelled.
+            unsafe {
+                (api.call_one_reply)(
+                    client.handle,
+                    uri.as_ptr(),
+                    payload.as_ptr(),
+                    on_reply,
+                    slot.cast(),
+                    &mut token,
+                    error,
+                )
+            }
+        });
+        if let Err(e) = sent {
+            // SAFETY: no call was made, so nothing else holds the slot.
+            drop(unsafe { Box::from_raw(slot) });
+            return Err(e);
+        }
+        // SAFETY: the slot is valid until it is taken back below, and only
+        // `on_reply` writes to it, on this thread, inside `context_iteration`.
+        let answered = || unsafe { (*slot).reply.is_some() };
+        let deadline = Instant::now() + self.timeout;
+        while !answered() && Instant::now() < deadline {
+            // SAFETY: the client's own context, dispatched from this thread
+            // only; 0 asks it not to block.
+            if unsafe { (api.context_iteration)(client.context, 0) } == 0 {
+                std::thread::sleep(POLL);
+            }
+        }
         let no_reply = || format!("no reply in {} ms", self.timeout.as_millis());
-        let out = match reply.recv_timeout(self.timeout) {
-            Ok(read) => read.map_err(|e| e.to_string())?,
-            Err(RecvTimeoutError::Timeout) => return Err(no_reply()),
-            Err(RecvTimeoutError::Disconnected) => {
-                return Err("reading luna-send's reply failed".to_owned());
+        if !answered() {
+            let cancelled = api.checked("cancelling", |error| {
+                // SAFETY: the handle is live, and the token its open call's.
+                unsafe { (api.cancel)(client.handle, token, error) }
+            });
+            if let Err(e) = cancelled {
+                // The call is still open and could yet write to the slot,
+                // through the client: both are leaked rather than freed
+                // under it.
+                info!("luna: {e}; leaking the call");
+                std::mem::forget(client);
+                return Err(no_reply());
             }
-        };
-        // The reply is in; luna-send has what is left of the time to exit.
-        let status = loop {
-            match child.0.try_wait().map_err(|e| e.to_string())? {
-                Some(status) => break status,
-                None if started.elapsed() < self.timeout => {
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                None => return Err(no_reply()),
-            }
-        };
-        if !status.success() {
-            return Err(format!("luna-send failed ({status})"));
         }
-        if out.len() > MAX_REPLY {
-            return Err(format!("a reply over {MAX_REPLY} bytes"));
-        }
-        serde_json::from_slice(&out).map_err(|e| format!("unreadable reply: {e}"))
+        drop(client);
+        // SAFETY: the call was answered or cancelled, so the library no
+        // longer holds the slot.
+        let slot = unsafe { Box::from_raw(slot) };
+        let reply = slot.reply.unwrap_or_else(|| Err(no_reply()))?;
+        serde_json::from_slice(&reply).map_err(|e| format!("unreadable reply: {e}"))
     }
 }
 
@@ -348,7 +578,7 @@ fn title_or_id(title: Option<&str>, id: &str) -> String {
 }
 
 /// Lists and launches through luna.
-pub struct LunaLauncher<B: Bus = LunaSend> {
+pub struct LunaLauncher<B: Bus = Ls2> {
     bus: B,
     /// Each tile's launch parameters, from the last list.
     params: HashMap<AppId, Value>,
@@ -424,6 +654,8 @@ impl<B: Bus> Launcher for LunaLauncher<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::ptr::NonNull;
     use std::sync::Mutex;
 
     const POINTS: &str = include_str!("../fixtures/luna/b9-launch-points.json");
@@ -751,76 +983,333 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// `luna-send` played by `sh -c script`: $4 is the URI, $5 the payload.
-    #[cfg(unix)]
-    fn fake_luna_send(script: &str, timeout_ms: u64) -> LunaSend {
-        LunaSend {
-            program: PathBuf::from("/bin/sh"),
-            prefix: vec!["-c".to_owned(), script.to_owned(), "luna-send".to_owned()],
+    /// What the fake libluna-service2 below does and saw, one per test
+    /// thread. The service answers `reply` once `reply_after` iterations have
+    /// found nothing, or never if there is no reply.
+    #[derive(Default)]
+    struct FakeLs2 {
+        /// The step the library refuses: register, attach, call, cancel or
+        /// unregister.
+        refuse: Option<&'static str>,
+        reply: Option<CString>,
+        reply_after: u32,
+        /// The open call's callback and its `ctx`.
+        open: Option<(FilterFunc, *mut c_void)>,
+        anonymous: bool,
+        sent: Vec<(String, String)>,
+        steps: Vec<&'static str>,
+        /// LSErrors initialised and not yet freed.
+        live_errors: i32,
+    }
+
+    thread_local! {
+        static FAKE: RefCell<FakeLs2> = RefCell::default();
+    }
+
+    fn fake<R>(f: impl FnOnce(&mut FakeLs2) -> R) -> R {
+        FAKE.with(|state| f(&mut state.borrow_mut()))
+    }
+
+    /// The bus over the fake library, with its state reset.
+    fn fake_bus(timeout_ms: u64) -> Ls2 {
+        fake(|s| *s = FakeLs2::default());
+        Ls2 {
+            api: Ok(Api {
+                error_init: fake_error_init,
+                error_free: fake_error_free,
+                register: fake_register,
+                unregister: fake_unregister,
+                attach: fake_attach,
+                call_one_reply: fake_call_one_reply,
+                cancel: fake_cancel,
+                payload: fake_payload,
+                context_new: fake_context_new,
+                context_iteration: fake_context_iteration,
+                context_unref: fake_context_unref,
+                _libs: Vec::new(),
+            }),
             timeout: Duration::from_millis(timeout_ms),
         }
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn luna_send_passes_the_uri_and_payload_and_reads_the_reply() {
-        let bus = fake_luna_send(
-            r#"printf '{"returnValue":true,"uri":"%s","payload":%s}' "$4" "$5""#,
-            5000,
-        );
-        let reply = bus.call(LAUNCH, &json!({ "id": "a'b\"c" })).unwrap();
-        assert_eq!(reply["uri"], LAUNCH);
-        assert_eq!(reply["payload"], json!({ "id": "a'b\"c" }));
+    fn reply(text: &str) -> Option<CString> {
+        Some(CString::new(text).unwrap())
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn luna_send_failures_are_errors() {
-        let silent = fake_luna_send("sleep 5", 100);
-        let started = Instant::now();
-        assert_eq!(
-            silent.call(LAUNCH, &json!({})).unwrap_err(),
-            "no reply in 100 ms"
-        );
-        assert!(
-            started.elapsed() < Duration::from_secs(4),
-            "killed, not waited for"
-        );
+    /// Records `step`, and fails it, as the library would, if the test said
+    /// to: false, with a message in the error.
+    fn refused(step: &'static str, error: *mut LsError) -> bool {
+        let refuse = fake(|s| {
+            s.steps.push(step);
+            s.refuse == Some(step)
+        });
+        if refuse {
+            let message = CString::new(format!("{step} refused\nby the hub")).unwrap();
+            // SAFETY: every library function gets a live, initialised LSError.
+            unsafe {
+                (*error).error_code = -1027;
+                (*error).message = message.into_raw();
+            }
+        }
+        refuse
+    }
 
-        // It exits, but something it started keeps the pipe open: the limit
-        // still holds.
-        let lingering = fake_luna_send("sleep 5 & echo '{}'", 200);
+    unsafe extern "C" fn fake_error_init(error: *mut LsError) -> bool {
+        fake(|s| s.live_errors += 1);
+        // SAFETY: callers pass a valid LSError.
+        unsafe { *error = LsError::empty() };
+        true
+    }
+
+    unsafe extern "C" fn fake_error_free(error: *mut LsError) {
+        fake(|s| s.live_errors -= 1);
+        // SAFETY: callers pass an LSError from `fake_error_init`, whose
+        // message, if any, `refused` made with `CString::into_raw`.
+        unsafe {
+            if !(*error).message.is_null() {
+                drop(CString::from_raw((*error).message));
+            }
+            *error = LsError::empty();
+        }
+    }
+
+    unsafe extern "C" fn fake_register(
+        name: *const c_char,
+        handle: *mut *mut LsHandle,
+        error: *mut LsError,
+    ) -> bool {
+        fake(|s| s.anonymous = name.is_null());
+        if refused("register", error) {
+            return false;
+        }
+        // SAFETY: callers pass a valid place for the handle.
+        unsafe { *handle = NonNull::<u8>::dangling().as_ptr().cast() };
+        true
+    }
+
+    unsafe extern "C" fn fake_unregister(_: *mut LsHandle, error: *mut LsError) -> bool {
+        !refused("unregister", error)
+    }
+
+    unsafe extern "C" fn fake_attach(
+        _: *mut LsHandle,
+        _: *mut GMainContext,
+        error: *mut LsError,
+    ) -> bool {
+        !refused("attach", error)
+    }
+
+    unsafe extern "C" fn fake_call_one_reply(
+        _: *mut LsHandle,
+        uri: *const c_char,
+        payload: *const c_char,
+        callback: FilterFunc,
+        ctx: *mut c_void,
+        token: *mut LsMessageToken,
+        error: *mut LsError,
+    ) -> bool {
+        // SAFETY: callers pass two C strings.
+        let (uri, payload) = unsafe { (CStr::from_ptr(uri), CStr::from_ptr(payload)) };
+        let sent = (
+            uri.to_string_lossy().into_owned(),
+            payload.to_string_lossy().into_owned(),
+        );
+        fake(|s| s.sent.push(sent));
+        if refused("call", error) {
+            return false;
+        }
+        fake(|s| s.open = Some((callback, ctx)));
+        // SAFETY: callers pass a valid place for the token.
+        unsafe { *token = 7 };
+        true
+    }
+
+    unsafe extern "C" fn fake_cancel(
+        _: *mut LsHandle,
+        token: LsMessageToken,
+        error: *mut LsError,
+    ) -> bool {
+        assert_eq!(token, 7);
+        if refused("cancel", error) {
+            return false;
+        }
+        fake(|s| s.open = None);
+        true
+    }
+
+    /// A fake message is its payload.
+    unsafe extern "C" fn fake_payload(message: *mut LsMessage) -> *const c_char {
+        message.cast_const().cast()
+    }
+
+    unsafe extern "C" fn fake_context_new() -> *mut GMainContext {
+        fake(|s| s.steps.push("context"));
+        NonNull::<u8>::dangling().as_ptr().cast()
+    }
+
+    unsafe extern "C" fn fake_context_unref(_: *mut GMainContext) {
+        fake(|s| s.steps.push("unref"));
+    }
+
+    /// Delivers the reply to the open call once it is due.
+    unsafe extern "C" fn fake_context_iteration(_: *mut GMainContext, may_block: c_int) -> c_int {
+        assert_eq!(may_block, 0, "a call never blocks in glib");
+        let due = fake(|s| {
+            let message = s.reply.as_ref()?.as_ptr();
+            let (callback, ctx) = s.open?;
+            if s.reply_after > 0 {
+                s.reply_after -= 1;
+                return None;
+            }
+            s.open = None;
+            Some((callback, ctx, message))
+        });
+        let Some((callback, ctx, message)) = due else {
+            return 0;
+        };
+        // SAFETY: what the library does with an open call: its callback, its
+        // ctx, and a message, here the reply, which FAKE keeps alive.
+        unsafe { callback(std::ptr::null_mut(), message.cast_mut().cast(), ctx) };
+        1
+    }
+
+    #[test]
+    fn ls2_calls_as_an_anonymous_client_and_reads_the_reply() {
+        let bus = fake_bus(5000);
+        fake(|s| {
+            s.reply = reply(r#"{"returnValue":true,"processId":"1001"}"#);
+            s.reply_after = 3;
+        });
+        let answer = bus.call(LAUNCH, &json!({ "id": "a'b\"c" })).unwrap();
+        assert_eq!(answer["processId"], "1001");
+        fake(|s| {
+            assert!(s.anonymous);
+            assert_eq!(
+                s.sent,
+                [(LAUNCH.to_owned(), r#"{"id":"a'b\"c"}"#.to_owned())]
+            );
+            assert_eq!(
+                s.steps,
+                [
+                    "context",
+                    "register",
+                    "attach",
+                    "call",
+                    "unregister",
+                    "unref"
+                ]
+            );
+            assert_eq!(s.live_errors, 0, "every LSError freed");
+        });
+    }
+
+    #[test]
+    fn ls2_cancels_a_call_without_a_reply_and_cleans_up() {
+        let bus = fake_bus(30);
         let started = Instant::now();
         assert_eq!(
-            lingering.call(LAUNCH, &json!({})).unwrap_err(),
-            "no reply in 200 ms"
+            bus.call(LAUNCH, &json!({})).unwrap_err(),
+            "no reply in 30 ms"
         );
         assert!(started.elapsed() < Duration::from_secs(4));
+        fake(|s| {
+            assert_eq!(
+                s.steps,
+                [
+                    "context",
+                    "register",
+                    "attach",
+                    "call",
+                    "cancel",
+                    "unregister",
+                    "unref"
+                ]
+            );
+            assert!(s.open.is_none());
+            assert_eq!(s.live_errors, 0);
+        });
+    }
 
-        let failing = fake_luna_send("echo '{}'; exit 3", 5000);
-        assert!(
-            failing
-                .call(LAUNCH, &json!({}))
-                .unwrap_err()
-                .contains("failed")
+    #[test]
+    fn ls2_reports_the_librarys_refusals_and_cleans_up() {
+        let cases: [(&str, &[&str]); 3] = [
+            ("register", &["context", "register", "unref"]),
+            (
+                "attach",
+                &["context", "register", "attach", "unregister", "unref"],
+            ),
+            (
+                "call",
+                &[
+                    "context",
+                    "register",
+                    "attach",
+                    "call",
+                    "unregister",
+                    "unref",
+                ],
+            ),
+        ];
+        for (step, steps) in cases {
+            let bus = fake_bus(5000);
+            fake(|s| s.refuse = Some(step));
+            let err = bus.call(LAUNCH, &json!({})).unwrap_err();
+            assert!(err.ends_with(" refused by the hub (error -1027)"), "{err}");
+            fake(|s| {
+                assert_eq!(s.steps, steps, "{step}");
+                assert_eq!(s.live_errors, 0, "{step}");
+            });
+        }
+        assert_eq!(LsError::empty().text(), "error 0");
+    }
+
+    #[test]
+    fn ls2_leaks_a_call_it_could_not_cancel() {
+        let bus = fake_bus(20);
+        fake(|s| {
+            s.refuse = Some("cancel");
+            s.reply = reply(r#"{"late":true}"#);
+            s.reply_after = u32::MAX;
+        });
+        assert_eq!(
+            bus.call(LAUNCH, &json!({})).unwrap_err(),
+            "no reply in 20 ms"
         );
+        fake(|s| {
+            assert!(!s.steps.contains(&"unregister"), "{:?}", s.steps);
+            assert!(!s.steps.contains(&"unref"), "{:?}", s.steps);
+            s.reply_after = 0;
+        });
+        // The late reply still finds its slot, which was leaked, not freed.
+        // SAFETY: the fake context ignores its argument.
+        let delivered = unsafe { fake_context_iteration(std::ptr::null_mut(), 0) };
+        assert_eq!(delivered, 1);
+    }
 
-        let junk = fake_luna_send("echo not json", 5000);
-        assert!(
-            junk.call(LAUNCH, &json!({}))
-                .unwrap_err()
-                .starts_with("unreadable reply")
-        );
+    #[test]
+    fn ls2_refuses_bad_replies_and_arguments() {
+        let bus = fake_bus(5000);
+        fake(|s| s.reply = reply("not json"));
+        let err = bus.call(LAUNCH, &json!({})).unwrap_err();
+        assert!(err.starts_with("unreadable reply"), "{err}");
 
-        // More than the pipe holds, and more than MAX_REPLY: drained, refused.
-        let huge = fake_luna_send("head -c 5000000 /dev/zero", 5000);
-        assert!(huge.call(LAUNCH, &json!({})).unwrap_err().contains("over"));
+        let bus = fake_bus(5000);
+        fake(|s| s.reply = reply(&"x".repeat(MAX_REPLY + 1)));
+        let err = bus.call(LAUNCH, &json!({})).unwrap_err();
+        assert_eq!(err, format!("a reply over {MAX_REPLY} bytes"));
 
-        let missing = LunaSend {
-            program: PathBuf::from("/no/such/luna-send"),
-            prefix: Vec::new(),
+        let bus = fake_bus(5000);
+        let err = bus.call("luna://a\0b", &json!({})).unwrap_err();
+        assert_eq!(err, "a URI with a NUL byte");
+        fake(|s| assert!(s.steps.is_empty(), "nothing registered"));
+
+        let missing = Ls2 {
+            api: Err("libluna-service2.so.3: no such file".to_owned()),
             timeout: CALL_TIMEOUT,
         };
-        assert!(missing.call(LAUNCH, &json!({})).is_err());
+        assert_eq!(
+            missing.call(LAUNCH, &json!({})).unwrap_err(),
+            "libluna-service2.so.3: no such file"
+        );
     }
 }

@@ -17,7 +17,7 @@ use crate::draw;
 use crate::frame_stats::FrameStats;
 use crate::gl::{self, Gl};
 use crate::info;
-use crate::luna::{LunaLauncher, LunaSend};
+use crate::luna::{Ls2, LunaLauncher};
 use crate::render::{Batch, Renderer, SCREEN_H, SCREEN_W, fit_viewport};
 use crate::sdl::{self, Event, GlContext, Sdl, Window};
 
@@ -604,7 +604,7 @@ fn launcher() -> Box<dyn Launcher> {
     let mock = std::env::var("LUMEN_LAUNCHER").is_ok_and(|v| v == "mock");
     if on_tv() && !mock {
         info!("apps from luna");
-        Box::new(LunaLauncher::new(LunaSend::system()))
+        Box::new(LunaLauncher::new(Ls2::system()))
     } else {
         Box::new(mock_launcher())
     }
