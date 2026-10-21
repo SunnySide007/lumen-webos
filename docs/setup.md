@@ -47,9 +47,10 @@ tools/recon.sh
 
 This runs [tools/recon/remote.sh](../tools/recon/remote.sh) on the TV, which
 only reads: firmware, hardware, graphics libraries, system apps, settings,
-mounts and boot hooks. The raw output stays in `tools/out/` (git ignores it);
-a redacted copy, with serial numbers, MAC addresses, local IPs and account
-identifiers removed, goes to `docs/device/`. Read it before committing it.
+mounts, boot hooks, and input, Bluetooth, USB, network and audio devices. The
+raw output stays in `tools/out/` (git ignores it); a redacted copy, with serial
+numbers, MAC addresses, local IPs, account identifiers and Bluetooth device
+names removed, goes to `docs/device/`. Read it before committing it.
 
 ## 4. Build, install and run
 
