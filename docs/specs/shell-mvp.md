@@ -10,7 +10,8 @@ it.
 Layout numbers are design values in the fixed 1920x1080 space, tuned by eye
 in the simulator. Facts about the B9 come from the main session's hello-gles
 run on an LG OLED55B9PUA, webOS 4.10.2-31, firmware 05.50.00 (hello-gles at
-commit 0932965); anything else about speed is checked on the TV before it is
+commit 0932965) and from this spec's B1 build on the same set ("Measured on
+the B9"); anything else about speed is checked on the TV before it is
 claimed (CONTRIBUTING.md, rule 3).
 
 ## The screen
@@ -86,7 +87,7 @@ BACK did nothing on the TV: it read the state byte as the scancode.
 | repeat | 13 | 17 |
 | keysym.scancode | 16 | 20 |
 | keysym.sym | 20 | 24 |
-| bytes 12–15 | (state, repeat, padding) | an unidentified u32 |
+| bytes 12–15 | (state, repeat, padding) | an unidentified u32, always 2 so far |
 
 * **The layout is chosen when SDL loads:** LG's layout for the system
   library on the TV (32-bit ARM Linux, loaded by its bare name), upstream's
@@ -97,7 +98,7 @@ BACK did nothing on the TV: it read the state byte as the scancode.
 * The first 8 key events and the first 8 other events are logged with their
   first 48 bytes in hex, so the next TV run can identify the unknown field
   and check where window events keep their data.
-* Window events are read at upstream offsets until that log shows otherwise.
+* Window events are read at upstream offsets, which the B9 run confirmed.
   App-lifecycle events carry no data beyond their type, so they need no
   offsets.
 * The raw event buffer grows from 64 to 128 bytes. LG's structs differ from
@@ -196,8 +197,8 @@ never as slow motion.
 ## Repainting
 
 A settled screen stops repainting. plx-native measured such a screen at
-about 2% of one core on the same hardware class; Lumen's own figure is taken
-on the B9 at Phase 3's TV check.
+about 2% of one core on the same hardware class; Lumen's settled grid used
+about 0.2% of one core on the B9 ("Measured on the B9").
 
 * A frame is drawn only when something changed (a key's effect, the window
   coming back, the status line expiring, the first frame) or a spring is
@@ -224,8 +225,8 @@ stops drawing, even mid-animation, when:
 
 Springs then snap to their targets and held keys are dropped. Shown,
 exposed, restored, focus gained (TV) and `SDL_APP_DIDENTERFOREGROUND` draw
-one fresh frame. Which of these events LG's SDL sends when HOME opens LG's
-Home is one of the things the raw event log will show.
+one fresh frame. On the B9, HOME sends only a focus loss, so the TV-only
+focus rule is what stops the drawing there.
 
 ## Apps and launching
 
@@ -303,7 +304,7 @@ review leave no critical or high findings; and simulator screenshots show the
 start screen, focus moved along row 0, row 1 with the Top Shelf scrolled off,
 and a launch's status line, with the log showing "idle" after each settle.
 The TV build is then ready for the main session to run, which also captures
-the raw event log.
+the raw event log. That run was on 2026-10-20 ("Measured on the B9").
 
 ### B2: icons and text (when the owner says so)
 
@@ -331,21 +332,49 @@ no FFI, and moves to the library only if a launch time measured on the TV
 calls for it. `MockLauncher` stays for the simulator. The first run on the TV
 is by hand, as an ordinary app, with no takeover (docs/safety.md, rule 3).
 
-## Still to settle on the TV
+## Measured on the B9
 
-Already answered by the main session's run: the remote's scancodes, that
+The main session's hello-gles run answered the remote's scancodes, that
 HOME never reaches the app, that LG's SDL marks held keys with the repeat
 flag, the key-event layout, and the GPU's headroom for one batched draw.
+
+The B1 build (commit 3572bf3) ran on the same set on 2026-10-20, by hand as
+an ordinary app, with the owner on the remote:
+
+1. **Bytes 12–15 of LG's key events** read 2 in all 8 logged key events,
+   presses and releases of Right, Down and Up. A constant, so probably an
+   input-device id rather than data about the key. The shell ignores it.
+2. **Window events are not shifted:** the event id is at byte 12, and data1
+   and data2 at 16 and 20 (size changed 1920x1080, shown, focus gained), as
+   upstream. Launching sends the will- and did-enter-foreground events.
+   **HOME sends only a focus loss,** with a pointer enter, motion and leave
+   as LG's Home shows the pointer: no hidden, minimised or background
+   event (the log records the first event of each kind, and none came). The
+   TV-only rule that focus loss means another app is in front is what stops
+   the drawing. Coming back resumed drawing on a kind of event already seen
+   at launch.
+3. **Key-ups arrive on release,** 100–151 ms after the key-down of a tap.
+   Holding Right fired the shell's own repeats, which stopped silently at
+   the end of the row.
+4. **Settled, the shell sleeps:** 2 clock ticks (20 ms of CPU) in 10 s, about
+   0.2% of one core, at 18 MB resident.
+5. **Moving, the grid holds 60 fps:** about 520 frames in 13 bursts averaged
+   16.2–16.7 ms a burst, the worst frame at or under 17.8 ms in 11 of them.
+   Down into the short last row took 19.6 ms once, and one frame took
+   33.3 ms (a missed vsync), the only miss. Frames drew 856–1,631 quads.
+
+BACK below row 0 scrolled to the top, and BACK on row 0 closed the shell
+("clean exit" 180 ms later). The shell lost and regained focus a second time
+during the run, with the same result.
+
 Still open:
 
-1. The unidentified u32 at bytes 12–15 of LG's key events.
-2. Whether window events are shifted like key events, and which window or
-   app-lifecycle events arrive when HOME opens LG's Home.
-3. Whether key-ups arrive on release (hello-gles never decoded them), and
-   how fast the remote repeats.
-4. Whether `SDL_WaitEventTimeout` on LG's SDL really sleeps, and the CPU use
-   once settled.
-5. The grid's frame time while moving.
+1. How fast the remote repeats. SDL's repeat events are not logged, so the
+   next run needs a log line with the times of the first few.
+2. Which event brings the shell back to the front (focus gained, or the
+   foreground events): the log records only the first event of each kind.
+3. What the u32 at bytes 12–15 means. Another input (a USB keyboard, LG's
+   phone app) may show a different value.
 
 ## Not in this spec
 
