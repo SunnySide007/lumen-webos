@@ -32,6 +32,7 @@ ipk: build-tv
 	mkdir -p $(STAGE)
 	install -m 0755 $(BIN) $(STAGE)/lumen-shell
 	install -m 0644 packaging/shell/icon80.png packaging/shell/icon130.png $(STAGE)/
+	install -m 0644 shell/assets/fonts/Inter-LICENSE.txt $(STAGE)/
 	sed -e 's/@APP_ID@/$(APP_ID)/' -e 's/@VERSION@/$(VERSION)/' \
 	    packaging/shell/appinfo.json.in > $(STAGE)/appinfo.json
 	ares-package --no-minify --outdir dist $(STAGE)

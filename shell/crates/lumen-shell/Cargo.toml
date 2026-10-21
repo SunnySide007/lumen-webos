@@ -8,8 +8,10 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+fontdue.workspace = true
 libloading.workspace = true
 lumen-core.workspace = true
+png.workspace = true
 
 [lints]
 workspace = true

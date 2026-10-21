@@ -9,8 +9,10 @@ license = "GPL-3.0-or-later"
 rust-version = "1.99"
 
 [workspace.dependencies]
+fontdue = { version = "0.9.4", default-features = false, features = ["std"] }
 libloading = "0.9"
 lumen-core = { path = "crates/lumen-core" }
+png = "0.18.1"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
