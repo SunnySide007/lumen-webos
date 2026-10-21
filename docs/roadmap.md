@@ -12,6 +12,7 @@ from what it measured.
 | **3. Shell MVP** | Native home with apps, inputs and launching; Home key takeover; plx-native pinned | Home to shell in under 150 ms; 60 fps navigation; every app launches; every escape hatch works alongside Glasshouse |
 | **4. Polish** | Top Shelf hero, glass dock, parallax icons, Control Center, app editing, more loops, Dolby Vision | Frame budget holds on the TV; toggles match LG Settings |
 | **5. Release** | CI-built IPKs, docs, screenshots, Homebrew Channel submission; upstream pull requests (B9 profile and HDR saver to Glasshouse, deep links to plx-native) | A clean install on a freshly reset set, following only the docs |
+| **P. Play** (parallel, proposed) | RetroArch measured on the B9, one controller working, a Games row, OLED care, the phone path ([spec](specs/play.md), decision 7) | A pad plays a game started from the shell at full speed on the B9; every step reverts |
 
 ## Phase 0 checklist
 
@@ -53,3 +54,21 @@ On the TV ([runbook](runbooks/phase1-tv.md)):
 - [ ] Second 24 h capture with blocking on: no allowlisted name blocked
 - [ ] `uninstall-all.sh` dry run reviewed; its Lumen-only part run for real
 - [ ] Decision 6 accepted; b9.md notes (resolver, tools on the TV)
+
+## Play checklist (proposed)
+
+The owner approved [specs/play.md](specs/play.md) on 2026-10-21; P0 and P1
+run first, side by side.
+
+- [x] Research with sources (`docs/research.md`, "Play")
+- [x] Input, Bluetooth, USB and network survey of the B9 (`docs/device/b9.md`)
+- [ ] P0: `lumen-tv-check` skill
+- [ ] P1: one controller working end to end. Parked 2026-10-21: the Series pad
+  sends nothing by cable and won't connect over Bluetooth; it comes back with
+  more research and the USB helper ([spec](specs/play.md#p1-one-controller-working-end-to-end))
+- [ ] P2: the shell reads the pad
+- [ ] P3: RetroArch on the B9, measured per system
+- [ ] P4: Games row
+- [ ] P5: OLED care (game mode only if the owner wants it)
+- [ ] P6: the phone path
+- [ ] P7: owner-only features the owner picks

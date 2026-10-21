@@ -109,3 +109,43 @@ dashboard needs a PC with the SSH key, and Glasshouse's phone setup link
 still opens on the LAN during setup. The capture puts a root packet sniffer
 on the TV for a day at a time; it holds names and addresses, not content,
 and its files never leave `tools/out/`, which git ignores.
+
+## 7. Play: RetroArch for games, one controller proven first (proposed)
+
+**Status.** Proposed on 2026-10-21, before any of it was built. The owner
+approved the plan ([specs/play.md](specs/play.md)) as written the same day,
+and it becomes accepted after P1 and P3 pass on the B9.
+
+**Context.** The owner wants games on the B9 with an Xbox Series controller,
+and their Android phone as a backup. webosbrew already ports RetroArch to
+webOS (1.22.2, a GLES 3 build for 4.10+). The B9's CPU is a Raspberry Pi 3's
+class, so systems up to PS1 should run. By cable the Series pad binds to the
+kernel's `xpad` but sends no input, and its light keeps blinking. LG's
+Bluetooth stack is its own, with no BlueZ, and it's untested with a gamepad.
+No Android app can host a game stream (research.md, "Play").
+
+**Decision.**
+
+- **Use RetroArch** (webosbrew's GLES 3 build, pinned by version and hash) as
+  the games runtime instead of writing an emulator. Lumen adds the Games row,
+  controller mappings, OLED care and the phone path around it.
+- **Prove one controller end to end first** (milestone P1), in order:
+  1. a pad this kernel already knows
+  2. Bluetooth pairing through LG's stack
+  3. a root helper that drives the pad over `usbfs` and presents it through
+     `uinput`, started by hand, never at boot until tested.
+
+  Nothing in the shell depends on a pad before then.
+- **Local only:** games the owner dumped or homebrew, with no ROMs, BIOS files
+  or links shipped. No box-art scraping and no cloud. A LAN listener is off by
+  default and paired.
+- **LG's picture settings stay as they are.** An automatic Game picture mode
+  is built only if the owner sets that rule aside, and then only as an opt-in
+  toggle that restores the previous mode.
+
+**Cost.** RetroArch's own menus, not Lumen's, run during play, and Lumen
+can't draw over them. Starting a game straight from a tile may need root
+through Homebrew Channel's `exec` service, and P3 finds out. If neither of
+the first two routes works, the pad needs a small root helper, and that
+helper needs a security review. Speed claims wait for measurements, because
+the B9 doesn't expose its clock speeds.
