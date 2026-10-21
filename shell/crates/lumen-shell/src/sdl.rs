@@ -177,6 +177,100 @@ fn window_id(bytes: &[u8], layout: KeyLayout) -> u8 {
     }
 }
 
+/// An event's timestamp: milliseconds on SDL's clock (`SDL_GetTicks`), at
+/// byte 4 in both layouts, since LG's extra key field comes after it.
+fn event_time(raw: &RawEvent) -> u32 {
+    read_u32(&raw.0, 4)
+}
+
+/// The key pressed last, with times on SDL's clock.
+#[derive(Debug, Clone, Copy)]
+struct Held {
+    scancode: i32,
+    pressed: u32,
+    first_repeat: u32,
+    last: u32,
+    repeats: u32,
+    /// Whether its repeats go into the log (`REPEAT_KEYS_LOGGED`).
+    logged: bool,
+}
+
+/// Times SDL's repeats of the key pressed last, for the log.
+#[derive(Debug, Default)]
+struct RepeatTimes {
+    held: Option<Held>,
+    /// Keys that have repeated so far.
+    keys_repeated: u32,
+}
+
+impl RepeatTimes {
+    /// Notes a key event stamped `ms` and returns the line to log, if any:
+    /// each of the first `REPEATS_LOGGED` repeats of a logged key, and a
+    /// summary at its release. Taps, and repeats of a key other than the one
+    /// pressed last, log nothing.
+    fn note(&mut self, event: Event, ms: u32) -> Option<String> {
+        match event {
+            Event::KeyDown {
+                scancode,
+                repeat: false,
+                ..
+            } => {
+                self.held = Some(Held {
+                    scancode,
+                    pressed: ms,
+                    first_repeat: ms,
+                    last: ms,
+                    repeats: 0,
+                    logged: false,
+                });
+                None
+            }
+            Event::KeyDown {
+                scancode,
+                repeat: true,
+                ..
+            } => {
+                let held = self.held.as_mut().filter(|h| h.scancode == scancode)?;
+                if held.repeats == 0 {
+                    held.first_repeat = ms;
+                    held.logged = self.keys_repeated < REPEAT_KEYS_LOGGED;
+                    self.keys_repeated = self.keys_repeated.saturating_add(1);
+                }
+                held.repeats = held.repeats.saturating_add(1);
+                let gap = ms.wrapping_sub(held.last);
+                held.last = ms;
+                (held.logged && held.repeats <= REPEATS_LOGGED).then(|| {
+                    format!(
+                        "SDL repeat {} of scancode {scancode}: {} ms after the press, \
+                         {gap} ms after the last",
+                        held.repeats,
+                        ms.wrapping_sub(held.pressed)
+                    )
+                })
+            }
+            Event::KeyUp { scancode } => {
+                let held = self.held.take_if(|h| h.scancode == scancode)?;
+                if !held.logged {
+                    return None;
+                }
+                let mut line = format!(
+                    "scancode {scancode} released {} ms after the press: {} SDL repeats, \
+                     the first {} ms after the press",
+                    ms.wrapping_sub(held.pressed),
+                    held.repeats,
+                    held.first_repeat.wrapping_sub(held.pressed)
+                );
+                if held.repeats > 1 {
+                    let every = held.last.wrapping_sub(held.first_repeat) / (held.repeats - 1);
+                    line.push_str(&format!(", then every {every} ms on average"));
+                }
+                Some(line)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// A key event's `state` byte: 1 (pressed) on a key-down read at the right
 /// offsets.
 fn key_state(raw: &RawEvent, layout: KeyLayout) -> u8 {
@@ -213,6 +307,12 @@ const RAW_KEY_EVENTS: u32 = 8;
 const RAW_OTHER_KINDS: usize = 24;
 /// Bytes of each raw event logged: enough for any key or window event.
 const RAW_BYTES: usize = 48;
+/// SDL's own key repeats are logged with their times for the first keys held
+/// long enough to repeat, so a TV run shows how fast the remote repeats: the
+/// first few of each key, then at its release how many came and how far
+/// apart. The shell's repeats do not depend on them.
+const REPEAT_KEYS_LOGGED: u32 = 8;
+const REPEATS_LOGGED: u32 = 5;
 
 pub struct Sdl {
     init: unsafe extern "C" fn(u32) -> c_int,
@@ -237,6 +337,7 @@ pub struct Sdl {
     raw_keys_logged: Cell<u32>,
     raw_kinds_logged: RefCell<Vec<u64>>,
     layout_warned: Cell<bool>,
+    repeat_times: RefCell<RepeatTimes>,
     /// Held so every function pointer above stays valid; dropped last.
     _lib: Library,
 }
@@ -335,6 +436,7 @@ impl Sdl {
                 raw_keys_logged: Cell::new(0),
                 raw_kinds_logged: RefCell::new(Vec::new()),
                 layout_warned: Cell::new(false),
+                repeat_times: RefCell::new(RepeatTimes::default()),
                 _lib: lib,
             })
         }
@@ -488,10 +590,14 @@ impl Sdl {
         (unsafe { (self.wait_event_timeout)(&mut raw, ms) } != 0).then(|| self.decode(&raw))
     }
 
-    /// Parses `raw`, logging the first events of each kind byte for byte and
-    /// warning once if key events look misread.
+    /// Parses `raw`, logging the first events of each kind byte for byte,
+    /// timing SDL's first key repeats, and warning once if key events look
+    /// misread.
     fn decode(&self, raw: &RawEvent) -> Event {
         let event = parse_event(raw, self.key_layout);
+        if let Some(line) = self.repeat_times.borrow_mut().note(event, event_time(raw)) {
+            crate::info!("{line}");
+        }
         let ty = read_u32(&raw.0, 0);
         let log = match event {
             Event::KeyDown { repeat: true, .. } => false,
@@ -688,5 +794,86 @@ mod tests {
     fn raw_event_has_room_beyond_sdl_event() {
         assert!(std::mem::size_of::<RawEvent>() >= 2 * 56);
         assert_eq!(std::mem::align_of::<RawEvent>(), 8);
+    }
+
+    #[test]
+    fn reads_the_timestamp_ahead_of_lgs_extra_field() {
+        let mut raw = lg_key(EVENT_KEYDOWN, 1, 1, 79);
+        raw.0[4..8].copy_from_slice(&123_456u32.to_ne_bytes());
+        assert_eq!(event_time(&raw), 123_456);
+    }
+
+    fn down(scancode: i32, repeat: bool) -> Event {
+        Event::KeyDown {
+            scancode,
+            keycode: 0,
+            repeat,
+        }
+    }
+
+    #[test]
+    fn times_sdls_repeats_of_a_held_key() {
+        let mut times = RepeatTimes::default();
+        assert_eq!(times.note(down(79, false), 1000), None);
+        assert_eq!(
+            times.note(down(79, true), 1500).as_deref(),
+            Some("SDL repeat 1 of scancode 79: 500 ms after the press, 500 ms after the last")
+        );
+        assert_eq!(
+            times.note(down(79, true), 1550).as_deref(),
+            Some("SDL repeat 2 of scancode 79: 550 ms after the press, 50 ms after the last")
+        );
+        assert!(times.note(down(79, true), 1610).is_some());
+        assert_eq!(
+            times.note(Event::KeyUp { scancode: 79 }, 1630).as_deref(),
+            Some(
+                "scancode 79 released 630 ms after the press: 3 SDL repeats, the first \
+                 500 ms after the press, then every 55 ms on average"
+            )
+        );
+    }
+
+    #[test]
+    fn logs_the_first_repeats_of_the_first_keys_only() {
+        let mut times = RepeatTimes::default();
+        let mut lines = 0;
+        for key in 0..REPEAT_KEYS_LOGGED + 2 {
+            let t = key * 10_000;
+            times.note(down(80, false), t);
+            for n in 1..=REPEATS_LOGGED + 3 {
+                lines += u32::from(times.note(down(80, true), t + 400 + n * 100).is_some());
+            }
+            lines += u32::from(
+                times
+                    .note(Event::KeyUp { scancode: 80 }, t + 2000)
+                    .is_some(),
+            );
+        }
+        // Each logged key gives its first repeats and the summary at release.
+        assert_eq!(lines, REPEAT_KEYS_LOGGED * (REPEATS_LOGGED + 1));
+    }
+
+    #[test]
+    fn taps_and_other_keys_repeats_log_nothing() {
+        let mut times = RepeatTimes::default();
+        // A tap: no repeats, no summary, and it uses up none of the keys logged.
+        times.note(down(40, false), 0);
+        assert_eq!(times.note(Event::KeyUp { scancode: 40 }, 120), None);
+        // A repeat of a key never pressed, or of one not pressed last.
+        assert_eq!(times.note(down(81, true), 500), None);
+        times.note(down(79, false), 1000);
+        assert_eq!(times.note(down(80, true), 1500), None);
+        assert_eq!(times.note(Event::KeyUp { scancode: 80 }, 1600), None);
+        assert_eq!(times.keys_repeated, 0);
+    }
+
+    #[test]
+    fn repeat_times_survive_sdls_clock_wrapping() {
+        let mut times = RepeatTimes::default();
+        times.note(down(79, false), u32::MAX - 99);
+        assert_eq!(
+            times.note(down(79, true), 400).as_deref(),
+            Some("SDL repeat 1 of scancode 79: 500 ms after the press, 500 ms after the last")
+        );
     }
 }

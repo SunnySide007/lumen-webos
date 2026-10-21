@@ -16,6 +16,7 @@ any of them is marked at the point of use with its origin and license.
 | [libloading](https://github.com/nagisa/rust_libloading) | Loading SDL2 at run time | ISC |
 | [png](https://github.com/image-rs/image-png) | Decoding app icons (`shell/.../icons.rs`) | MIT or Apache-2.0 |
 | [fontdue](https://github.com/mooman219/fontdue) | Rasterising text (`shell/.../text.rs`) | MIT, Apache-2.0 or Zlib |
+| [serde_json](https://github.com/serde-rs/json) | Reading the TV's app and input lists from luna (`shell/.../luna.rs`) | MIT or Apache-2.0 |
 | [Inter](https://github.com/rsms/inter) 4.1 | The shell's typeface: `shell/assets/fonts/Inter-SemiBold.ttf`, unmodified, built into the binary, with its licence beside it (`Inter-LICENSE.txt`) | SIL Open Font License 1.1 |
 
 Trademarks (LG, webOS, Apple, tvOS, Netflix, Prime Video, Plex) belong to their

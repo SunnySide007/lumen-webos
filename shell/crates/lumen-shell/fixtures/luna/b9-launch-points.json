@@ -1,0 +1,96 @@
+{
+  "returnValue": true,
+  "launchPoints": [
+    {
+      "id": "com.webos.app.photovideo",
+      "launchPointId": "com.webos.app.photovideo_default",
+      "title": "Photo & Video",
+      "icon": "/usr/palm/applications/com.webos.app.photovideo/icon.png",
+      "largeIcon": "/usr/palm/applications/com.webos.app.photovideo/icon_photovideo.png",
+      "iconColor": "#7c20d5",
+      "lptype": "default",
+      "params": {},
+      "systemApp": true,
+      "removable": false,
+      "bgColor": ""
+    },
+    {
+      "id": "netflix",
+      "launchPointId": "netflix_default",
+      "title": "Netflix",
+      "icon": "/media/cryptofs/apps/usr/palm/applications/netflix/SMALL_APP_ICON.png",
+      "largeIcon": "/media/cryptofs/apps/usr/palm/applications/netflix/LARGE_APP_ICON.png",
+      "iconColor": "#ffffff",
+      "lptype": "default",
+      "params": {},
+      "systemApp": false,
+      "removable": true,
+      "bgColor": ""
+    },
+    {
+      "id": "cdp-30",
+      "launchPointId": "cdp-30_default",
+      "title": "Plex",
+      "icon": "/media/cryptofs/apps/usr/palm/applications/cdp-30/Plex_80x80.png",
+      "largeIcon": "/media/cryptofs/apps/usr/palm/applications/cdp-30/Plex_130x130.png",
+      "iconColor": "#000000",
+      "lptype": "default",
+      "params": {},
+      "systemApp": false,
+      "removable": true,
+      "bgColor": "#000000"
+    },
+    {
+      "id": "com.webos.app.discovery",
+      "launchPointId": "com.webos.app.discovery_default",
+      "title": "LG Content Store",
+      "icon": "/mnt/otncabi/usr/palm/applications/com.webos.app.discovery/asset/hd1080/lgstore.png",
+      "largeIcon": "/mnt/otncabi/usr/palm/applications/com.webos.app.discovery/asset/hd1080/lgstore_130x130.png",
+      "iconColor": "#d7156d",
+      "lptype": "default",
+      "params": {},
+      "systemApp": true,
+      "removable": false,
+      "bgColor": "#470a21"
+    },
+    {
+      "id": "com.open.hidden.menu",
+      "launchPointId": "com.open.hidden.menu_default",
+      "title": "Open Service Menu",
+      "icon": "/media/developer/apps/usr/palm/applications/com.open.hidden.menu/icon.png",
+      "largeIcon": "",
+      "iconColor": "",
+      "lptype": "default",
+      "params": {},
+      "systemApp": false,
+      "removable": true,
+      "bgColor": ""
+    },
+    {
+      "id": "io.github.sunnyside007.lumen.shell",
+      "launchPointId": "io.github.sunnyside007.lumen.shell_default",
+      "title": "Lumen",
+      "icon": "/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/icon80.png",
+      "largeIcon": "/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/icon130.png",
+      "iconColor": "#0b0f1c",
+      "lptype": "default",
+      "params": {},
+      "systemApp": false,
+      "removable": true,
+      "bgColor": "#000000"
+    },
+    {
+      "id": "com.beb.plxnative",
+      "launchPointId": "com.beb.plxnative_default",
+      "title": "PlxNative",
+      "icon": "/media/developer/apps/usr/palm/applications/com.beb.plxnative/icon.png",
+      "largeIcon": "/media/developer/apps/usr/palm/applications/com.beb.plxnative/largeIcon.png",
+      "iconColor": "#060606",
+      "lptype": "default",
+      "params": {},
+      "systemApp": false,
+      "removable": true,
+      "bgColor": ""
+    }
+  ]
+}

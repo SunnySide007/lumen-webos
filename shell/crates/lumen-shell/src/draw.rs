@@ -62,11 +62,22 @@ pub struct Assets {
 }
 
 impl Assets {
+    /// Icons load as they are first drawn: deterministic, for tests and
+    /// `--fixed-dt`.
     pub fn new() -> Result<Self, String> {
         Ok(Self {
             atlas: Atlas::default(),
             text: Text::new()?,
             icons: Icons::default(),
+        })
+    }
+
+    /// Icons load on a thread of their own; a tile is drawn plain until its
+    /// icon arrives.
+    pub fn threaded() -> Result<Self, String> {
+        Ok(Self {
+            icons: Icons::threaded(),
+            ..Self::new()?
         })
     }
 }
@@ -182,6 +193,15 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
         let side = layout::ICON_SIZE * zoom / w.max(h) as f32;
         let (iw, ih) = (w as f32 * side, h as f32 * side);
         batch.image(cx - iw / 2.0, cy - ih / 2.0, iw, ih, uv, WHITE);
+        return;
+    }
+    // Still loading: the plain tile, so its letter does not flash up first.
+    if tile
+        .app
+        .icon
+        .as_deref()
+        .is_some_and(|path| assets.icons.is_loading(path))
+    {
         return;
     }
     // No icon: the title's first letter, rasterised once at its lifted size
@@ -383,8 +403,11 @@ mod tests {
 
     #[test]
     fn a_frame_that_fills_the_atlas_never_points_at_stale_pixels() {
-        let icons =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/mock-icons");
+        // Canonical, as the TV's launcher gives them.
+        let icons = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/mock-icons")
+            .canonicalize()
+            .unwrap();
         let apps = MockLauncher::default()
             .with_icons_in(&icons)
             .list()

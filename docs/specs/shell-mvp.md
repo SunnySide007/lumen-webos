@@ -100,9 +100,13 @@ BACK did nothing on the TV: it read the state byte as the scancode.
   `LUMEN_SDL_KEY_LAYOUT=upstream` or `=lg` overrides the choice.
 * A key-down whose state byte is not "pressed" at the chosen offsets is
   logged once as a likely layout mismatch.
-* The first 8 key events and the first 8 other events are logged with their
-  first 48 bytes in hex, so the next TV run can identify the unknown field
-  and check where window events keep their data.
+* The first 8 key events and the first event of each other kind (up to 24
+  kinds) are logged with their first 48 bytes in hex, so the next TV run can
+  identify the unknown field and check where window events keep their data.
+* SDL's own repeats are timed with each event's timestamp (byte 4 in both
+  layouts) for the first 8 keys held long enough to repeat: the log gets
+  each of a key's first 5 repeats, then, at its release, how many came and
+  their average spacing. Only the key pressed last is timed.
 * Window events are read at upstream offsets, which the B9 run confirmed.
   App-lifecycle events carry no data beyond their type, so they need no
   offsets.
@@ -260,8 +264,8 @@ pub trait Launcher {
 }
 ```
 
-* Launch order is the launcher's order. Pinning (plx-native first) and
-  hiding system apps come with the TV launcher in B3.
+* Launch order is the launcher's order. On the TV that is LG's, with
+  plx-native pinned first (B3, below).
 * `MockLauncher` serves the simulator and tests: a fixed list of 12 entries
   modelled on the B9's apps and HDMI inputs (rows of 5, 5 and 2, so the short
   last row gets exercised). It records every launch, and a test can make one
@@ -269,16 +273,22 @@ pub trait Launcher {
   `shell/assets/mock-icons` (play, note, tv, input, globe, gear; drawn by
   `tools/mock-icons.py`), leaving Plex and Disney+ as letter tiles. The
   simulator finds them through `LUMEN_MOCK_ICONS`, which `tools/sim.ps1`
-  sets; the TV build looks for a `mock-icons` folder beside its binary,
-  which the IPK carries until B3.
-* On the TV the icon paths will come from other apps' appinfo, so an icon
-  is read only from a regular file of at most 1 MB, opened without blocking
-  (a FIFO or a device cannot hang the shell), and decoded only if it is at
-  most 512 px a side, within 4 MB of decoder memory. One larger than 160 px
-  is halved until it fits, since a tile draws it at most 138 px; that keeps
-  a frame's icons well inside the atlas and about 100 KB of memory each. A
+  sets. The TV build has no mock icons; `LUMEN_LAUNCHER=mock` gives it the
+  mock list with letter tiles.
+* On the TV the icon paths come from other apps' appinfo, so an icon is
+  read only from a regular file of at most 1 MB, opened without blocking (a
+  FIFO or a device cannot hang the shell), and decoded only if it is at most
+  512 px a side, within 4 MB of decoder memory. One larger than 160 px is
+  halved until it fits, since a tile draws it at most 138 px; that keeps a
+  frame's icons well inside the atlas and about 100 KB of memory each. A
   failure is logged once, with the path escaped, and the tile shows its
   letter.
+* Icons load on a thread of their own, in the order tiles first ask for
+  them. Until its icon arrives a tile is drawn plain, neither icon nor
+  letter, so a letter never flashes up first; each arrival draws one frame.
+  While any is on its way, a settled screen looks for them every 16 ms.
+  With `--fixed-dt` they load as they are first drawn, so the frames stay
+  the same from run to run.
 * If `list` fails, the shell shows the empty state and puts the error in the
   status line and the log.
 
@@ -310,6 +320,10 @@ pub trait Launcher {
   shape shader and the atlas texture. The 5x7 font goes.
 * No new crates.io dependencies in B1. B2 adds `png` 0.18 and `fontdue` 0.9
   (`std` only), both approved by the owner.
+* B3 adds `luna.rs` (the TV's `Launcher`) and `serde_json` 1.0 (`std` only,
+  its `Value` API, no derive), which the owner chose on 2026-10-20 over a
+  parser of our own: luna's replies carry other apps' data. `lumen-core`
+  stays std only and gains `clean_title` and a `Launcher` impl for `Box`.
 
 ## Simulator automation
 
@@ -344,7 +358,7 @@ and a launch's status line, with the log showing "idle" after each settle.
 The TV build is then ready for the main session to run, which also captures
 the raw event log. That run was on 2026-10-20 ("Measured on the B9").
 
-### B2: icons and text (this branch)
+### B2: icons and text (done; its TV run is owed)
 
 Textured quads in the renderer, app icons, real text for titles,
 shader-drawn rounded corners and soft shadows. Of the two ways to decode
@@ -359,7 +373,7 @@ row 0, row 1 with the Top Shelf scrolled off, a launch's status line, and
 letter tiles for apps without icons. Then the TV run: the frame time while
 moving, now that the cost is in the fragment shader.
 
-### B3: the TV launcher (after the TV recon)
+### B3: the TV launcher (this branch)
 
 A `Launcher` backed by luna: list apps and inputs, and launch them. Both
 routes exist on the B9: `luna-send` works, and `libluna-service2.so.3`
@@ -368,17 +382,64 @@ no FFI, and moves to the library only if a launch time measured on the TV
 calls for it. `MockLauncher` stays for the simulator. The first run on the TV
 is by hand, as an ordinary app, with no takeover (docs/safety.md, rule 3).
 
+**What the B9 answers** (queried over SSH on 2026-10-20; trimmed copies with
+generic input names are the tests' fixtures, in
+`shell/crates/lumen-shell/fixtures/luna/`):
+
+| Call | Gives |
+|---|---|
+| `applicationManager/listLaunchPoints` | LG's Home bar: 27 launch points in its order, each with `title`, `iconColor`, absolute `icon` (80 px) and `largeIcon` (130 px, sometimes empty), `lptype` (all `default` here) and `params`. No inputs; Lumen itself is one. |
+| `applicationManager/listApps` | 99 apps (27 visible), each with its `folderPath`. Apps live under `/usr/palm/applications`, `/media/cryptofs/apps`, `/media/developer/apps`, `/media/system/apps` and `/mnt/otncabi`. |
+| `service.eim/getAllInputStatus` | AV and HDMI 1–4, each with its app (`com.webos.app.hdmi1`…), the `label` the owner gave it, `connected`, and an icon under `/usr/palm/plugins/inputapps/assets/small/`. |
+
+**The list**, owner's choice on 2026-10-20 (LG's launcher list, not every
+visible app):
+
+1. plx-native (`com.beb.plxnative`) first.
+2. LG's launch points in LG's order, so rearranging LG's Home bar
+   rearranges Lumen. Left out: Lumen itself, any launch point that is not
+   an app's own (`lptype` other than `default`: bookmarks, channels), and
+   repeats.
+3. The inputs with something connected, by port, titled with the owner's
+   names (`Game console`), unless LG's bar already has them.
+
+The three calls run at once, each through `/usr/bin/luna-send -n 1 -f`
+(never one found on `PATH`, since the shell runs as root) with stdin from
+`/dev/null` and its stderr the shell's, and at most 4 MB of reply read. The
+reply must be in, and luna-send gone, within 5 s, even if something keeps
+its pipe open; past that it is killed. Each call is timed in the log.
+Without launch points the shell shows its empty state and the error.
+Without `listApps` no icon can be confined, so every tile shows its letter.
+Without the inputs there are only apps. Launching calls
+`applicationManager/launch` with the app's ID and its launch point's
+`params`; a refusal's `errorText` goes to the log, and the status line says
+the app could not open.
+
 Feeding other apps' data into the shell, B3 also:
 
-* Confines each icon path to its app's own folder: resolve it against that
-  folder, canonicalise it, and refuse it unless it is still inside. Today
-  root would read and draw any small PNG an app names.
-* Caps title lengths when it parses appinfo; fitting a title is linear in
-  its length.
-* Loads icons off the frame path, or a few a frame: the first decode of
-  each is synchronous today, a cost not yet measured on the TV.
+* Confines each icon path to its owner's folder: an app's icon to the
+  `folderPath` `listApps` gives it, an input's to
+  `/usr/palm/plugins/inputapps`. The path is resolved against that folder,
+  canonicalised, and refused unless it is still inside, so neither `..` nor
+  a link can take it elsewhere. The 130 px icon is tried first, then the
+  80 px one. An app can change its folder after the list, and a tile may
+  first ask for its icon minutes later, so the loader opens an icon only if
+  its path still resolves to itself (on Linux; the shell's other checks
+  then apply).
+* Takes `iconColor` only as `#rrggbb`; titles through `clean_title`:
+  trimmed of spaces and control characters, those inside as spaces, at most
+  64 characters; and IDs only as printable ASCII without spaces, at most
+  255 bytes (a folder name's limit), since they reach the log and `launch`
+  as they are.
+* Loads icons on a thread of their own ("Apps and launching").
 * Drops the mock icons from the TV build: the IPK's `mock-icons` folder, and
   the binary's search for one.
+
+**Done when:** `make check` is green and the reviews leave no critical or
+high findings. Then the TV run, by hand: the list matches LG's Home bar with
+plx-native first, every tile launches, the inputs switch, and the log shows
+how long the three calls and each launch take. Whether `luna-send` may run
+from inside an app's jail is the first thing that run answers.
 
 ## Measured on the B9
 
@@ -417,8 +478,8 @@ during the run, with the same result.
 
 Still open:
 
-1. How fast the remote repeats. SDL's repeat events are not logged, so the
-   next run needs a log line with the times of the first few.
+1. How fast the remote repeats. The B2 build logs the times of SDL's repeats
+   ("SDL repeat …" lines), so the next run answers it.
 2. Which event brings the shell back to the front (focus gained, or the
    foreground events): the log records only the first event of each kind.
 3. What the u32 at bytes 12–15 means. Another input (a USB keyboard, LG's

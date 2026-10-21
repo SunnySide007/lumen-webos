@@ -26,18 +26,20 @@ build-tv:
 	cd shell && cargo build --release --target $(TARGET)
 
 # ares-package (LG's packager) writes the control fields the webosbrew
-# repository checks for, which a hand-made .ipk would lack.
+# repository checks for, which a hand-made .ipk would lack. It also makes every
+# folder 0777, which fix_modes.py puts right; an IPK it cannot fix is removed,
+# so none is left to install with world-writable folders.
 ipk: build-tv
 	rm -rf dist/stage
 	mkdir -p $(STAGE)
 	install -m 0755 $(BIN) $(STAGE)/lumen-shell
 	install -m 0644 packaging/shell/icon80.png packaging/shell/icon130.png $(STAGE)/
 	install -m 0644 shell/assets/fonts/Inter-LICENSE.txt $(STAGE)/
-	install -d $(STAGE)/mock-icons
-	install -m 0644 shell/assets/mock-icons/*.png $(STAGE)/mock-icons/
 	sed -e 's/@APP_ID@/$(APP_ID)/' -e 's/@VERSION@/$(VERSION)/' \
 	    packaging/shell/appinfo.json.in > $(STAGE)/appinfo.json
 	ares-package --no-minify --outdir dist $(STAGE)
+	python3 -I tools/ipk/fix_modes.py dist/$(APP_ID)_$(VERSION)_arm.ipk \
+	    || { rm -f dist/$(APP_ID)_$(VERSION)_arm.ipk; exit 1; }
 	rm -rf dist/stage
 	@ls -l dist/*.ipk
 

@@ -12,6 +12,7 @@ fontdue.workspace = true
 libloading.workspace = true
 lumen-core.workspace = true
 png.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

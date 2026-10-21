@@ -17,6 +17,7 @@ use crate::draw;
 use crate::frame_stats::FrameStats;
 use crate::gl::{self, Gl};
 use crate::info;
+use crate::luna::{LunaLauncher, LunaSend};
 use crate::render::{Batch, Renderer, SCREEN_H, SCREEN_W, fit_viewport};
 use crate::sdl::{self, Event, GlContext, Sdl, Window};
 
@@ -41,6 +42,8 @@ pub struct Options {
 
 /// When `--screenshot` takes its frame.
 const SCREENSHOT_AFTER: Duration = Duration::from_millis(1500);
+/// How often a settled screen looks for icons while the loader has some.
+const ICON_POLL: Duration = Duration::from_millis(16);
 
 impl Options {
     /// Reads `--exit-after <seconds>`, `--windowed`, `--gles`,
@@ -435,7 +438,12 @@ fn run_surface(sdl: &Sdl, opts: &Options) -> Result<(), String> {
     );
 
     let renderer = Renderer::new(gl)?;
-    let mut assets = draw::Assets::new()?;
+    // A fixed clock wants the same frames every run, so its icons load at once.
+    let mut assets = if opts.fixed_dt.is_some() {
+        draw::Assets::new()?
+    } else {
+        draw::Assets::threaded()?
+    };
     let mut batch = Batch::default();
     let mut stats = FrameStats::new(Duration::from_secs(1));
     let mut burst = Burst::default();
@@ -446,13 +454,16 @@ fn run_surface(sdl: &Sdl, opts: &Options) -> Result<(), String> {
     if let Some(step) = opts.fixed_dt {
         info!("fixed clock: {:.3} ms a frame", step.as_secs_f64() * 1000.0);
     }
-    let mut shell = Shell::new(mock_launcher(), clock.now());
+    let mut shell = Shell::new(launcher(), clock.now());
 
     loop {
         // A settled screenshot that is ready must not wait for an event; one
-        // that cannot be drawn yet (window hidden) must not spin either.
-        let shot_ready =
-            settled_shot.is_some() && shell.visible && keys_done(script.as_ref(), &shell.input);
+        // that cannot be drawn yet (window hidden, icons on their way) must
+        // not spin either.
+        let shot_ready = settled_shot.is_some()
+            && shell.visible
+            && keys_done(script.as_ref(), &shell.input)
+            && !assets.icons.any_loading();
         let first = if shell.wants_frame() || shot_ready {
             sdl.poll_event()
         } else {
@@ -469,6 +480,8 @@ fn run_surface(sdl: &Sdl, opts: &Options) -> Result<(), String> {
                     .as_ref()
                     .filter(|_| shell.visible)
                     .map(|_| SCREENSHOT_AFTER),
+                // The same for icons; showing the shell again wakes the loop.
+                (shell.visible && assets.icons.any_loading()).then(|| clock.now() + ICON_POLL),
             ]
             .into_iter()
             .flatten()
@@ -520,11 +533,16 @@ fn run_surface(sdl: &Sdl, opts: &Options) -> Result<(), String> {
         if screenshot.is_some() && now >= SCREENSHOT_AFTER {
             shell.home.mark_dirty();
         }
+        if assets.icons.receive() {
+            shell.home.mark_dirty();
+        }
         shell.home.advance_to(now);
-        // The settled screenshot: the keys are all played and released and
-        // nothing moves, so draw the settled frame once more and keep it.
+        // The settled screenshot: the keys are all played and released,
+        // nothing moves and every icon is in, so draw the settled frame once
+        // more and keep it.
         let take_settled = settled_shot.is_some()
             && keys_done(script.as_ref(), &shell.input)
+            && !assets.icons.any_loading()
             && !shell.wants_frame();
         if take_settled {
             shell.home.mark_dirty();
@@ -580,23 +598,38 @@ fn run_surface(sdl: &Sdl, opts: &Options) -> Result<(), String> {
     Ok(())
 }
 
-/// The simulator's apps, with its placeholder icons when it can find them:
-/// in `LUMEN_MOCK_ICONS`, or a `mock-icons` folder beside the binary (the IPK
-/// carries one until the TV's own launcher, milestone B3).
+/// The TV's apps through luna; the simulator's mock list on a PC, or on the
+/// TV with `LUMEN_LAUNCHER=mock` (a smoke test that touches no other app).
+fn launcher() -> Box<dyn Launcher> {
+    let mock = std::env::var("LUMEN_LAUNCHER").is_ok_and(|v| v == "mock");
+    if on_tv() && !mock {
+        info!("apps from luna");
+        Box::new(LunaLauncher::new(LunaSend::system()))
+    } else {
+        Box::new(mock_launcher())
+    }
+}
+
+/// The simulator's apps, with its placeholder icons if `LUMEN_MOCK_ICONS`
+/// names their folder (`tools/sim.ps1` sets it). The folder is resolved
+/// first, since an icon is read only at a path that resolves to itself.
 fn mock_launcher() -> MockLauncher {
     let dir = std::env::var_os("LUMEN_MOCK_ICONS")
         .map(PathBuf::from)
-        .or_else(|| Some(std::env::current_exe().ok()?.parent()?.join("mock-icons")));
+        .map(|dir| std::fs::canonicalize(&dir).unwrap_or(dir));
     match dir {
         Some(dir) if dir.is_dir() => {
-            info!("mock icons from {}", dir.display());
+            info!("mock apps, icons from {}", dir.display());
             MockLauncher::default().with_icons_in(&dir)
         }
         Some(dir) => {
-            info!("no mock icons at {}: letter tiles", dir.display());
+            info!("mock apps; no icons at {}: letter tiles", dir.display());
             MockLauncher::default()
         }
-        None => MockLauncher::default(),
+        None => {
+            info!("mock apps, letter tiles");
+            MockLauncher::default()
+        }
     }
 }
 

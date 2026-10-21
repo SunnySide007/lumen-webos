@@ -84,6 +84,34 @@ pub trait Launcher {
     fn launch(&mut self, id: &AppId) -> Result<(), LaunchError>;
 }
 
+/// So the shell can pick its launcher at run time: luna on the TV, the mock
+/// in the simulator.
+impl<L: Launcher + ?Sized> Launcher for Box<L> {
+    fn list(&mut self) -> Result<Vec<App>, LaunchError> {
+        (**self).list()
+    }
+
+    fn launch(&mut self, id: &AppId) -> Result<(), LaunchError> {
+        (**self).launch(id)
+    }
+}
+
+/// The longest title kept, in characters. On the TV titles come from other
+/// apps' appinfo, and fitting one to a tile takes time in its length; LG's
+/// own run to about 30.
+pub const MAX_TITLE_CHARS: usize = 64;
+
+/// A title as the shell shows it: trimmed of spaces and control characters,
+/// those inside as spaces, and cut to `MAX_TITLE_CHARS`.
+pub fn clean_title(title: &str) -> String {
+    title
+        .trim_matches(|c: char| c.is_whitespace() || c.is_control())
+        .chars()
+        .take(MAX_TITLE_CHARS)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
 /// The simulator's launcher: a fixed list modelled on the B9's apps and HDMI
 /// inputs (12 entries, so rows of 5, 5 and 2). The IDs are illustrative;
 /// the TV's launcher reports the real ones. Launches are only recorded.
@@ -240,5 +268,24 @@ mod tests {
         assert!(err.to_string().contains("amazon"));
         assert!(mock.launch(&AppId::new("nope")).is_err());
         assert!(mock.launched().is_empty());
+    }
+
+    #[test]
+    fn a_boxed_launcher_is_a_launcher() {
+        let mut boxed: Box<dyn Launcher> = Box::new(MockLauncher::default());
+        assert_eq!(boxed.list().unwrap().len(), 12);
+        assert!(boxed.launch(&AppId::new("netflix")).is_ok());
+    }
+
+    #[test]
+    fn titles_are_trimmed_cleaned_and_capped() {
+        assert_eq!(clean_title("  Streamer "), "Streamer");
+        assert_eq!(clean_title("Two\nlines\t"), "Two lines");
+        // Nothing but control characters is no title, so the ID stands in.
+        assert_eq!(clean_title("\u{0}\u{1b}\u{7f}"), "");
+        assert_eq!(clean_title("\u{0}Netflix\u{7}"), "Netflix");
+        let long = "é".repeat(200);
+        assert_eq!(clean_title(&long).chars().count(), MAX_TITLE_CHARS);
+        assert_eq!(clean_title(""), "");
     }
 }

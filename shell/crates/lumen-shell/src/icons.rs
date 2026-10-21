@@ -1,13 +1,17 @@
 //! App icons: PNG files named by the launcher, decoded once, premultiplied,
 //! shrunk to the size a tile draws them and kept in the atlas. On the TV the
-//! paths will come from other apps' appinfo (milestone B3), so a file is read
-//! only if it is a small regular file, and decoded only within fixed limits;
-//! any failure leaves the tile with its letter instead.
+//! paths come from other apps' appinfo (confined to each app's folder by
+//! `luna`), so a file is read only if its path still resolves to itself and
+//! it is a small regular file, and decoded only within fixed limits; any
+//! failure leaves the tile with its letter
+//! instead. The shell decodes them on a thread of their own, so a slow file
+//! never holds up a frame.
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 
 use crate::atlas::{Atlas, Uv};
 
@@ -102,6 +106,15 @@ pub fn shrink(mut image: Image, max: u32) -> Image {
 
 /// Reads, decodes and shrinks the PNG at `path`.
 pub fn load(path: &Path) -> Result<Image, String> {
+    // The launcher hands over paths with their links and `..` resolved
+    // (`luna::confine`). An app may change its folder after that, and a tile
+    // may first ask for its icon minutes later, so a path that no longer
+    // resolves to itself is refused rather than followed. (Windows paths
+    // resolve to another form, and there no other app's data is read.)
+    #[cfg(unix)]
+    if std::fs::canonicalize(path).map_err(|e| e.to_string())? != path {
+        return Err("a link or `..` in its path".to_owned());
+    }
     let file = open_regular(path)?;
     let mut bytes = Vec::new();
     // One byte more than allowed tells a file that grew from one that fits.
@@ -139,6 +152,8 @@ fn open_regular(path: &Path) -> Result<File, String> {
 }
 
 enum Entry {
+    /// Asked of the loader thread, and not back yet.
+    Loading,
     /// Decoded, and placed in the atlas of the given generation, if at all.
     Ready {
         image: Image,
@@ -147,28 +162,76 @@ enum Entry {
     Failed,
 }
 
-/// Icons by path, each loaded the first time a tile asks for it.
+impl Entry {
+    fn from(path: &Path, loaded: Result<Image, String>) -> Self {
+        match loaded {
+            Ok(image) => Self::Ready {
+                image,
+                placed: None,
+            },
+            Err(e) => {
+                // Debug formatting escapes whatever a third-party path holds.
+                crate::info!("icon {path:?}: {e}; the tile shows its letter");
+                Self::Failed
+            }
+        }
+    }
+}
+
+/// A thread that loads the icons asked of it, in order. It ends when its
+/// `Icons` is dropped.
+struct Loader {
+    requests: Sender<PathBuf>,
+    results: Receiver<(PathBuf, Result<Image, String>)>,
+}
+
+impl Loader {
+    fn spawn() -> std::io::Result<Self> {
+        let (requests, asked) = mpsc::channel::<PathBuf>();
+        let (done, results) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("icons".to_owned())
+            .spawn(move || {
+                for path in asked {
+                    let loaded = load(&path);
+                    if done.send((path, loaded)).is_err() {
+                        break;
+                    }
+                }
+            })?;
+        Ok(Self { requests, results })
+    }
+}
+
+/// Icons by path, each loaded the first time a tile asks for it: on the
+/// loader thread if there is one, at once if not (tests, `--fixed-dt`).
 #[derive(Default)]
 pub struct Icons {
     entries: HashMap<PathBuf, Entry>,
+    loader: Option<Loader>,
 }
 
 impl Icons {
+    /// Icons loaded on a thread of their own. If the thread cannot start,
+    /// they load at once instead.
+    pub fn threaded() -> Self {
+        let loader = Loader::spawn()
+            .inspect_err(|e| crate::info!("no icon thread ({e}): icons load as they are drawn"))
+            .ok();
+        Self {
+            entries: HashMap::new(),
+            loader,
+        }
+    }
+
     /// Where `path`'s icon sits in the atlas and its size in pixels, loading
-    /// and placing it if need be. `None` if it cannot be loaded (logged once)
-    /// or does not fit even in an empty atlas.
+    /// and placing it if need be. `None` while it loads, if it cannot be
+    /// loaded (logged once), or if it does not fit even in an empty atlas.
     pub fn get(&mut self, path: &Path, atlas: &mut Atlas) -> Option<(Uv, u32, u32)> {
         if !self.entries.contains_key(path) {
-            let entry = match load(path) {
-                Ok(image) => Entry::Ready {
-                    image,
-                    placed: None,
-                },
-                Err(e) => {
-                    // Debug formatting escapes whatever a third-party path holds.
-                    crate::info!("icon {path:?}: {e}; the tile shows its letter");
-                    Entry::Failed
-                }
+            let entry = match &self.loader {
+                Some(loader) if loader.requests.send(path.to_owned()).is_ok() => Entry::Loading,
+                _ => Entry::from(path, load(path)),
             };
             self.entries.insert(path.to_owned(), entry);
         }
@@ -180,6 +243,48 @@ impl Icons {
             *placed = place(image, atlas).map(|uv| (uv, atlas.generation()));
         }
         placed.map(|(uv, _)| (uv, image.w, image.h))
+    }
+
+    /// Whether `path`'s icon is still on its way.
+    pub fn is_loading(&self, path: &Path) -> bool {
+        matches!(self.entries.get(path), Some(Entry::Loading))
+    }
+
+    /// Whether any icon is still on its way.
+    pub fn any_loading(&self) -> bool {
+        self.entries.values().any(|e| matches!(e, Entry::Loading))
+    }
+
+    /// Takes in the icons the loader has finished, without waiting. True if
+    /// any came, so the screen needs drawing again. If the thread has died,
+    /// the icons it owed fail, and the rest load at once.
+    pub fn receive(&mut self) -> bool {
+        let Some(loader) = &self.loader else {
+            return false;
+        };
+        let mut any = false;
+        loop {
+            match loader.results.try_recv() {
+                Ok((path, loaded)) => {
+                    let entry = Entry::from(&path, loaded);
+                    self.entries.insert(path, entry);
+                    any = true;
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    crate::info!("the icon thread stopped: icons load as they are drawn");
+                    for entry in self.entries.values_mut() {
+                        if matches!(entry, Entry::Loading) {
+                            *entry = Entry::Failed;
+                            any = true;
+                        }
+                    }
+                    self.loader = None;
+                    break;
+                }
+            }
+        }
+        any
     }
 }
 
@@ -354,7 +459,10 @@ mod tests {
 
     #[test]
     fn the_mock_launchers_icons_are_all_there() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/mock-icons");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/mock-icons")
+            .canonicalize()
+            .unwrap();
         let apps = MockLauncher::default().with_icons_in(&dir).list().unwrap();
         let mut named = 0;
         for app in &apps {
@@ -382,6 +490,57 @@ mod tests {
         atlas.clear();
         assert!(icons.get(&path, &mut atlas).is_some());
         assert_eq!(atlas.take_uploads().len(), 1, "placed again");
+    }
+
+    /// Takes in the loader's results until `path` is no longer loading.
+    fn wait_for(icons: &mut Icons, path: &Path) {
+        let started = std::time::Instant::now();
+        while icons.is_loading(path) {
+            assert!(
+                started.elapsed().as_secs() < 10,
+                "the loader never answered"
+            );
+            icons.receive();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn the_loader_thread_loads_icons_off_the_frame() {
+        let good = temp_file(
+            "threaded.png",
+            &png_bytes(4, 4, png::ColorType::Rgb, &[5, 6, 7]),
+        );
+        let bad = temp_file("threaded-bad.png", b"junk");
+        let (mut icons, mut atlas) = (Icons::threaded(), Atlas::default());
+        assert!(
+            icons.get(&good, &mut atlas).is_none(),
+            "not drawn while loading"
+        );
+        assert!(icons.get(&bad, &mut atlas).is_none());
+        assert!(icons.is_loading(&good) && icons.any_loading());
+        wait_for(&mut icons, &good);
+        wait_for(&mut icons, &bad);
+        assert!(!icons.any_loading());
+        assert_eq!(
+            icons.get(&good, &mut atlas).map(|(_, w, h)| (w, h)),
+            Some((4, 4))
+        );
+        assert!(icons.get(&bad, &mut atlas).is_none());
+        assert!(!icons.is_loading(&bad), "failed, not loading");
+        assert!(!icons.receive(), "nothing more to come");
+    }
+
+    #[test]
+    fn without_a_thread_icons_load_at_once() {
+        let path = temp_file(
+            "at-once.png",
+            &png_bytes(2, 2, png::ColorType::Rgb, &[1, 1, 1]),
+        );
+        let (mut icons, mut atlas) = (Icons::default(), Atlas::default());
+        assert!(icons.get(&path, &mut atlas).is_some());
+        assert!(!icons.any_loading());
+        assert!(!icons.receive());
     }
 
     #[test]

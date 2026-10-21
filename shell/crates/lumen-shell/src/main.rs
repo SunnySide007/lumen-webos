@@ -12,6 +12,7 @@ mod frame_stats;
 mod gl;
 mod icons;
 mod log;
+mod luna;
 mod render;
 mod sdl;
 mod text;

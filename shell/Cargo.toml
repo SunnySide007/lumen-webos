@@ -13,6 +13,7 @@ fontdue = { version = "0.9.4", default-features = false, features = ["std"] }
 libloading = "0.9"
 lumen-core = { path = "crates/lumen-core" }
 png = "0.18.1"
+serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
