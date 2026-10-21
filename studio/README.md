@@ -68,14 +68,28 @@ tests skip there and run here:
 tools/studio.sh python3 -I -m unittest discover -s tools/tests -p 'test_studio*.py'
 ```
 
+## On the TV
+
+Watched on the B9 (OLED55B9PUA, webOS 4.10.2, firmware 05.50.00) on
+2026-10-20: `aurora-2160p.mp4` in LG's player, started by `tv/hdr-check.sh`
+([tv/README.md](tv/README.md) has the steps).
+
+* The TV went from `expert1` / `sdr` to `hdrCinemaBright` / `hdr` 4 s after
+  the player started, and showed its HDR logo. The MP4 as it is (`hev1`,
+  HDR10 metadata in the stream's SEI only, no `mdcv` or `clli` boxes) is
+  enough; the `.mkv` was not needed.
+* By eye: the stars sparkle against true black, and no banding showed in the
+  glow above the mountains.
+* The player plays the loop once and does not repeat. Three minutes after
+  the start, the TV was back on the input it showed before (HDMI 2, in SDR),
+  with the player in the background. A seamless repeat is the screensaver's
+  job, in `ambient/`.
+
 ## Still to do
 
-* Watch it on the TV: the B9 must switch into its HDR picture mode on the loop.
-  [tv/README.md](tv/README.md) has the steps, and `tv/hdr-check.sh` plays a
-  loop in LG's player and reads the dynamic range back.
-  The MP4 is tagged `hev1` (parameter sets repeat in the stream) and carries
-  its HDR10 metadata in the stream's SEI only, with no `mdcv` or `clli` boxes;
-  if the B9 wants either, try `.mkv`, then a container-level fix.
+* Watch `aurora-2160p-60s.mp4` and `fireflies-2160p.mp4` on the TV the same
+  way.
 * Dolby Vision Profile 8.1, an RPU added with `dovi_tool`.
-* Dither before the 10-bit quantization, if the faint glows band on the panel.
+* Dither before the 10-bit quantization, if a faint glow bands on the panel
+  (none seen in aurora).
 * More scenes.

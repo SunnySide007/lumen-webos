@@ -39,6 +39,9 @@ until the dynamic range leaves `sdr`. The last line is the verdict:
 | `RESULT: the player did not start` or `... is not in front` | 2 |
 | `RESULT: inconclusive` (the TV was in HDR before the player started) | 3 |
 
+Close any app that is showing HDR first: a Netflix title in Dolby Vision
+left the B9 in `dolbyHdr`, and the check stopped as inconclusive.
+
 Today, in SDR, the TV reports `expert2` and `sdr`. In HDR, LG uses a
 separate set of picture modes (the `hdr...` names in `psmListForExpert`), so
 expect `pictureMode` to change as well. Whether `dynamicRange` follows LG's
@@ -90,5 +93,5 @@ tools/tv.sh run 'rm -rf /tmp/lumen-hdr'
   open it from the TV's Photo & Video app. If the TV shows HDR that way, the
   file is right and the launch from the shell is what needs work.
 
-Whatever happens, keep the script's output: it is the measurement for
-studio/README.md's "watch it on the TV" item.
+Whatever happens, keep the script's output: it is the measurement that goes
+under "On the TV" in studio/README.md.
