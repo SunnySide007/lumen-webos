@@ -21,6 +21,14 @@ class RedactTest(unittest.TestCase):
         self.assertEqual(redact_line('0.0.0.0 ads.example 127.0.0.1 8.8.8.8 172.32.0.1'),
                          '0.0.0.0 ads.example 127.0.0.1 8.8.8.8 172.32.0.1')
 
+    def test_ipv6_addresses(self):
+        self.assertEqual(redact_line('"ip": "fd12:3456:789a:1:7640:beff:fe01:2345"'),
+                         '"ip": "<ipv6>"')
+        self.assertEqual(redact_line('fe80::7640:beff:fe01:2345/64 2001:db8::1'),
+                         '<ipv6>/64 <ipv6>')
+        self.assertEqual(redact_line('::1 up 04:37:52, std::string'),
+                         '::1 up 04:37:52, std::string')
+
     def test_identifying_json_values(self):
         line = '"serialNumber": "903KXYZ123", "modelName": "OLED55B9PLA",'
         self.assertEqual(redact_line(line),
