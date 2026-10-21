@@ -30,17 +30,17 @@ from what it measured.
 
 Off the TV (Stage A):
 
-- [ ] On-TV capture: `tools/capture.sh` and a static tcpdump build
+- [x] On-TV capture: `tools/capture.sh` and a static tcpdump build
   (`make capture-tools`)
-- [ ] Capture summary: `tools/capture/summarize.py`
-- [ ] `profiles/glasshouse`: allowlist, firmware blocks, candidate list,
+- [x] Capture summary: `tools/capture/summarize.py`
+- [x] `profiles/glasshouse`: allowlist, firmware blocks, candidate list,
   recipe, pinned versions
-- [ ] `tools/store-safe-check.sh`, `tools/uninstall-all.sh`,
+- [x] `tools/store-safe-check.sh`, `tools/uninstall-all.sh`,
   `tools/glasshouse-custom.sh`, `tools/tv.sh push` and `tunnel`
 
 On the TV ([runbook](runbooks/phase1-tv.md)):
 
-- [ ] plx-native 0.8.0 installed from the verified IPK; signed in, plays from Plex
+- [x] plx-native 0.8.0 installed from the verified IPK; signed in, plays from Plex
 - [ ] 24 h baseline capture, fetched and summarised
 - [ ] `b9-aggressive.hosts` and `allowlist.txt` refined from the capture (owner reviewed)
 - [ ] Glasshouse 0.118.0 installed (owner confirmed), dashboard on 127.0.0.1 only
