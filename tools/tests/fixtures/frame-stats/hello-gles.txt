@@ -1,0 +1,15 @@
+[1760000000.120] GL vendor "ARM" renderer "Mali-T820" version "OpenGL ES 3.2 v1.r12p0-04rel0" glsl "OpenGL ES GLSL ES 3.20"
+[1760000000.130] drawable 1920x1080, vsync on
+[1760000001.250] fps 55.2 avg 18.12 ms max 48.00 ms (3000 quads)
+[1760000002.261] fps 60.0 avg 16.67 ms max 17.00 ms (3000 quads)
+[1760000003.261] fps 60.0 avg 16.67 ms max 18.00 ms (3000 quads)
+[1760000004.262] fps 60.0 avg 16.67 ms max 19.00 ms (3000 quads)
+[1760000005.262] fps 60.0 avg 16.67 ms max 17.00 ms (3000 quads)
+[1760000006.263] fps 60.0 avg 16.67 ms max 18.00 ms (3000 quads)
+[1760000007.263] fps 59.9 avg 16.69 ms max 33.30 ms (3000 quads)
+[1760000008.264] fps 60.0 avg 16.67 ms max 17.00 ms (3000 quads)
+[1760000009.264] fps 60.0 avg 16.67 ms max 18.00 ms (3000 quads)
+[1760000010.265] fps 60.0 avg 16.67 ms max 17.00 ms (3000 quads)
+[1760000011.265] fps 60.0 avg 16.67 ms max 19.00 ms (3000 quads)
+[1760000011.700] key down scancode 482 keycode 0x40000118 (BACK)
+[1760000011.710] back pressed, leaving

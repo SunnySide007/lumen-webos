@@ -1,0 +1,17 @@
+[1760000100.000] GL vendor "ARM" renderer "Mali-T820" version "OpenGL ES 3.2 v1.r12p0-04rel0" glsl "OpenGL ES GLSL ES 3.20"
+[1760000100.050] apps from luna
+[1760000100.400] key down scancode 79 keycode 0x4000004f (RIGHT)
+[1760000100.900] SDL repeat 1 of scancode 79: 500 ms after the press, 500 ms after the last
+[1760000100.933] SDL repeat 2 of scancode 79: 533 ms after the press, 33 ms after the last
+[1760000100.966] SDL repeat 3 of scancode 79: 566 ms after the press, 33 ms after the last
+[1760000101.000] SDL repeat 4 of scancode 79: 600 ms after the press, 34 ms after the last
+[1760000101.200] scancode 79 released 800 ms after the press: 12 SDL repeats, the first 500 ms after the press, then every 33 ms on average
+[1760000101.400] drew 40 frames in 650 ms (avg 16.67 ms, worst 17.00 ms, 1200 quads); idle
+[1760000102.000] key down scancode 81 keycode 0x40000051 (DOWN)
+[1760000102.520] SDL repeat 1 of scancode 81: 520 ms after the press, 520 ms after the last
+[1760000102.553] SDL repeat 2 of scancode 81: 553 ms after the press, 33 ms after the last
+[1760000102.700] fps 60.0 avg 16.67 ms max 17.00 ms (60 frames, 1200 quads)
+[1760000103.700] fps 58.0 avg 17.24 ms max 33.30 ms (58 frames, 1631 quads)
+[1760000104.000] drew 21 frames in 400 ms (avg 20.00 ms, worst 33.30 ms, 1631 quads); idle
+[1760000105.000] drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 856 quads); idle
+[1760000106.000] drew 3 frames in 33 ms (avg 16.60 ms, worst 16.80 ms, 856 quads); idle
