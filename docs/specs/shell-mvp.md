@@ -188,8 +188,8 @@ B2 keeps one draw call a frame with far fewer quads:
   memory), one quad each. The start screen is 45 quads in the simulator.
 * The cost moves from vertices to pixels: the shape shader runs over every
   pixel of every tile, pill and shadow, in high precision where the GPU has
-  it. Whether the grid still holds 60 fps on the B9 is measured at B2's TV
-  run; until then the B1 figures are the last measured.
+  it. On the B9 the grid averages 16.8 ms a frame but misses a vsync in most
+  bursts of motion, which B1 did not ("Measured on the B9", 6).
 * The vertex list is reused from frame to frame, never reallocated. Memory
   is tight on the B9 (about 330 MB free of 1.6 GB, with swap in use).
 
@@ -360,7 +360,7 @@ and a launch's status line, with the log showing "idle" after each settle.
 The TV build is then ready for the main session to run, which also captures
 the raw event log. That run was on 2026-10-20 ("Measured on the B9").
 
-### B2: icons and text (done; its TV run is owed)
+### B2: icons and text (done; measured on the B9 on 2026-10-22)
 
 Textured quads in the renderer, app icons, real text for titles,
 shader-drawn rounded corners and soft shadows. Of the two ways to decode
@@ -373,7 +373,8 @@ show under the focused tile only, as on tvOS (also the owner's choice).
 findings; and simulator screenshots show the start screen, focus moved along
 row 0, row 1 with the Top Shelf scrolled off, a launch's status line, and
 letter tiles for apps without icons. Then the TV run: the frame time while
-moving, now that the cost is in the fragment shader.
+moving, now that the cost is in the fragment shader. That run, with B3's
+apps, is in "Measured on the B9" (6).
 
 ### B3: the TV launcher (this branch)
 
@@ -412,7 +413,8 @@ the owner at the TV): the hub answered all three calls from the jail,
 That gave 30 tiles: LG's 26 launch points other than Lumen, then the 4
 connected inputs (AV, unconnected, left out). The owner confirmed that the
 grid matched LG's Home bar, with plx-native first. Launching a tile was not
-tried, so the launch time is still owed.
+tried that night; the first launches were timed on 2026-10-22 ("Measured on
+the B9", 10).
 
 **Only 4 of the 30 tiles had icons.** The app's jail mounts `/media/developer`
 but not `/usr/palm/applications`, `/media/cryptofs/apps` or
@@ -488,8 +490,69 @@ plx-native first, every tile launches, the inputs switch, and the log shows
 how long the three calls and each launch take. On 2026-10-21 the first run
 showed that `luna-send` may not run inside the app's jail, and the second,
 through the library, that the list works and matches LG's Home bar (above).
-Still owed: the launches, the inputs switching, and icons for apps outside
-`/media/developer`.
+On 2026-10-22 HDMI 1 and Homebrew Channel launched from their tiles
+("Measured on the B9", 10). Still owed: the other tiles, the other inputs,
+and icons for apps outside `/media/developer`.
+
+### Frame time: finding the missed vsyncs (plan, approved 2026-10-22)
+
+Most bursts of motion miss a vsync on the B9 ("Measured on the B9", 6),
+which B1 did not. It is looked into before any Phase 4 item spends frame
+time (look-and-feel.md, "Order").
+
+**What changed since B1.** B1 drew every pixel with a flat colour in
+mediump. B2 draws every pixel, the full-screen background and the 1920x640
+shelf included, through one shader in highp with three branches (flat,
+rounded-box distance, atlas texture) and blending on. B2 also rasterises
+glyphs on the main thread the first time they are drawn and uploads them
+with `glTexSubImage2D` into the atlas that the same frame reads. A frame's
+time runs from one swap's return to the next; the first frame after an idle
+wait is not timed; and the log keeps only each burst's worst frame, so which
+frame was slow, and where its time went, is not known.
+
+| | Cause | Fits because | Told apart by |
+|---|---|---|---|
+| H1 | Waking from idle: the GPU clock has dropped, or the buffer queue starts out of phase | A single tap's burst starts from idle and almost always misses; hello-gles drew without stopping and never missed | The slow frame is the burst's first or second; drawing without a stop removes it |
+| H2 | The pixel cost of the highp shader over about 4 Mpx a frame | Down's scroll misses; the cost moved from vertices to pixels | Slow frames mid-burst, their time in the swap; a flat or mediump shader removes them |
+| H3 | Main-thread work: rasterising glyphs, and uploading into an atlas the GPU still reads (on Mali, a copy of the 8 MB texture or a wait) | Each tap shows a new title, at 30 px under the tile and 72 px on the shelf | The slow frame has an upload and a high CPU time; glyphs made ahead remove it |
+| H4 | The measurement: the first swap returns at once and the second waits a whole vsync, with nothing lost on screen | A tap's worst frame is 28–34 ms, about a vsync plus the render | Always the burst's second frame; the slow-motion video shows no stutter |
+| H5 | Paging from swap (39.7 MB resident, the B9 already swapping) | Weakly | Page faults jump in the slow frames |
+
+Two held Ups that started from idle stayed at 17.9 and 18.3 ms, against a
+pure H1 or H4; that is two samples.
+
+**Stage 1: which frame, and where its time goes.** No change on screen.
+
+* Each burst's line gains its first three frame times.
+* Each frame over 25 ms gets a line of its own: its place in the burst, its
+  CPU time split into building the batch, uploading (bytes and ms) and
+  submitting, the time in the swap, the glyphs rasterised, and the minor and
+  major page faults since the last frame (`getrusage`). At most a few such
+  lines a burst.
+* `tools/frame-stats.sh` summarises them.
+* On the TV: a `lumen-tv-check` run, and 10 single taps filmed in slow
+  motion to check H4 against the screen. Separately, asked first and
+  read-only: whether the B9 shows the Mali clock in `/sys` (devfreq), for H1.
+
+**Stage 2: switches, only if stage 1 leaves it open.** One build reads a
+flags file from the app's own folder, so a reinstall or the restore removes
+it and nothing outlives the check: `finish` (`glFinish` before the swap, for
+the GPU time), `keepalive` (draw while settled; H1, H4), `flat` (B1's flat
+shader; H2), `mediump` (shapes in mediump, atlas coordinates in highp; H2)
+and `warm` (every title's glyphs made right after the first frame; H3). One
+switch a run, the same moves each time.
+
+**Stage 3: the fix for the cause found,** measured against target 1 with
+`lumen-tv-check`. Candidates: mediump distances with highp texture
+coordinates, separate programs for flat, shape and texture, and the
+background drawn without blending (H2); glyphs made ahead off the frame
+path, and no upload into an atlas the frame reads (H3); a short warm tail
+after a burst (H1); or, for H4, a burst's first frame time left out, said so
+here, and judged by the video.
+
+Not in this plan: Phase 4 items, the held-key speed-up and the start-up
+time (its 923 ms in `draw::Assets` may share a fix with H3; it is a target of
+its own).
 
 ## Measured on the B9
 
@@ -526,12 +589,62 @@ BACK below row 0 scrolled to the top, and BACK on row 0 closed the shell
 ("clean exit" 180 ms later). The shell lost and regained focus a second time
 during the run, with the same result.
 
+The B2/B3 builds ran on the same set on 2026-10-22, opened by hand from LG's
+app list with the owner on the remote: commit c500289 (B3 through the
+library) with Phase 1's DNS capture running, then 09711d7 (branch
+`claude/shell-timing`: the timing lines in look-and-feel.md, and the launch
+called after the pulse frame) with nothing else of ours running. Each run's
+window runs from the log's own first to last arrow. The log keeps one average
+and one worst frame per burst, so the counts are over bursts, not frames.
+
+6. **Moving, most bursts miss a vsync.** c500289: 2,611 frames in 50
+   bursts, 16.83 ms on average (59.4 fps); 37 bursts had a frame over 25 ms,
+   the worst 50.6 ms. 09711d7: 1,399 frames in 20 bursts, 16.82 ms on
+   average; 16 bursts over 25 ms, the worst 35.1 ms. So the capture is not
+   the cause. The slow frames come mostly in a single tap's burst (its worst
+   28–34 ms) and while Down scrolls (33–35 ms); holding Up stayed at
+   17.8–18.3 ms. Frames drew 24–104 quads, against B1's 856–1,631, so the
+   cost is in the pixels, not the vertices. Which frame of a burst is the slow
+   one, the log doesn't say. (The once-a-second `fps` line keeps its worst
+   frame across a hide; the burst lines don't.)
+7. **The remote repeats** a held key first after about 505 ms (491–522),
+   then every 50 ms (26–68), over 16 holds. The shell's own repeat, 400 ms
+   then 120 ms, is what sets the pace.
+8. **Key to frame** (09711d7): all 72 presses shown were on screen within
+   20 ms of SDL's stamp on the event: 1–7 ms from a settled screen, 16–20 ms
+   when the press came mid-burst. One more came as the window hid and was
+   not shown. This assumes LG's SDL stamps an event when it arrives.
+9. **Start-up** (09711d7): the first frame came 1,395 ms after `main()`:
+   SDL 163 ms, the GL context 138, `Renderer::new` 59, `draw::Assets` 923
+   (the font and the atlas), apps from luna 63, the frame 49. c500289 took
+   1,197 ms.
+10. **Launching.** c500289 called `launch` inside the key handler: HDMI 1
+    answered in 320 ms and no frame of the press pulse was drawn. 09711d7
+    draws the pulse frame first, 1 ms after OK, then calls: HDMI 1 answered
+    in 18 ms and Homebrew Channel in 573 ms. Launching HDMI 1 sent `window
+    minimized`, two app-background events and a focus loss, all within 1 ms
+    and 180 ms after OK; the swap before them took 154 ms. HOME, by
+    contrast, sends only a focus loss (2).
+11. **Coming back to the front:** picking the running shell from LG's app
+    list sent `window restored`, then the did-enter-foreground event, then
+    `focus gained` 350 ms later; the first frame came 170 ms after the
+    restore. On two other returns it came 13 ms after a focus gain and 2 ms
+    after a restore.
+12. **Memory:** 39.7 MB resident (c500289, about 10 minutes after its
+    start), against B1's 18 MB.
+13. **Keys still go missing when opened by hand.** c500289: in two of its
+    three processes keys stopped arriving, and the shell lost focus without a
+    key several times; at times another build was in front when it looked
+    like this one. 09711d7: no focus loss without a key (0 of 3), but in its
+    second round, which the owner spent moving, the log has no arrow for
+    20 s and then 28 s; whether presses were lost in those gaps is not yet
+    confirmed.
+
 Still open:
 
-1. How fast the remote repeats. The B2 build logs the times of SDL's repeats
-   ("SDL repeat …" lines), so the next run answers it.
-2. Which event brings the shell back to the front (focus gained, or the
-   foreground events): the log records only the first event of each kind.
+1. ~~How fast the remote repeats.~~ Answered on 2026-10-22 (7).
+2. ~~Which event brings the shell back to the front.~~ Answered on
+   2026-10-22 (11): from LG's app list, `window restored` comes first.
 3. What the u32 at bytes 12–15 means. Another input (a USB keyboard, LG's
    phone app) may show a different value.
 4. Where the shell gets icons for apps whose folders the jail doesn't mount:
@@ -543,7 +656,9 @@ Still open:
    (2026-10-21): none arrived until the Magic Remote's pointer was woken,
    and the shell sometimes lost focus to LG's UI. In the library build's run
    it lost focus about two minutes after launch, with no key pressed. B1's
-   run, opened by hand from LG's app list, got keys from the start.
+   run, opened by hand from LG's app list, got keys from the start; the
+   2026-10-22 runs, opened the same way, still lost keys at times (13).
+6. Why most bursts miss a vsync (6), and which frame of a burst it is.
 
 ## Not in this spec
 
