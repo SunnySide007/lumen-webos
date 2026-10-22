@@ -1,0 +1,93 @@
+[1792650000.100] lumen-shell 0.0.1 starting, args ["{\"@system_native_app\":true,\"nid\":\"io.github.sunnyside007.lumen.shell\"}"]
+[1792650000.102] options Options { exit_after: None, windowed: false, screenshot: None, gles: false, keys: None, fixed_dt: None, screenshot_when_settled: None }
+[1792650000.110] SDL2 loaded from libSDL2-2.0.so.0 (System); key events in the Lg layout
+[1792650000.116] SDL 2.0.5
+[1792650000.117] pointer: SDL_webOSCursorVisibility found in LG's SDL; arrows hide the pointer
+[1792650000.402] GL vendor "ARM" renderer "Mali-T820" version "OpenGL ES 3.2 v1.r12p0-04rel0" glsl "OpenGL ES GLSL ES 3.20"
+[1792650000.402] drawable 1920x1080, vsync on
+[1792650001.380] apps from luna
+[1792650001.380] luna through libluna-service2.so.3
+[1792650001.390] luna getAllInputStatus: 9 ms
+[1792650001.430] luna listLaunchPoints: 49 ms
+[1792650001.437] luna listApps: 57 ms
+[1792650001.480] start: sdl 16, gl 302, renderer 700, assets 1150, apps 1337, first frame 1380 ms
+[1792650001.490] power Active: last input 1.4 s ago
+[1792650001.495] front app io.github.sunnyside007.lumen.shell: last input 1.4 s ago
+[1792650002.480] fps 60.0 avg 16.67 ms max 17.10 ms (60 frames, 52 quads)
+[1792650005.000] key down scancode 79 keycode 0x4000004f (Some(Move(Right)))
+[1792650005.017] key 79: shown after 17 ms
+[1792650005.300] key down scancode 79 keycode 0x4000004f (Some(Move(Right)))
+[1792650005.316] key 79: shown after 16 ms
+[1792650005.820] drew 50 frames in 820 ms (avg 16.70 ms, worst 18.20 ms, 52 quads); first 16.80, 16.60, 16.70 ms; idle
+[1792650010.000] raw event 0x400: 00 04 00 00|a2 7d 01 00|01 00 00 00|00 00 00 00
+[1792650010.000] key down scancode 484 keycode 0x0 (None)
+[1792650010.001] pointer shown
+[1792650010.300] raw event 0x401: 01 04 00 00|d3 7e 01 00|01 00 00 00|01 01 00 00
+[1792650010.300] mouse button 1 down at 960,540: taken as OK
+[1792650010.318] key 40: shown after 18 ms
+[1792650010.450] raw event 0x402: 02 04 00 00|6a 7f 01 00|01 00 00 00|01 00 00 00
+[1792650010.450] mouse button 1 up at 960,540
+[1792650011.100] drew 40 frames in 650 ms (avg 16.67 ms, worst 17.40 ms, 52 quads); first 16.70, 16.65, 16.68 ms; idle
+[1792650012.000] raw event 0x401: 01 04 00 00|b0 85 01 00|01 00 00 00|03 01 00 00
+[1792650012.000] mouse button 3 down at 1210,302: ignored
+[1792650012.120] raw event 0x402: 02 04 00 00|28 86 01 00|01 00 00 00|03 00 00 00
+[1792650012.120] mouse button 3 up at 1210,302
+[1792650014.000] key down scancode 485 keycode 0x0 (None)
+[1792650014.001] pointer hidden
+[1792650015.000] key down scancode 81 keycode 0x40000051 (Some(Move(Down)))
+[1792650015.017] key 81: shown after 17 ms
+[1792650015.700] drew 42 frames in 690 ms (avg 16.70 ms, worst 17.00 ms, 52 quads); idle
+[1792650045.000] no input for 30 s; focused yes; pointer hidden; power Active
+[1792650075.000] no input for 60 s; focused yes; pointer hidden; power Active
+[1792650105.000] no input for 90 s; focused yes; pointer hidden; power Active
+[1792650133.100] screensaver request: allowed; last input 118.1 s ago
+[1792650133.300] raw event 0x200: 00 02 00 00|16 1c 03 00|01 00 00 00|0d 09 8b 00
+[1792650133.300] window focus lost: last key 118.3 s ago, 3 other events since
+[1792650133.300] the window lost focus: drawing stops
+[1792650133.800] power Screen Saver: last input 118.8 s ago
+[1792650134.000] front app com.webos.app.screensaver: last input 119.0 s ago
+[1792650135.000] no input for 120 s; focused no; pointer hidden; power Screen Saver
+[1792650165.000] no input for 150 s; focused no; pointer hidden; power Screen Saver
+[1792650180.000] power Active: last input 165.0 s ago
+[1792650180.200] front app io.github.sunnyside007.lumen.shell: last input 165.2 s ago
+[1792650180.200] window focus gained: last key 165.2 s ago, 5 other events since
+[1792650180.201] in front again (focus gained): drawing resumes
+[1792650180.204] foreground: first frame after 3 ms
+[1792650183.000] key down scancode 80 keycode 0x40000050 (Some(Move(Left)))
+[1792650183.017] key 80: shown after 17 ms
+[1792650185.000] key down scancode 80 keycode 0x40000050 (Some(Move(Left)))
+[1792650185.016] key 80: shown after 16 ms
+[1792650185.700] drew 44 frames in 720 ms (avg 16.74 ms, worst 17.30 ms, 52 quads); first 16.75, 16.70, 16.72 ms; idle
+[1792650215.000] no input for 30 s; focused yes; pointer hidden; power Active
+[1792650245.000] no input for 60 s; focused yes; pointer hidden; power Active
+[1792650275.000] no input for 90 s; focused yes; pointer hidden; power Active
+[1792650280.000] key down scancode 40 keycode 0xd (Some(Select))
+[1792650280.017] key 40: shown after 17 ms
+[1792650280.044] luna launch: 44 ms
+[1792650280.045] launch com.webos.app.hdmi1: answered in 45 ms
+[1792650280.200] window focus lost: last key 0.2 s ago, 2 other events since
+[1792650280.200] the window lost focus: drawing stops
+[1792650280.300] front app com.webos.app.hdmi1: last input 0.3 s ago
+[1792650310.000] front app io.github.sunnyside007.lumen.shell: last input 30.0 s ago
+[1792650310.000] window focus gained: last key 30.0 s ago, 4 other events since
+[1792650310.001] in front again (focus gained): drawing resumes
+[1792650310.003] foreground: first frame after 2 ms
+[1792650312.000] raw event 0x400: 00 04 00 00|50 9f 13 00|01 00 00 00|00 00 00 00
+[1792650312.000] key down scancode 484 keycode 0x0 (None)
+[1792650312.001] pointer shown
+[1792650313.000] key down scancode 485 keycode 0x0 (None)
+[1792650313.001] pointer hidden
+[1792650315.000] key down scancode 81 keycode 0x40000051 (Some(Move(Down)))
+[1792650315.017] key 81: shown after 17 ms
+[1792650315.700] drew 42 frames in 690 ms (avg 16.70 ms, worst 17.20 ms, 52 quads); idle
+[1792650320.000] luna watch front app: subscription cancelled: no reply from com.webos.applicationManager
+[1792650345.000] no input for 30 s; focused yes; pointer hidden; power Active
+[1792650375.000] no input for 60 s; focused yes; pointer hidden; power Active
+[1792650405.000] no input for 90 s; focused yes; pointer hidden; power Active
+[1792650434.600] screensaver request: allowed; last input 119.6 s ago
+[1792650434.800] window focus lost: last key 119.8 s ago, 2 other events since
+[1792650434.800] the window lost focus: drawing stops
+[1792650435.000] no input for 120 s; focused no; pointer hidden; power Active
+[1792650435.500] power Screen Saver: last input 120.5 s ago
+[1792650465.000] no input for 150 s; focused no; pointer hidden; power Screen Saver
+[1792650500.000] power Screen Off: last input 185.0 s ago

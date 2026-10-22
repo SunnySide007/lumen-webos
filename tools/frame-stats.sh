@@ -73,6 +73,36 @@
 # glyphs, and their page faults; then the first frames, with in how many bursts
 # frame 2, 3 and 4 took over --miss-ms, each over the bursts that drew it.
 #
+# Input lines, only from the shell (<state> is LG's power state, such as
+# "Active" or "Screen Saver", and may hold spaces; "last input" is the seconds
+# since the shell last had input; <what> is power, front app or screensaver):
+#   pointer shown                              the Magic Remote's pointer
+#   pointer hidden
+#   pointer: SDL_webOSCursorVisibility found in LG's SDL; arrows hide the pointer
+#   pointer: SDL_webOSCursorVisibility not in LG's SDL; the pointer stays as LG leaves it
+#   mouse button 1 down at 960,540: taken as OK
+#   mouse button 3 down at 1210,302: ignored
+#   mouse button 1 up at 960,540
+#   power <state>: last input 118.8 s ago
+#   front app <id>: last input 0.3 s ago
+#   screensaver request: allowed; last input 118.1 s ago
+#   luna watch <what>: <error text>            a subscription that failed
+#   no input for 90 s; focused yes; pointer hidden; power Active
+#                                              the heartbeat while no input comes
+# A click taken as OK is also timed by a "key 40: shown after" line, so the key
+# presses count it. "key down scancode 484 ..." and the raw event lines are not
+# input lines. The input section comes last, and only when the period holds
+# such lines: how often the pointer showed and hid, and whether arrows hide it;
+# the clicks, the ignored ones by button; each power state and front app with
+# its time and last input, 20 of each at most; the screensaver requests with
+# the p50, min and max of their last input; each failed luna watch; the
+# heartbeats, the longest wait among them and how many came while focused, and
+# each run of them (a run is one stretch with no input: its count only grows,
+# so a count no higher than the last starts the next) from its first stamp to
+# its last, 20 at most. When the period also holds a power or front app line,
+# a reading follows: of the focus losses, how many had a "power Screen Saver"
+# or "front app com.webos.app.screensaver" line within 2 s before or after.
+#
 # Exit status: 0 with a summary; 1 when the log holds no frame statistics in
 # the period (any slow-frame and timing sections are still printed first); 2
 # for a bad argument.
@@ -148,6 +178,16 @@ function rest(i,   s) {
     for (i++; i <= NF; i++) s = s " " $i
     return s
 }
+# Fields i to j of the line, joined by single spaces.
+function fields(i, j,   s) {
+    s = $i
+    for (i++; i <= j; i++) s = s " " $i
+    return s
+}
+# The line stamp as written, without its brackets.
+function stamp() { return substr($1, 2, length($1) - 2) }
+# The line stamp in whole milliseconds, to compare two stamps exactly.
+function msec() { return int(ts * 1000 + 0.5) }
 # Digits, and for a number inside a start line a comma after them.
 function whole(s) { return s ~ /^[0-9]+$/ }
 function stage(s) { return s ~ /^[0-9]+,?$/ }
@@ -243,6 +283,64 @@ function report_focus() {
     if (nfl == 0) return
     printf "focus losses (window focus lost lines): %d\n", nfl
     printf "  %-16s %d of %d (no key yet, or the last key over 5 s before)\n", "no key pressed", nfl_nokey, nfl
+}
+
+# Up to 20 of a[1..n], one line each under the label, then how many more.
+function listed(label, a, n,   i) {
+    for (i = 1; i <= n && i <= 20; i++) printf "  %-16s %s\n", label, a[i]
+    if (n > 20) printf "  %-16s ... %d more\n", label, n - 20
+}
+# The ignored clicks by button, in the order of the buttons.
+function by_button(   k, n, raw, b, i, s) {
+    n = 0
+    for (k in cign_by) raw[++n] = k + 0
+    isort(raw, n, b)
+    for (i = 1; i <= n; i++) s = s ((i > 1) ? ", " : "") sprintf("button %d: %d", b[i], cign_by[b[i]])
+    return s
+}
+# The focus losses with a screensaver line within 2 s before or after; read
+# only when the watches of power or the front app logged something.
+function report_reading(   i, j, d, k) {
+    if (nfl == 0 || npw + nfa == 0) return
+    k = 0
+    for (i = 1; i <= nfl; i++) {
+        for (j = 1; j <= nsv; j++) {
+            d = flms[i] - svms[j]
+            if (d >= -2000 && d <= 2000) { k++; break }
+        }
+    }
+    printf "  %-16s focus losses explained by the screensaver: %d of %d\n", "reading", k, nfl
+}
+function report_input(   s, gaps, i, runs) {
+    if (nin == 0) return
+    print "input (pointer, clicks, power, front app, heartbeats):"
+    if (npshown + nphidden > 0 || pverdict != "") {
+        s = sprintf("shown %d, hidden %d", npshown, nphidden)
+        if (pverdict != "") s = s "; " pverdict
+        printf "  %-16s %s\n", "pointer", s
+    }
+    if (ncok + ncign + ncup > 0) {
+        s = sprintf("%d taken as OK, %d ignored", ncok, ncign)
+        if (ncign > 0) s = s " (" by_button() ")"
+        printf "  %-16s %s, %d ups\n", "clicks", s, ncup
+    }
+    listed("power", pwline, npw)
+    listed("front app", faline, nfa)
+    if (nsr > 0) {
+        isort(srgap, nsr, gaps)
+        printf "  %-16s %d requests; last input p50 %.1f, min %.1f, max %.1f s\n", "screensaver", nsr, pct(gaps, nsr, 50), gaps[1], gaps[nsr]
+    }
+    for (i = 1; i <= nlw; i++) {
+        s = lwkey[i]
+        if (lwcount[s] > 1) s = s sprintf(" (%d lines)", lwcount[s])
+        printf "  %-16s %s\n", "luna watch", s
+    }
+    if (nhb > 0) {
+        printf "  %-16s %d lines; longest no input for %d s at %s; %d of %d focused yes\n", "heartbeats", nhb, hbmax, hbmaxat, hbfocus, nhb
+        for (i = 1; i <= nrun; i++) runs[i] = sprintf("%s to %s: %d heartbeats, up to %d s", runfrom[i], runto[i], runcount[i], runmax[i])
+        listed("no input", runs, nrun)
+    }
+    report_reading()
 }
 
 BEGIN {
@@ -432,12 +530,120 @@ $2 == "launch" && $3 ~ /^[^:]+:$/ && $4 == "failed" && $5 == "after" && whole($6
 $2 == "window" && $3 == "focus" && $4 == "lost:" && $5 == "no" && $6 == "key" && $7 == "yet," {
     nfl++
     nfl_nokey++
+    flms[nfl] = msec()
     next
 }
 $2 == "window" && $3 == "focus" && $4 == "lost:" && $5 == "last" && $6 == "key" &&
     $7 ~ /^[0-9]+(\.[0-9]+)?$/ && $8 == "s" && $9 == "ago," {
     nfl++
     if ($7 + 0 > 5) nfl_nokey++
+    flms[nfl] = msec()
+    next
+}
+
+# The input lines below are matched on fixed fields too, so "key down scancode
+# 484 ..." and the raw event lines are never taken for them. A line that has
+# the fields but not the numbers is skipped.
+
+# pointer shown  or  pointer hidden
+$2 == "pointer" && ($3 == "shown" || $3 == "hidden") && NF == 3 {
+    nin++
+    if ($3 == "shown") npshown++
+    else nphidden++
+    next
+}
+
+# pointer: SDL_webOSCursorVisibility found in the SDL from LG; arrows hide the pointer
+# pointer: SDL_webOSCursorVisibility not in the SDL from LG; the pointer stays as LG leaves it
+# (The log says "LG" with an apostrophe s, which this program cannot hold: it is
+# \047 below.) The last such line in the period gives the verdict.
+$2 == "pointer:" && $3 == "SDL_webOSCursorVisibility" && ($4 == "found" || $4 == "not") &&
+    $5 == "in" && $6 == "LG\047s" && $7 == "SDL;" {
+    nin++
+    pverdict = ($4 == "found") ? "arrows hide the pointer" : "pointer stays as LG leaves it"
+    next
+}
+
+# mouse button 1 down at 960,540: taken as OK
+# mouse button 3 down at 1210,302: ignored
+$2 == "mouse" && $3 == "button" && whole($4) && $5 == "down" && $6 == "at" && $7 ~ /^[0-9]+,[0-9]+:$/ {
+    s = rest(8)
+    if (s == "taken as OK") ncok++
+    else if (s == "ignored") { ncign++; cign_by[$4 + 0]++ }
+    else next
+    nin++
+    next
+}
+
+# mouse button 1 up at 960,540
+$2 == "mouse" && $3 == "button" && whole($4) && $5 == "up" && $6 == "at" && $7 ~ /^[0-9]+,[0-9]+$/ && NF == 7 {
+    nin++
+    ncup++
+    next
+}
+
+# power Screen Saver: last input 118.8 s ago  (the state may hold spaces)
+$2 == "power" && NF >= 8 && $(NF - 5) ~ /:$/ && $(NF - 4) == "last" && $(NF - 3) == "input" &&
+    decimal($(NF - 2)) && $(NF - 1) == "s" && $NF == "ago" {
+    s = fields(3, NF - 5)
+    s = substr(s, 1, length(s) - 1)
+    if (s == "") next
+    nin++
+    npw++
+    pwline[npw] = sprintf("%s at %s (last input %s s ago)", s, stamp(), $(NF - 2))
+    if (s == "Screen Saver") svms[++nsv] = msec()
+    next
+}
+
+# front app com.webos.app.screensaver: last input 119.0 s ago
+$2 == "front" && $3 == "app" && $4 ~ /^[^:]+:$/ && $5 == "last" && $6 == "input" && decimal($7) &&
+    $8 == "s" && $9 == "ago" && NF == 9 {
+    s = substr($4, 1, length($4) - 1)
+    nin++
+    nfa++
+    faline[nfa] = sprintf("%s at %s (last input %s s ago)", s, stamp(), $7)
+    if (s == "com.webos.app.screensaver") svms[++nsv] = msec()
+    next
+}
+
+# screensaver request: allowed; last input 118.1 s ago
+$2 == "screensaver" && $3 == "request:" && $4 == "allowed;" && $5 == "last" && $6 == "input" &&
+    decimal($7) && $8 == "s" && $9 == "ago" && NF == 9 {
+    nin++
+    nsr++
+    srgap[nsr] = $7 + 0
+    next
+}
+
+# luna watch front app: <error text>  (or luna watch power: or luna watch screensaver:)
+# The same subscription with the same text is listed once, with its count.
+$2 == "luna" && $3 == "watch" && ($4 == "power:" || $4 == "screensaver:" || ($4 == "front" && $5 == "app:")) {
+    i = ($4 == "front") ? 6 : 5
+    s = fields(4, i - 1)
+    if (i <= NF) s = s " " rest(i)
+    else s = substr(s, 1, length(s) - 1)
+    nin++
+    if (!(s in lwcount)) lwkey[++nlw] = s
+    lwcount[s]++
+    next
+}
+
+# no input for 90 s; focused yes; pointer hidden; power Active  (or power unknown)
+# A run of heartbeats is one stretch with no input: its count only grows, so a
+# count no higher than the one before starts the next run.
+$2 == "no" && $3 == "input" && $4 == "for" && whole($5) && $6 == "s;" && $7 == "focused" &&
+    ($8 == "yes;" || $8 == "no;") && $9 == "pointer" && ($10 == "shown;" || $10 == "hidden;") &&
+    $11 == "power" && NF >= 12 {
+    hn = $5 + 0
+    nin++
+    nhb++
+    if ($8 == "yes;") hbfocus++
+    if (nhb == 1 || hn > hbmax) { hbmax = hn; hbmaxat = stamp() }
+    if (nhb == 1 || hn <= hblast) { nrun++; runfrom[nrun] = stamp() }
+    runto[nrun] = stamp()
+    runcount[nrun]++
+    runmax[nrun] = hn
+    hblast = hn
     next
 }
 
@@ -492,6 +698,7 @@ END {
     report_foreground()
     report_launches()
     report_focus()
+    report_input()
     if (!frames_seen) {
         # Standard output first, so the message follows the sections it is about
         # when both go to the same place.

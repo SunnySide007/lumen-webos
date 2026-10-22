@@ -1,0 +1,48 @@
+windows (fps lines): 1, 60 frames, 1.0 s
+  average frame    16.67 ms (60.0 fps)
+  worst frame      17.10 ms
+  window worst     p50 17.10  p95 17.10  p99 17.10 ms
+  window average   p50 16.67  p95 16.67  p99 16.67 ms
+  missed vsync     0 of 1 windows had a frame over 25 ms
+  quads            52
+bursts (drew ... idle): 5, 218 frames, 3.6 s
+  average frame    16.70 ms (59.9 fps)
+  worst frame      18.20 ms
+  burst worst      p50 17.30  p95 18.20  p99 18.20 ms
+  burst average    p50 16.70  p95 16.74  p99 16.74 ms
+  missed vsync     0 of 5 bursts had a frame over 25 ms
+  quads            52
+note: the log keeps one average and one worst frame per window or burst, so percentiles are over those, not over single frames
+first frames: in 3 bursts with first times, frame 2 over 25 ms in 0, frame 3 in 0, frame 4 in 0
+key presses (key ...: lines): 8 shown, 0 not shown, 0 more not timed
+  shown after      p50 17  p95 18  max 18 ms
+  target 2         8 of 8 within 33 ms
+start-ups (start: lines): 1
+  sdl 16 ms, gl 286 ms, renderer 398 ms, assets 450 ms, apps 187 ms, first frame 43 ms (1380 ms in all)
+foreground (foreground: lines): 2 shown, 0 not shown
+  first frame      p50 2  max 3 ms
+launches (launch <id>: lines): 1, 0 failed
+  com.webos.app.hdmi1: answered in 45 ms
+  target 6         1 of 1 within 100 ms
+focus losses (window focus lost lines): 3
+  no key pressed   2 of 3 (no key yet, or the last key over 5 s before)
+input (pointer, clicks, power, front app, heartbeats):
+  pointer          shown 2, hidden 2; arrows hide the pointer
+  clicks           1 taken as OK, 1 ignored (button 3: 1), 2 ups
+  power            Active at 1792650001.490 (last input 1.4 s ago)
+  power            Screen Saver at 1792650133.800 (last input 118.8 s ago)
+  power            Active at 1792650180.000 (last input 165.0 s ago)
+  power            Screen Saver at 1792650435.500 (last input 120.5 s ago)
+  power            Screen Off at 1792650500.000 (last input 185.0 s ago)
+  front app        io.github.sunnyside007.lumen.shell at 1792650001.495 (last input 1.4 s ago)
+  front app        com.webos.app.screensaver at 1792650134.000 (last input 119.0 s ago)
+  front app        io.github.sunnyside007.lumen.shell at 1792650180.200 (last input 165.2 s ago)
+  front app        com.webos.app.hdmi1 at 1792650280.300 (last input 0.3 s ago)
+  front app        io.github.sunnyside007.lumen.shell at 1792650310.000 (last input 30.0 s ago)
+  screensaver      2 requests; last input p50 118.1, min 118.1, max 119.6 s
+  luna watch       front app: subscription cancelled: no reply from com.webos.applicationManager
+  heartbeats       13 lines; longest no input for 150 s at 1792650165.000; 9 of 13 focused yes
+  no input         1792650045.000 to 1792650165.000: 5 heartbeats, up to 150 s
+  no input         1792650215.000 to 1792650275.000: 3 heartbeats, up to 90 s
+  no input         1792650345.000 to 1792650465.000: 5 heartbeats, up to 150 s
+  reading          focus losses explained by the screensaver: 2 of 3

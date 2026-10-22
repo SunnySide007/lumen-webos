@@ -646,3 +646,361 @@ EOF
     [[ "$output" == *"first frames: in 1 bursts with first times, frame 2 over 25 ms in 1, frame 3 in 1, frame 4 in 0"* ]]
     [[ "$output" != *$'\r'* ]]
 }
+
+# The input lines: the Magic Remote's pointer and clicks, LG's power state, the
+# app in front, the screensaver's requests, failed luna watches and the idle
+# heartbeat. input.txt is a run with all of them: two screensavers (the second
+# after the front-app watch failed) and a launch of HDMI 1, each with a focus
+# loss. input.expected and slow.expected are what the script printed for them;
+# slow.expected was printed by the script before it read the input lines.
+
+@test "help lists the input lines" {
+    run "$STATS" help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"pointer shown"* ]]
+    [[ "$output" == *"mouse button 1 down at 960,540: taken as OK"* ]]
+    [[ "$output" == *"power <state>: last input"* ]]
+    [[ "$output" == *"luna watch <what>: <error text>"* ]]
+    [[ "$output" == *"no input for 90 s; focused yes; pointer hidden; power Active"* ]]
+}
+
+@test "logs without input lines print no input section, byte for byte as before" {
+    for fix in hello-gles shell timing slow; do
+        "$STATS" "$FIX/$fix.txt" > "$BATS_TEST_TMPDIR/$fix.out"
+        cmp "$FIX/$fix.expected" "$BATS_TEST_TMPDIR/$fix.out"
+        [ "$(grep -c -E '^(input \(|  reading )' "$BATS_TEST_TMPDIR/$fix.out")" -eq 0 ]
+    done
+}
+
+@test "the input run prints the whole summary" {
+    run "$STATS" "$FIX/input.txt"
+    [ "$status" -eq 0 ]
+    "$STATS" "$FIX/input.txt" > "$BATS_TEST_TMPDIR/input.out"
+    cmp "$FIX/input.expected" "$BATS_TEST_TMPDIR/input.out"
+    # The click taken as OK is a key press too: 7 keys and 1 click, all timed.
+    [[ "$output" == *"key presses (key ...: lines): 8 shown, 0 not shown, 0 more not timed"* ]]
+}
+
+@test "the input lines leave the rest of the output as it was, and come last" {
+    run "$STATS" "$FIX/input.txt"
+    [ "$status" -eq 0 ]
+    with=$(printf '%s\n' "$output" | sed '/^input (/,$d')
+    order=$(printf '%s\n' "$output" |
+        grep -o -E '^(windows|bursts|note:|first frames|key presses|start-ups|foreground|launches|focus losses|input)' |
+        tr '\n' ',')
+    [ "$order" = "windows,bursts,note:,first frames,key presses,start-ups,foreground,launches,focus losses,input," ]
+
+    grep -v -E '^\[[0-9.]+\] (pointer|mouse button|power|front app|screensaver request|luna watch|no input for)([ :]|$)' \
+        "$FIX/input.txt" > "$BATS_TEST_TMPDIR/without.log"
+    run "$STATS" "$BATS_TEST_TMPDIR/without.log"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$with" ]
+}
+
+@test "the pointer gives how often it showed and hid, and the last verdict on arrows" {
+    log="$BATS_TEST_TMPDIR/pointer.log"
+    {
+        echo "[1792636000.000] pointer: SDL_webOSCursorVisibility not in LG's SDL; the pointer stays as LG leaves it"
+        echo '[1792636000.100] pointer shown'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"input (pointer, clicks, power, front app, heartbeats):"$'\n'"  pointer          shown 1, hidden 0; pointer stays as LG leaves it"$'\n'* ]]
+
+    echo "[1792636000.200] pointer: SDL_webOSCursorVisibility found in LG's SDL; arrows hide the pointer" >> "$log"
+    echo '[1792636000.300] pointer hidden' >> "$log"
+    run "$STATS" "$log"
+    [[ "$output" == *"  pointer          shown 1, hidden 1; arrows hide the pointer"$'\n'* ]]
+
+    # The verdict alone, and the counts alone.
+    run "$STATS" --since 1792636000.2 --until 1792636000.2 "$log"
+    [[ "$output" == *"  pointer          shown 0, hidden 0; arrows hide the pointer"$'\n'* ]]
+    run "$STATS" --since 1792636000.3 "$log"
+    [[ "$output" == *"  pointer          shown 0, hidden 1"$'\n'* ]]
+    [[ "$output" != *"arrows"* ]]
+}
+
+@test "clicks count OKs, ignored ones by button in number order, and ups" {
+    log="$BATS_TEST_TMPDIR/clicks.log"
+    {
+        echo '[1792636000.000] mouse button 1 down at 960,540: taken as OK'
+        echo '[1792636000.100] mouse button 10 down at 0,0: ignored'
+        echo '[1792636000.200] mouse button 2 down at 1919,1079: ignored'
+        echo '[1792636000.300] mouse button 2 down at 5,5: ignored'
+        echo '[1792636000.400] mouse button 2 up at 5,5'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"  clicks           1 taken as OK, 3 ignored (button 2: 2, button 10: 1), 1 ups"$'\n'* ]]
+    [[ "$output" != *"  pointer "* ]]
+
+    run "$STATS" --until 1792636000 "$log"
+    [[ "$output" == *"  clicks           1 taken as OK, 0 ignored, 0 ups"$'\n'* ]]
+}
+
+@test "power and front app list each line in order, with its stamp and last input" {
+    run "$STATS" "$FIX/input.txt"
+    [ "$status" -eq 0 ]
+    power=$(printf '%s\n' "$output" | grep '^  power ')
+    [ "$power" = "  power            Active at 1792650001.490 (last input 1.4 s ago)
+  power            Screen Saver at 1792650133.800 (last input 118.8 s ago)
+  power            Active at 1792650180.000 (last input 165.0 s ago)
+  power            Screen Saver at 1792650435.500 (last input 120.5 s ago)
+  power            Screen Off at 1792650500.000 (last input 185.0 s ago)" ]
+    front=$(printf '%s\n' "$output" | grep '^  front app ')
+    [ "$front" = "  front app        io.github.sunnyside007.lumen.shell at 1792650001.495 (last input 1.4 s ago)
+  front app        com.webos.app.screensaver at 1792650134.000 (last input 119.0 s ago)
+  front app        io.github.sunnyside007.lumen.shell at 1792650180.200 (last input 165.2 s ago)
+  front app        com.webos.app.hdmi1 at 1792650280.300 (last input 0.3 s ago)
+  front app        io.github.sunnyside007.lumen.shell at 1792650310.000 (last input 30.0 s ago)" ]
+}
+
+@test "power, front app and heartbeat runs stop at 20 lines each and count the rest" {
+    log="$BATS_TEST_TMPDIR/many.log"
+    for i in $(seq 1 23); do
+        echo "[$((1792636000 + i)).000] power Active: last input $i.0 s ago"
+    done > "$log"
+    for i in $(seq 1 20); do
+        echo "[$((1792636100 + i)).000] front app com.example.app$i: last input $i.0 s ago"
+    done >> "$log"
+    # The same count each time: every heartbeat starts a run.
+    for i in $(seq 1 21); do
+        echo "[$((1792636200 + i)).000] no input for 30 s; focused yes; pointer hidden; power Active"
+    done >> "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [ "$(printf '%s\n' "$output" | grep -c '^  power ')" -eq 21 ]
+    [[ "$output" == *"  power            Active at 1792636020.000 (last input 20.0 s ago)"$'\n'"  power            ... 3 more"$'\n'* ]]
+    [[ "$output" != *"last input 21.0 s ago"* ]]
+    [ "$(printf '%s\n' "$output" | grep -c '^  front app ')" -eq 20 ]
+    [[ "$output" == *"com.example.app20 at 1792636120.000"* ]]
+    [[ "$output" != *"front app        ..."* ]]
+    [ "$(printf '%s\n' "$output" | grep -c '^  no input ')" -eq 21 ]
+    [[ "$output" == *"  no input         1792636220.000 to 1792636220.000: 1 heartbeats, up to 30 s"$'\n'"  no input         ... 1 more"* ]]
+    [[ "$output" == *"  heartbeats       21 lines; longest no input for 30 s at 1792636201.000; 21 of 21 focused yes"* ]]
+}
+
+@test "screensaver requests give their count and the p50, min and max of last input" {
+    log="$BATS_TEST_TMPDIR/ss.log"
+    {
+        echo '[1792636000.000] screensaver request: allowed; last input 120.1 s ago'
+        echo '[1792636200.000] screensaver request: allowed; last input 112.4 s ago'
+        echo '[1792636400.000] screensaver request: allowed; last input 118.0 s ago'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"  screensaver      3 requests; last input p50 118.0, min 112.4, max 120.1 s"* ]]
+    # No power or front app line: nothing to read the focus losses by.
+    [[ "$output" != *"reading"* ]]
+}
+
+@test "failed luna watches are listed once each, with their text and count" {
+    log="$BATS_TEST_TMPDIR/watch.log"
+    {
+        echo '[1792636000.000] luna watch power: Denied method call "getPowerState" for category "/"'
+        echo '[1792636000.100] luna watch front app: 100% %s denied'
+        echo '[1792636000.200] luna watch power: Denied method call "getPowerState" for category "/"'
+        echo '[1792636000.300] luna watch screensaver:'
+        echo '[1792636000.400] luna launch: 38 ms'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    watch=$(printf '%s\n' "$output" | grep '^  luna watch ')
+    [ "$watch" = '  luna watch       power: Denied method call "getPowerState" for category "/" (2 lines)
+  luna watch       front app: 100% %s denied
+  luna watch       screensaver' ]
+}
+
+@test "heartbeats give the longest wait, how many were focused, and each run" {
+    log="$BATS_TEST_TMPDIR/heart.log"
+    {
+        echo '[1792636000.000] no input for 30 s; focused yes; pointer shown; power Active'
+        echo '[1792636030.000] no input for 60 s; focused no; pointer hidden; power Screen Saver'
+        echo '[1792636040.000] no input for 60 s; focused no; pointer hidden; power unknown'
+        echo '[1792636070.000] no input for 90 s; focused no; pointer hidden; power Screen Off'
+        echo '[1792636080.000] no input for 30 s; focused yes; pointer hidden; power Active'
+        echo '[1792636110.000] no input for 90 s; focused yes; pointer hidden; power Active'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    # 60 after 60 is a new run, as is 30 after 90; the first 90 is the longest.
+    [[ "$output" == *"  heartbeats       6 lines; longest no input for 90 s at 1792636070.000; 3 of 6 focused yes"* ]]
+    runs=$(printf '%s\n' "$output" | grep '^  no input ')
+    [ "$runs" = "  no input         1792636000.000 to 1792636030.000: 2 heartbeats, up to 60 s
+  no input         1792636040.000 to 1792636070.000: 2 heartbeats, up to 90 s
+  no input         1792636080.000 to 1792636110.000: 2 heartbeats, up to 90 s" ]
+}
+
+@test "the reading counts focus losses with a screensaver line within 2 s either side" {
+    log="$BATS_TEST_TMPDIR/reading.log"
+    {
+        # 2 s after: counted.
+        echo '[1792636000.000] window focus lost: no key yet, 3 other events since'
+        echo '[1792636002.000] power Screen Saver: last input 120.0 s ago'
+        # 2.001 s before: not counted.
+        echo '[1792636097.999] front app com.webos.app.screensaver: last input 119.0 s ago'
+        echo '[1792636100.000] window focus lost: last key 121.0 s ago, 2 other events since'
+        # Another state, another app: not counted.
+        echo '[1792636200.000] window focus lost: last key 0.2 s ago, 2 other events since'
+        echo '[1792636200.500] power Screen Off: last input 0.7 s ago'
+        echo '[1792636200.600] front app com.webos.app.hdmi1: last input 0.8 s ago'
+        # 2 s before: counted.
+        echo '[1792636298.000] front app com.webos.app.screensaver: last input 118.0 s ago'
+        echo '[1792636300.000] window focus lost: last key 120.0 s ago, 2 other events since'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"focus losses (window focus lost lines): 4"* ]]
+    [[ "$output" == *$'\n'"  reading          focus losses explained by the screensaver: 2 of 4"$'\n'* ]]
+
+    # Without power or front app lines there is nothing to read them by.
+    grep -v -E '] (power|front app) ' "$log" > "$BATS_TEST_TMPDIR/bare.log"
+    echo '[1792636400.000] no input for 30 s; focused yes; pointer hidden; power unknown' >> "$BATS_TEST_TMPDIR/bare.log"
+    run "$STATS" "$BATS_TEST_TMPDIR/bare.log"
+    [[ "$output" == *"heartbeats"* ]]
+    [[ "$output" != *"reading"* ]]
+
+    # Nor without focus losses.
+    grep -v 'window focus lost' "$log" > "$BATS_TEST_TMPDIR/nofocus.log"
+    run "$STATS" "$BATS_TEST_TMPDIR/nofocus.log"
+    [[ "$output" == *"  power "* ]]
+    [[ "$output" != *"reading"* ]]
+}
+
+@test "--since and --until cut the input lines too" {
+    run "$STATS" --until 1792650200 "$FIX/input.txt"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"  pointer          shown 1, hidden 1; arrows hide the pointer"* ]]
+    [[ "$output" == *"  clicks           1 taken as OK, 1 ignored (button 3: 1), 2 ups"* ]]
+    [ "$(printf '%s\n' "$output" | grep -c '^  power ')" -eq 3 ]
+    [ "$(printf '%s\n' "$output" | grep -c '^  front app ')" -eq 3 ]
+    [[ "$output" == *"  screensaver      1 requests; last input p50 118.1, min 118.1, max 118.1 s"* ]]
+    [[ "$output" != *"luna watch"* ]]
+    [[ "$output" == *"  heartbeats       5 lines; longest no input for 150 s at 1792650165.000; 3 of 5 focused yes"* ]]
+    [ "$(printf '%s\n' "$output" | grep -c '^  no input ')" -eq 1 ]
+    [[ "$output" == *"explained by the screensaver: 1 of 1"* ]]
+
+    # After the first screensaver: the start-up's pointer verdict is cut.
+    run "$STATS" --since 1792650200 "$FIX/input.txt"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"  pointer          shown 1, hidden 1"$'\n'* ]]
+    [[ "$output" != *"  clicks "* ]]
+    [[ "$output" == *"  power            Screen Saver at 1792650435.500 (last input 120.5 s ago)"* ]]
+    [[ "$output" == *"  luna watch       front app: subscription cancelled: no reply from com.webos.applicationManager"* ]]
+    [[ "$output" == *"  heartbeats       8 lines; longest no input for 150 s at 1792650465.000; 6 of 8 focused yes"* ]]
+    [[ "$output" == *"explained by the screensaver: 1 of 2"* ]]
+
+    # Up to the second focus loss but not the power line just after it.
+    run "$STATS" --since 1792650200 --until 1792650435 "$FIX/input.txt"
+    [[ "$output" != *"  power "* ]]
+    [[ "$output" == *"explained by the screensaver: 0 of 2"* ]]
+
+    # Frames and keys only: no input section.
+    run "$STATS" --since 1792650002 --until 1792650009 "$FIX/input.txt"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"key presses"* ]]
+    [[ "$output" != *"input ("* ]]
+}
+
+@test "input lines that do not read right are skipped, and the rest still counts" {
+    log="$BATS_TEST_TMPDIR/good.log"
+    {
+        echo '[1792636000.000] fps 60.0 avg 16.67 ms max 17.00 ms (60 frames, 1200 quads)'
+        echo '[1792636000.100] pointer shown'
+        echo "[1792636000.200] pointer: SDL_webOSCursorVisibility not in LG's SDL; the pointer stays as LG leaves it"
+        echo '[1792636000.300] mouse button 1 down at 960,540: taken as OK'
+        echo '[1792636000.400] mouse button 3 down at 960,540: ignored'
+        echo '[1792636000.500] mouse button 1 up at 960,540'
+        echo '[1792636000.600] power Screen Saver: last input 118.8 s ago'
+        echo '[1792636000.700] front app com.webos.app.screensaver: last input 119.0 s ago'
+        echo '[1792636000.800] screensaver request: allowed; last input 118.1 s ago'
+        echo '[1792636000.900] luna watch power: denied'
+        echo '[1792636001.000] no input for 30 s; focused yes; pointer hidden; power Active'
+        echo '[1792636001.100] window focus lost: last key 118.3 s ago, 3 other events since'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 0 ]
+    good=$output
+    [[ "$good" == *"  pointer          shown 1, hidden 0; pointer stays as LG leaves it"* ]]
+    [[ "$good" == *"  clicks           1 taken as OK, 1 ignored (button 3: 1), 1 ups"* ]]
+    [[ "$good" == *"explained by the screensaver: 1 of 1"* ]]
+
+    bad="$BATS_TEST_TMPDIR/bad.log"
+    {
+        echo '[1792636002.000] pointer shown now'
+        echo '[1792636002.000] pointer'
+        echo '[1792636002.000] pointer: shown'
+        echo "[1792636002.000] pointer: SDL_webOSCursorVisibility maybe in LG's SDL; arrows hide the pointer"
+        echo '[1792636002.000] pointer: SDL_webOSCursorVisibility found in SDL; arrows hide the pointer'
+        echo '[1792636002.000] mouse button left down at 960,540: taken as OK'
+        echo '[1792636002.000] mouse button 1 down at 960;540: taken as OK'
+        echo '[1792636002.000] mouse button 1 down at 960,540 taken as OK'
+        echo '[1792636002.000] mouse button 1 down at 960,540: pressed'
+        echo '[1792636002.000] mouse button 1 down at 960,540:'
+        echo '[1792636002.000] mouse button 1 up at 960,540 late'
+        echo '[1792636002.000] mouse button 1 up at x,540'
+        echo '[1792636002.000] power Active: last input soon s ago'
+        echo '[1792636002.000] power : last input 1.0 s ago'
+        echo '[1792636002.000] power Screen Saver last input 1.0 s ago'
+        echo '[1792636002.000] power Active: last input 1.0 s'
+        echo '[1792636002.000] power: last input 1.0 s ago'
+        echo '[1792636002.000] front app com.x last input 1.0 s ago'
+        echo '[1792636002.000] front app com.webos.app.screensaver: last input -1.0 s ago'
+        echo '[1792636002.000] front app: last input 1.0 s ago'
+        echo '[1792636002.000] front app a b: last input 1.0 s ago'
+        echo '[1792636002.000] screensaver request: refused; last input 118.1 s ago'
+        echo '[1792636002.000] screensaver request: allowed; last input soon s ago'
+        echo '[1792636002.000] screensaver request: allowed'
+        echo '[1792636002.000] luna watch tv: denied'
+        echo '[1792636002.000] luna watch front: denied'
+        echo '[1792636002.000] luna watched power: denied'
+        echo '[1792636002.000] no input for soon s; focused yes; pointer hidden; power Active'
+        echo '[1792636002.000] no input for 30 s; focused maybe; pointer hidden; power Active'
+        echo '[1792636002.000] no input for 30 s; focused yes; pointer gone; power Active'
+        echo '[1792636002.000] no input for 30 s; focused yes; pointer hidden; power'
+        echo '[1792636002.000] no input for 30 s'
+        echo '[1792636002.000] key down scancode 484 keycode 0x0 (None)'
+        echo '[1792636002.000] raw event 0x401: 01 04 00 00|d3 30 00 00'
+        echo '[1792636002.000] raw event 0x402: 02 04 00 00|6a 31 00 00'
+        echo 'pointer shown'
+        echo 'power Screen Saver: last input 1.0 s ago'
+    } > "$bad"
+    cat "$log" "$bad" > "$BATS_TEST_TMPDIR/both.log"
+    run "$STATS" "$BATS_TEST_TMPDIR/both.log"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$good" ]
+
+    # Alone, they print no input section at all.
+    run "$STATS" "$bad"
+    [ "$status" -eq 1 ]
+    [[ "$output" != *"input ("* ]]
+}
+
+@test "input lines without frame statistics are printed, and the status is still 1" {
+    log="$BATS_TEST_TMPDIR/only.log"
+    echo '[1792636000.000] no input for 30 s; focused yes; pointer hidden; power Active' > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == "input (pointer, clicks, power, front app, heartbeats):"*"heartbeats       1 lines"*"no frame statistics in the log for that period" ]]
+}
+
+@test "carriage returns and percent signs on input lines do not matter" {
+    log="$BATS_TEST_TMPDIR/crlf-input.log"
+    printf '[1792636000.000] pointer shown\r\n' > "$log"
+    printf '[1792636000.100] mouse button 1 up at 960,540\r\n' >> "$log"
+    printf '[1792636000.200] power 100%% %%s Saver: last input 1.0 s ago\r\n' >> "$log"
+    printf '[1792636000.300] front app a.b: last input 2.0 s ago\r\n' >> "$log"
+    printf '[1792636000.400] screensaver request: allowed; last input 3.0 s ago\r\n' >> "$log"
+    printf '[1792636000.500] luna watch screensaver: 100%% %%d gone\r\n' >> "$log"
+    printf '[1792636000.600] no input for 30 s; focused no; pointer shown; power Active\r\n' >> "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"  pointer          shown 1, hidden 0"* ]]
+    [[ "$output" == *"  clicks           0 taken as OK, 0 ignored, 1 ups"* ]]
+    [[ "$output" == *"  power            100% %s Saver at 1792636000.200 (last input 1.0 s ago)"* ]]
+    [[ "$output" == *"  front app        a.b at 1792636000.300 (last input 2.0 s ago)"* ]]
+    [[ "$output" == *"  screensaver      1 requests; last input p50 3.0, min 3.0, max 3.0 s"* ]]
+    [[ "$output" == *"  luna watch       screensaver: 100% %d gone"* ]]
+    [[ "$output" == *"  heartbeats       1 lines; longest no input for 30 s at 1792636000.600; 0 of 1 focused yes"* ]]
+    [[ "$output" != *$'\r'* ]]
+}

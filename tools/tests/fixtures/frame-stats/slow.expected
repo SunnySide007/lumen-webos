@@ -1,0 +1,19 @@
+bursts (drew ... idle): 4, 71 frames, 1.2 s
+  average frame    18.23 ms (54.9 fps)
+  worst frame      35.10 ms
+  burst worst      p50 28.41  p95 35.10  p99 35.10 ms
+  burst average    p50 19.00  p95 33.30  p99 33.30 ms
+  missed vsync     4 of 4 bursts had a frame over 25 ms
+  quads            36 to 104
+note: the log keeps one average and one worst frame per window or burst, so percentiles are over those, not over single frames
+slow frames (slow frame lines): 7, 2 more not logged
+  which frame      frame 2: 2, frame 3: 1, frame 4: 1, later: 3
+  loop             p50 0.30  max 0.50 ms
+  batch            p50 0.60  max 4.10 ms
+  upload           p50 0.00  max 2.20 ms
+  submit           p50 0.50  max 0.60 ms
+  swap             p50 32.00  max 33.50 ms
+  uploads          2 of 7 had uploads, 76 KB in all
+  glyphs           3 of 7 rasterised glyphs, 25 in all
+  page faults      19 minor, 4 major; 2 of 7 counted had a major fault
+first frames: in 4 bursts with first times, frame 2 over 25 ms in 2, frame 3 in 1, frame 4 in 1
