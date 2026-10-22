@@ -47,26 +47,53 @@ sets the bar they are judged against.
 Memory is on the list because a page-in from swap is a stall no frame budget
 survives.
 
-### Log lines to add (proposed)
+### Log lines
 
-Built with `/ecc:orch-add-feature` once this spec is approved, and summarised
-by `tools/frame-stats.sh`:
+Decided; the owner approved them on 2026-10-22. The shell writes them (branch
+`claude/shell-timing`) and `tools/frame-stats.sh` summarises them. Each line
+starts with `[<unix seconds>] ` like the others. Times are whole milliseconds.
+`<why>` is one of `the window lost focus`, `the window was hidden`, `the app
+went to the background`, `nothing to draw` or `the shell is leaving`.
 
-* `key <scancode>: shown after N ms`: from the SDL event's timestamp to the end
-  of the swap of the first frame that drew its effect.
-* `start: sdl N, gl N, renderer N, assets N, apps N, first frame N ms`: each
-  phase, from the process's start.
-* `foreground: first frame after N ms`: from focus gained, or
-  did-enter-foreground, to the first frame shown.
-* `launch <id>: answered in N ms`: luna's reply to `applicationManager/launch`.
+```text
+key <sc>: shown after <N> ms
+key <sc>: shown after <N> ms (<B> ms in launch)
+key <sc>: not shown after <N> ms: <why>
+key <sc>: not shown after <N> ms (<B> ms in launch): <why>
+keys: <K> more presses not timed
+start: sdl <N>, gl <N>, renderer <N>, assets <N>, apps <N>, first frame <N> ms
+start: sdl <N>, gl <N>, renderer <N>, assets <N>, apps <N> ms; no first frame: <why>
+foreground: first frame after <N> ms
+foreground: not shown after <N> ms: <why>
+launch <id>: answered in <N> ms
+launch <id>: failed after <N> ms: <error text>
+window <event>: last key <S.s> s ago, <M> other events since
+window <event>: no key yet, <M> other events since
+app <background|foreground>: last key <S.s> s ago, <M> other events since
+app <background|foreground>: no key yet, <M> other events since
+in front again (<cause>): drawing resumes
+```
+
+* `key` (target 2): from the SDL event's timestamp to the end of the swap of the
+  first frame that drew its effect. `(<B> ms in launch)` says how much of that
+  went on a launch. `keys:` counts the presses that got no line of their own.
+* `start` (target 4): running totals in ms from the process's `main()`;
+  `frame-stats.sh` turns them into the time each phase took.
+* `foreground` (target 5): from focus gained, or did-enter-foreground, to the
+  first frame shown.
+* `launch` (target 6): luna's reply to `applicationManager/launch`.
+* `window` and `app`: `<event>` is `focus lost`, `focus gained`, `hidden`,
+  `shown`, `minimized` or `restored`. They say how long ago the last key came
+  and how many other events came since, to tell a lost focus from no keys.
+  `frame-stats.sh` counts the focus losses with no key pressed.
+* `in front again` pairs with the existing `the window lost focus: drawing
+  stops`.
 
 ### What blocks measuring now
 
 * **Keys:** after `tools/tv.sh launch`, keys didn't reach the shell
   (shell-mvp.md, "Still open" 5). B1, opened by hand from LG's app list, got
   them. The next TV run opens the shell by hand.
-* **Tools:** `lumen-tv-check` and `tools/frame-stats.sh` are on branch
-  `claude/play-p0-tv-check-38065c`, not on main yet.
 
 ## Pretty
 
@@ -182,20 +209,26 @@ The roadmap's Phase 4 is done when all three pass.
 1. The owed B2/B3 run on the TV, opened by hand: the frame time of the moving
    grid with the shape shader. Every pretty item spends against that number.
 2. The log lines above, then targets 1–9 measured.
-3. The cheap fixes: the `style` module, dither, kerning; icons once the owner
-   decides about root.
-4. Phase 4, in this order: focus light and tilt, Top Shelf, glass (the chosen
-   option), Control Center, editing.
+3. The cheap fixes: the `style` module, dither, kerning; icons through the
+   root copy.
+4. Phase 4, in this order: focus light and tilt, Top Shelf, glass (B, frosted
+   still), Control Center, editing.
 
 ## Owner's decisions
 
-1. Glass: A (live) or B (frosted still).
-2. Icons: allow a root copy of LG's app icons through Homebrew Channel, or keep
-   letters for those apps.
-3. Held keys: speed up after 1.5 s, or keep the steady 120 ms.
-4. Sound: tvOS ticks on focus moves. shell-mvp.md leaves sound out; in or out
-   for Phase 4?
-5. Top Shelf art: the owner's per-app art, stills from Lumen's loops, or both.
+Answered on 2026-10-22, except held keys:
+
+1. Glass: **B, frosted still.**
+2. Icons: **a root copy is allowed:** LG's app icons copied through Homebrew
+   Channel's `exec`, reversible, with every TV step asked first
+   ([docs/safety.md](../safety.md)).
+3. Held keys: speed up after 1.5 s, or keep the steady 120 ms. **Open** until
+   the B2/B3 run measures the remote's repeat rate; then tried in the
+   simulator.
+4. Sound: **in** for Phase 4: tvOS-style ticks on focus moves. The shell MVP
+   stays silent.
+5. Top Shelf art: **both:** the owner's art for an app where there is some,
+   stills from Lumen's loops otherwise.
 
 ## Not in this spec
 
