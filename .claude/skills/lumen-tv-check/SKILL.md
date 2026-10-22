@@ -134,11 +134,18 @@ Agree first on what the owner does on the remote while the clock runs:
 * **Focus and keys (B9, 2026-10-21):** after `tv.sh launch`, no remote key
   reached the shell until the owner woke the Magic Remote's pointer. The shell
   also lost focus to LG's UI twice with nothing on our side, and every key
-  then went elsewhere. The B2 and B3 builds log both: `the window lost focus:
-  drawing stops` and `in front again: drawing resumes`. So the owner wakes the
-  pointer and checks that an arrow moves the focus before the clock starts.
-  B1's run, which got keys, was opened by hand from LG's app list; try that if
-  keys still don't arrive.
+  then went elsewhere. The shell logs both: `the window lost focus: drawing
+  stops` and `in front again (<cause>): drawing resumes` (the B2 and B3 builds
+  print no cause). So the owner wakes the pointer and checks that an arrow
+  moves the focus before the clock starts. B1's run, which got keys, was opened
+  by hand from LG's app list; try that if keys still don't arrive.
+* **The window, and who is in front (B9, 2026-10-22):** when keys may be
+  missing, don't take the window from a `T0` read. A `T0` only says when the
+  owner meant to start. Take it from the log's own first and last `key down`
+  after the launch, and use those two stamps as `--since` and `--until`. Don't
+  confirm that the shell is the app in front by eye either. The log says so:
+  `key down`, `fps` and `drew` lines are coming in, and no `the window lost
+  focus: drawing stops` has come since the last `in front again`.
 * **A build that lists apps through `luna-send`** (B3 on) shows no apps when
   launched as an app. Inside the app's jail `luna-send` fails with
   `Permission denied` (B9, 2026-10-21), so there is nothing to move through.
@@ -153,15 +160,16 @@ sh tools/tv.sh launch $APP                                       # expect "retur
 sh tools/tv.sh run 'sleep 35; date +%s' </dev/null               # 5 s warm-up + 30 s; prints END
 ```
 
-For the shell, read the clock again as `T0` once the owner confirms that keys
-reach it, then run the wait. Write "start" when the wait begins and "stop"
-when it returns. If the harness blocks the `sleep`, run that call in the
-background. Then fetch the whole log (the app appends to it across runs; the
-lookup is the one `tools/tv.sh log` uses for a jailed `/tmp`) and summarise
-the window:
+For the shell, keep the first reading as `LAUNCH0` and read the clock again as
+`T0` once the owner confirms that keys reach it (or take the window from the
+log, as in the 2026-10-22 note above), then run the wait. Write "start" when
+the wait begins and "stop" when it returns. If the harness blocks the `sleep`,
+run that call in the background. Then fetch the whole log (the app appends to
+it across runs; the lookup is the one `tools/tv.sh log` uses for a jailed
+`/tmp`) and summarise the window:
 
 ```sh
-sh tools/tv.sh run 'f=/tmp/lumen-shell.log; [ -f "$f" ] || f=$(find /var/palm/jail -name lumen-shell.log 2>/dev/null | head -n 1); [ -n "$f" ] && [ -f "$f" ] && tail -n 20000 "$f"' </dev/null > "$OUT/run.log"
+sh tools/tv.sh run 'n=0; for f in /tmp/lumen-shell.log /tmp/lumen-shell.fallback.log; do [ -f "$f" ] && tail -n 20000 "$f" && n=1; done; [ "$n" = 1 ] || { f=$(find /var/palm/jail -name lumen-shell.log 2>/dev/null | head -n 1); [ -n "$f" ] && tail -n 20000 "$f"; }' </dev/null > "$OUT/run.log"
 sh $STATS --since $((T0 + 5)) --until $END "$OUT/run.log"         # END from the wait
 grep 'GL vendor' "$OUT/run.log" | tail -n 1
 ```
@@ -175,6 +183,15 @@ it a crash: on 2026-10-21 a B2 that looked crashed was alive, only without
 focus. Add `--miss-ms` only if the milestone sets another line; the default
 25 ms is a frame and a half at 60 Hz.
 
+A build with the timing lines gets their sections from the same `frame-stats.sh`
+run, printed after the frame statistics. They are printed even when there are
+no frame statistics, and the exit status is then still 1. `--since` drops every
+line before it, and the `start:` line is logged a second or two after the
+launch, so a `--since` after the launch loses it. To include it, make a second
+pass over the whole run, with a `--since` from before the launch (`LAUNCH0`,
+read before `tv.sh launch`, not the `T0` read once keys work). Report the frame
+numbers from the first pass and the start-up from the second.
+
 What the log holds, for reading the output:
 
 * `fps … avg … ms max … ms (…)`: one line per window of about a second, from
@@ -182,10 +199,21 @@ What the log holds, for reading the output:
 * `drew N frames in … ms (avg …, worst …, … quads); idle`: one line per burst
   of motion, from the shell.
 * `SDL repeat K of scancode S: … ms after the press, … ms after the last`: the
-  remote's key repeats (B3 builds on), summarised at the end of the output.
+  remote's key repeats (B3 builds on), summarised after the frame statistics.
+* `key S: shown after … ms`, `key S: not shown after … ms: <why>` and `keys: K
+  more presses not timed`: the time from a press to the frame that shows it.
+  The output gives p50, p95 and max, how many were within 33 ms (target 2), and
+  the presses not shown by reason.
+* `start: …`, `foreground: …` and `launch <id>: …`: the start-up split into its
+  phases, the wake-ups from the background, and how long luna took to answer
+  each launch (target 6, 100 ms).
+* `window focus lost: …`: how long since the last key. The output counts the
+  focus losses with no key pressed.
+* `key down scancode …` and `luna <method>: N ms` are not timing lines; the
+  script leaves them out.
 * The log keeps no per-frame times. The percentiles are over windows or bursts,
   nearest rank, and the output says so; keep that sentence when you pass the
-  numbers on.
+  numbers on. The key, launch and foreground figures are over single events.
 
 ## 5. Step D: close and restore (ask first)
 

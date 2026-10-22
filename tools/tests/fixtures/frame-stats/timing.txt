@@ -1,0 +1,55 @@
+[1792635800.000] GL vendor "ARM" renderer "Mali-T820" version "OpenGL ES 3.2 v1.r12p0-04rel0" glsl "OpenGL ES GLSL ES 3.20"
+[1792635801.210] start: sdl 340, gl 366, renderer 700, assets 1000, apps 1040 ms; no first frame: the app went to the background
+[1792635801.300] app background: no key yet, 2 other events since
+[1792635806.900] app foreground: no key yet, 4 other events since
+[1792635807.000] foreground: not shown after 5700 ms: the app went to the background
+[1792635808.000] the window lost focus: drawing stops
+[1792635808.000] window focus lost: no key yet, 3 other events since
+[1792635809.000] launch com.example.missing: failed after 12 ms: Permission denied
+[1792635812.500] window focus gained: no key yet, 1 other events since
+[1792635812.510] in front again (the window gained focus): drawing resumes
+[1792635812.620] foreground: first frame after 90 ms
+[1792635950.000] GL vendor "ARM" renderer "Mali-T820" version "OpenGL ES 3.2 v1.r12p0-04rel0" glsl "OpenGL ES GLSL ES 3.20"
+[1792635951.504] start: sdl 352, gl 380, renderer 1023, assets 1403, apps 1453, first frame 1504 ms
+[1792635951.560] luna listApps: 51 ms
+[1792635951.700] fps 60.0 avg 16.67 ms max 17.00 ms (60 frames, 1200 quads)
+[1792635952.700] fps 58.0 avg 17.24 ms max 33.30 ms (58 frames, 1631 quads)
+[1792635953.000] foreground: first frame after 140 ms
+[1792635955.000] luna launch: 38 ms
+[1792635955.001] launch com.webos.app.hdmi1: answered in 45 ms
+[1792635957.000] launch io.github.sunnyside007.lumen.shell: answered in 100 ms
+[1792635959.900] key down scancode 79 keycode 0x4000004f (RIGHT)
+[1792635959.940] SDL repeat 1 of scancode 79: 500 ms after the press, 500 ms after the last
+[1792635960.000] key 79: shown after 17 ms
+[1792635961.000] key 79: shown after 12 ms
+[1792635962.000] key 79: shown after 31 ms
+[1792635963.000] key 79: shown after 15 ms
+[1792635963.500] keys: 4 more presses not timed
+[1792635964.000] key 80: shown after 20 ms
+[1792635965.000] key 80: shown after 14 ms
+[1792635966.000] key 80: shown after 33 ms
+[1792635966.500] keys: 3 more presses not timed
+[1792635967.000] key 81: shown after 18 ms
+[1792635968.000] key 81: shown after 16 ms
+[1792635968.900] launch com.webos.app.browser: answered in 320 ms
+[1792635969.000] key 40: shown after 342 ms (320 ms in launch)
+[1792635970.500] scancode 79 released 2500 ms after the press: 20 SDL repeats, the first 500 ms after the press, then every 33 ms on average
+[1792635971.000] key 79: not shown after 41 ms: the window lost focus
+[1792635971.500] key 79: not shown after 50 ms (45 ms in launch): the window lost focus
+[1792635972.000] key 40: not shown after 12 ms: nothing to draw
+[1792635973.000] key 41: not shown after 3 ms: the shell is leaving
+[1792635974.000] the window lost focus: drawing stops
+[1792635974.000] window focus lost: last key 12.3 s ago, 1 other events since
+[1792635975.000] window focus gained: last key 13.3 s ago, 0 other events since
+[1792635975.010] in front again (the window gained focus): drawing resumes
+[1792635976.000] window focus lost: last key 5.0 s ago, 0 other events since
+[1792635977.000] window focus gained: last key 6.0 s ago, 0 other events since
+[1792635979.000] drew 40 frames in 650 ms (avg 16.67 ms, worst 17.00 ms, 1200 quads); idle
+[1792635980.000] window focus lost: last key 1.2 s ago, 0 other events since
+[1792635981.000] window hidden: last key 2.2 s ago, 0 other events since
+[1792635982.000] window shown: last key 3.2 s ago, 0 other events since
+[1792635983.000] window minimized: last key 4.2 s ago, 0 other events since
+[1792635984.000] window restored: last key 5.2 s ago, 0 other events since
+[1792635985.000] app background: last key 6.2 s ago, 5 other events since
+[1792635986.000] app foreground: last key 7.2 s ago, 6 other events since
+[1792635987.000] foreground: first frame after 300 ms

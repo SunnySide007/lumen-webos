@@ -1,6 +1,7 @@
 #!/bin/sh
-# Summarises the frame times that hello-gles and Lumen's shell write to their
-# log on the TV (/tmp/lumen-shell.log), for .claude/skills/lumen-tv-check.
+# Summarises the frame times and the timings that hello-gles and Lumen's shell
+# write to their log on the TV (/tmp/lumen-shell.log), for
+# .claude/skills/lumen-tv-check.
 #
 #   tools/frame-stats.sh [options] [LOG]
 #
@@ -26,8 +27,34 @@
 # weighted by frames; a hello-gles window does not print its frame count, so it
 # counts as fps frames. A burst of one frame has no frame time and is skipped.
 #
+# Timing lines, only from the shell, in whole milliseconds (<why> is a reason
+# such as "the window lost focus"):
+#   key 79: shown after 17 ms                  a press, to the frame showing it
+#   key 79: shown after 342 ms (320 ms in launch)
+#   key 79: not shown after 41 ms: <why>       (also with the "(B ms in launch)")
+#   keys: 7 more presses not timed
+#   start: sdl N, gl N, renderer N, assets N, apps N, first frame N ms
+#   start: sdl N, gl N, renderer N, assets N, apps N ms; no first frame: <why>
+#   foreground: first frame after 140 ms
+#   foreground: not shown after 5700 ms: <why>
+#   launch <id>: answered in 45 ms
+#   launch <id>: failed after 12 ms: <error text>
+#   window focus lost: last key 12.3 s ago, 1 other events since
+#   window focus lost: no key yet, 3 other events since
+# These lines are matched by their fixed fields, so "key down scancode ..." and
+# "luna launch: 38 ms" are not timings. After the frame statistics (and the
+# note below) come one section per kind that the period holds: key presses with
+# p50, p95 and max of "shown after" and how many were within 33 ms (target 2 of
+# docs/specs/look-and-feel.md) and the presses not shown by reason; each start
+# line split into the time each phase took (the line has running totals from
+# main()); the foreground wake-ups; each launch with how many answered within
+# 100 ms (target 6; a failed launch never counts); and the focus losses with no
+# key pressed (no key yet, or the last key over 5 s before). Their percentiles
+# are over single events, nearest rank. Other window and app lines are not read.
+#
 # Exit status: 0 with a summary; 1 when the log holds no frame statistics in
-# the period; 2 for a bad argument.
+# the period (any timing sections are still printed first); 2 for a bad
+# argument.
 set -eu
 
 SINCE=
@@ -93,6 +120,65 @@ function quads(lo, hi) {
     if (lo == hi) printf "  quads            %d\n", lo
     else printf "  quads            %d to %d\n", lo, hi
 }
+# Fields i to NF of the line, joined by single spaces.
+function rest(i,   s) {
+    if (i > NF) return ""
+    s = $i
+    for (i++; i <= NF; i++) s = s " " $i
+    return s
+}
+# Digits, and for a number inside a start line a comma after them.
+function whole(s) { return s ~ /^[0-9]+$/ }
+function stage(s) { return s ~ /^[0-9]+,?$/ }
+# The keys of counts[] in alphabetical order in names[1..n]; returns n.
+function sorted_keys(counts, names,   k, n, raw) {
+    n = 0
+    for (k in counts) raw[++n] = k
+    if (n > 0) isort(raw, n, names)
+    return n
+}
+# One line for each reason a press or a wake-up was not shown.
+function by_reason(counts,   names, n, i) {
+    n = sorted_keys(counts, names)
+    for (i = 1; i <= n; i++) printf "  %-16s %d %s\n", "not shown", counts[names[i]], names[i]
+}
+
+function report_keys(   ks) {
+    if (nks + nkn + nku == 0) return
+    printf "key presses (key ...: lines): %d shown, %d not shown, %d more not timed\n", nks, nkn, kuntimed
+    if (nks > 0) {
+        isort(kshown, nks, ks)
+        printf "  %-16s p50 %d  p95 %d  max %d ms\n", "shown after", pct(ks, nks, 50), pct(ks, nks, 95), ks[nks]
+        printf "  %-16s %d of %d within 33 ms\n", "target 2", kwithin, nks
+        if (nklaunch > 0) printf "  %-16s %d of %d had launch time, up to %d ms\n", "in a launch", nklaunch, nks, klmax
+    }
+    if (nkn > 0) by_reason(knot)
+}
+function report_starts(   i) {
+    if (nst == 0) return
+    printf "start-ups (start: lines): %d\n", nst
+    for (i = 1; i <= nst; i++) printf "  %s\n", stline[i]
+}
+function report_foreground(   fs) {
+    if (nfs + nfn == 0) return
+    printf "foreground (foreground: lines): %d shown, %d not shown\n", nfs, nfn
+    if (nfs > 0) {
+        isort(fshown, nfs, fs)
+        printf "  %-16s p50 %d  max %d ms\n", "first frame", pct(fs, nfs, 50), fs[nfs]
+    }
+    if (nfn > 0) by_reason(fnot)
+}
+function report_launches(   i) {
+    if (nl == 0) return
+    printf "launches (launch <id>: lines): %d, %d failed\n", nl, nlfail
+    for (i = 1; i <= nl; i++) printf "  %s\n", lline[i]
+    printf "  %-16s %d of %d within 100 ms\n", "target 6", lwithin, nl
+}
+function report_focus() {
+    if (nfl == 0) return
+    printf "focus losses (window focus lost lines): %d\n", nfl
+    printf "  %-16s %d of %d (no key yet, or the last key over 5 s before)\n", "no key pressed", nfl_nokey, nfl
+}
 
 BEGIN {
     missv = miss + 0
@@ -144,14 +230,113 @@ $2 == "SDL" && $3 == "repeat" && $5 == "of" && $6 == "scancode" {
     next
 }
 
-END {
-    if (nw == 0 && nb == 0) {
-        cmd = "cat 1>&2"
-        print "frame-stats.sh: no frame statistics in the log for that period" | cmd
-        close(cmd)
-        exit 1
+# The timing lines below are matched on fixed fields, so that "key down
+# scancode 79 ..." and "luna launch: 38 ms" are never mistaken for them. A line
+# that has the fields but not the numbers is skipped.
+
+# key 79: shown after 17 ms  or  key 79: shown after 342 ms (320 ms in launch)
+$2 == "key" && $3 ~ /^[0-9]+:$/ && $4 == "shown" && $5 == "after" && whole($6) && $7 == "ms" {
+    nks++
+    kshown[nks] = $6 + 0
+    if ($6 + 0 <= 33) kwithin++
+    if ($8 ~ /^\([0-9]+$/ && $9 == "ms" && $10 == "in" && $11 == "launch)") {
+        nklaunch++
+        b = substr($8, 2) + 0
+        if (b > klmax) klmax = b
     }
+    next
+}
+
+# key 79: not shown after 41 ms: the window lost focus
+# key 79: not shown after 50 ms (45 ms in launch): the window lost focus
+$2 == "key" && $3 ~ /^[0-9]+:$/ && $4 == "not" && $5 == "shown" && $6 == "after" && whole($7) &&
+    ($8 == "ms:" || ($8 == "ms" && $9 ~ /^\([0-9]+$/ && $10 == "ms" && $11 == "in" && $12 == "launch):")) {
+    why = rest(($8 == "ms:") ? 9 : 13)
+    if (why == "") why = "no reason given"
+    nkn++
+    knot[why]++
+    next
+}
+
+# keys: 7 more presses not timed
+$2 == "keys:" && whole($3) && $4 == "more" && $5 == "presses" && $6 == "not" && $7 == "timed" {
+    nku++
+    kuntimed += $3
+    next
+}
+
+# start: sdl 352, gl 380, renderer 1023, assets 1403, apps 1453, first frame 1504 ms
+# start: sdl 340, gl 366, renderer 700, assets 1000, apps 1040 ms; no first frame: <why>
+# The numbers are running totals from main(); the summary shows the time between.
+$2 == "start:" && $3 == "sdl" && $5 == "gl" && $7 == "renderer" && $9 == "assets" && $11 == "apps" &&
+    stage($4) && stage($6) && stage($8) && stage($10) && stage($12) {
+    p_sdl = $4 + 0; p_gl = $6 + 0; p_ren = $8 + 0; p_ast = $10 + 0; p_app = $12 + 0
+    s = sprintf("sdl %d ms, gl %d ms, renderer %d ms, assets %d ms, apps %d ms", p_sdl, p_gl - p_sdl, p_ren - p_gl, p_ast - p_ren, p_app - p_ast)
+    if ($12 ~ /,$/ && $13 == "first" && $14 == "frame" && whole($15) && $16 == "ms") {
+        p_ff = $15 + 0
+        s = s sprintf(", first frame %d ms (%d ms in all)", p_ff - p_app, p_ff)
+    } else if ($12 !~ /,$/ && $13 == "ms;" && $14 == "no" && $15 == "first" && $16 == "frame:") {
+        why = rest(17)
+        if (why == "") why = "no reason given"
+        s = s sprintf("; no first frame: %s (%d ms to the apps)", why, p_app)
+    } else next
+    nst++
+    stline[nst] = s
+    next
+}
+
+# foreground: first frame after 140 ms
+$2 == "foreground:" && $3 == "first" && $4 == "frame" && $5 == "after" && whole($6) && $7 == "ms" {
+    nfs++
+    fshown[nfs] = $6 + 0
+    next
+}
+
+# foreground: not shown after 5700 ms: the app went to the background
+$2 == "foreground:" && $3 == "not" && $4 == "shown" && $5 == "after" && whole($6) && $7 == "ms:" {
+    why = rest(8)
+    if (why == "") why = "no reason given"
+    nfn++
+    fnot[why]++
+    next
+}
+
+# launch com.webos.app.hdmi1: answered in 45 ms
+# launch com.example.missing: failed after 12 ms: Permission denied
+# A failed launch is counted but is never within the time that target 6 sets.
+$2 == "launch" && $3 ~ /^[^:]+:$/ && $4 == "answered" && $5 == "in" && whole($6) && $7 == "ms" {
+    nl++
+    if ($6 + 0 <= 100) lwithin++
+    lline[nl] = sprintf("%s answered in %d ms", $3, $6 + 0)
+    next
+}
+$2 == "launch" && $3 ~ /^[^:]+:$/ && $4 == "failed" && $5 == "after" && whole($6) && $7 == "ms:" {
+    nl++
+    nlfail++
+    why = rest(8)
+    lline[nl] = sprintf("%s failed after %d ms%s", $3, $6 + 0, ((why == "") ? "" : ": " why))
+    next
+}
+
+# window focus lost: no key yet, 3 other events since
+# window focus lost: last key 12.3 s ago, 1 other events since
+# With no key pressed: none yet, or the last one more than 5 s before.
+$2 == "window" && $3 == "focus" && $4 == "lost:" && $5 == "no" && $6 == "key" && $7 == "yet," {
+    nfl++
+    nfl_nokey++
+    next
+}
+$2 == "window" && $3 == "focus" && $4 == "lost:" && $5 == "last" && $6 == "key" &&
+    $7 ~ /^[0-9]+(\.[0-9]+)?$/ && $8 == "s" && $9 == "ago," {
+    nfl++
+    if ($7 + 0 > 5) nfl_nokey++
+    next
+}
+
+# The frame statistics, then the note on their percentiles when any printed.
+function frame_report(   avg, shown) {
     if (nw > 0 && wtime > 0) {
+        shown = 1
         avg = wtime / wframes
         printf "windows (fps lines): %d, %s%.0f frames, %.1f s\n", nw, estimated ? "about " : "", wframes, wtime / 1000
         printf "  average frame    %.2f ms (%.1f fps)\n", avg, 1000 / avg
@@ -162,6 +347,7 @@ END {
         quads(wq_lo, wq_hi)
     }
     if (nb > 0 && btime > 0) {
+        shown = 1
         avg = btime / bgaps
         printf "bursts (drew ... idle): %d, %d frames, %.1f s\n", nb, bframes, btime / 1000
         printf "  average frame    %.2f ms (%.1f fps)\n", avg, 1000 / avg
@@ -182,7 +368,28 @@ END {
             printf "  gap after that   p50 %d ms (%d to %d)\n", pct(sg, ngap, 50), sg[1], sg[ngap]
         }
     }
-    print "note: the log keeps one average and one worst frame per window or burst, so percentiles are over those, not over single frames"
+    if (shown) print "note: the log keeps one average and one worst frame per window or burst, so percentiles are over those, not over single frames"
+}
+
+# The timing sections follow the frame statistics. They are printed even when
+# there are no frame statistics, which still ends in exit status 1.
+END {
+    frames_seen = (nw > 0 || nb > 0)
+    if (frames_seen) frame_report()
+    report_keys()
+    report_starts()
+    report_foreground()
+    report_launches()
+    report_focus()
+    if (!frames_seen) {
+        # Standard output first, so the message follows the sections it is about
+        # when both go to the same place.
+        fflush()
+        cmd = "cat 1>&2"
+        print "frame-stats.sh: no frame statistics in the log for that period" | cmd
+        close(cmd)
+        exit 1
+    }
 }
 '
 
