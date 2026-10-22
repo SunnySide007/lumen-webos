@@ -1,0 +1,18 @@
+windows (fps lines): 2, 118 frames, 2.0 s
+  average frame    16.95 ms (59.0 fps)
+  worst frame      33.30 ms
+  window worst     p50 17.00  p95 33.30  p99 33.30 ms
+  window average   p50 16.67  p95 17.24  p99 17.24 ms
+  missed vsync     1 of 2 windows had a frame over 25 ms
+  quads            1200 to 1631
+bursts (drew ... idle): 3, 64 frames, 1.1 s
+  average frame    17.76 ms (56.3 fps)
+  worst frame      33.30 ms
+  burst worst      p50 17.00  p95 33.30  p99 33.30 ms
+  burst average    p50 16.67  p95 20.00  p99 20.00 ms
+  missed vsync     1 of 3 bursts had a frame over 25 ms
+  quads            856 to 1631
+key repeats (SDL repeat lines): 6 lines from 2 holds
+  first repeat     p50 500 ms after the press (500 to 520)
+  gap after that   p50 33 ms (33 to 34)
+note: the log keeps one average and one worst frame per window or burst, so percentiles are over those, not over single frames

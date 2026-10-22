@@ -196,8 +196,20 @@ What the log holds, for reading the output:
 
 * `fps … avg … ms max … ms (…)`: one line per window of about a second, from
   hello-gles and the shell. A window has an average and a worst frame.
-* `drew N frames in … ms (avg …, worst …, … quads); idle`: one line per burst
-  of motion, from the shell.
+* `drew N frames in … ms (avg … ms, worst … ms, … quads); first …, …, … ms;
+  idle`: one line per burst of motion, from the shell. `first` gives the times
+  of the burst's frames 2, 3 and 4 (frame 1 follows an idle wait and has
+  nothing to be timed from); a short burst gives fewer, a 1-frame burst none.
+  The output summarises them on a "first frames" line.
+* `slow frame n: … ms = loop … + batch … + upload … + submit … + swap … ms; K
+  uploads, X KB, G glyphs; faults … minor, … major`: a frame over 25 ms, `n`
+  its place in the burst, timed from the previous frame's swap to its own.
+  The five parts add up to its time; [look-and-feel.md, "Log
+  lines"](../../../docs/specs/look-and-feel.md#log-lines) says what each
+  covers. `faults` are the main thread's page faults since the previous frame;
+  a major one read a page back from swap. A burst logs at most 4, and `slow
+  frames: K more not logged`, just before its `drew` line, counts the rest.
+  The output summarises them in a "slow frames" section.
 * `SDL repeat K of scancode S: … ms after the press, … ms after the last`: the
   remote's key repeats (B3 builds on), summarised after the frame statistics.
 * `key S: shown after … ms`, `key S: not shown after … ms: <why>` and `keys: K
@@ -211,9 +223,10 @@ What the log holds, for reading the output:
   focus losses with no key pressed.
 * `key down scancode …` and `luna <method>: N ms` are not timing lines; the
   script leaves them out.
-* The log keeps no per-frame times. The percentiles are over windows or bursts,
-  nearest rank, and the output says so; keep that sentence when you pass the
-  numbers on. The key, launch and foreground figures are over single events.
+* The log times only a burst's first and slow frames, not every frame. The
+  percentiles are over windows or bursts, nearest rank, and the output says
+  so; keep that sentence when you pass the numbers on. The key, launch and
+  foreground figures are over single events.
 
 ## 5. Step D: close and restore (ask first)
 

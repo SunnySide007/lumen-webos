@@ -1,0 +1,18 @@
+[1792640000.000] GL vendor "ARM" renderer "Mali-T820" version "OpenGL ES 3.2 v1.r12p0-04rel0" glsl "OpenGL ES GLSL ES 3.20"
+[1792640010.000] key down scancode 79 keycode 0x4000004f (RIGHT)
+[1792640010.050] slow frame 2: 28.41 ms = loop 0.31 + batch 0.40 + upload 2.20 + submit 0.50 + swap 25.00 ms; 3 uploads, 12 KB, 9 glyphs; faults 4 minor, 1 major
+[1792640010.120] drew 6 frames in 95 ms (avg 19.00 ms, worst 28.41 ms, 36 quads); first 28.41, 16.70, 16.68 ms; idle
+[1792640020.000] key down scancode 79 keycode 0x4000004f (RIGHT)
+[1792640020.040] slow frame 2: 33.30 ms = loop 0.20 + batch 0.30 + upload 0.00 + submit 0.40 + swap 32.40 ms; 0 uploads, 0 KB, 0 glyphs; faults 0 minor, 0 major
+[1792640020.050] drew 2 frames in 33 ms (avg 33.30 ms, worst 33.30 ms, 36 quads); first 33.30 ms; idle
+[1792640030.000] key down scancode 80 keycode 0x40000050 (LEFT)
+[1792640030.040] slow frame 3: 26.00 ms = loop 0.50 + batch 1.50 + upload 0.00 + submit 0.30 + swap 23.70 ms; 0 uploads, 0 KB, 2 glyphs; faults 1 minor, 0 major
+[1792640030.050] drew 3 frames in 43 ms (avg 21.35 ms, worst 26.00 ms, 40 quads); first 16.70, 26.00 ms; idle
+[1792640035.000] drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 36 quads); idle
+[1792640040.000] key down scancode 81 keycode 0x40000051 (DOWN)
+[1792640040.100] slow frame 4: 34.00 ms = loop 0.40 + batch 0.60 + upload 0.00 + submit 0.50 + swap 32.50 ms; 0 uploads, 0 KB, 0 glyphs; faults 0 minor, 0 major
+[1792640040.250] slow frame 9: 35.10 ms = loop 0.30 + batch 0.70 + upload 0.00 + submit 0.60 + swap 33.50 ms; 0 uploads, 0 KB, 0 glyphs; faults 2 minor, 0 major
+[1792640040.450] slow frame 20: 33.40 ms = loop 0.30 + batch 4.10 + upload 1.80 + submit 0.60 + swap 26.60 ms; 2 uploads, 64 KB, 14 glyphs; faults 12 minor, 3 major
+[1792640040.650] slow frame 31: 33.20 ms = loop 0.20 + batch 0.50 + upload 0.00 + submit 0.50 + swap 32.00 ms; 0 uploads, 0 KB, 0 glyphs; faults 0 minor, 0 major
+[1792640041.000] slow frames: 2 more not logged
+[1792640041.000] drew 60 frames in 1050 ms (avg 17.80 ms, worst 35.10 ms, 104 quads); first 20.00, 16.70, 34.00 ms; idle

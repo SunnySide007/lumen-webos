@@ -19,6 +19,8 @@
 #   fps 60.0 avg 16.67 ms max 17.50 ms (60 frames, 1200 quads)   the shell, a window
 #   drew 40 frames in 650 ms (avg 16.30 ms, worst 17.10 ms, 1200 quads); idle
 #                                                                the shell, a burst of motion
+#   drew 23 frames in 371 ms (avg 16.85 ms, worst 28.41 ms, 36 quads); first 28.41, 16.70, 16.68 ms; idle
+#                                                                the same, with its frames 2 to 4
 #   SDL repeat 2 of scancode 79: 533 ms after the press, 33 ms after the last
 #
 # A window is about a second of frames. The log keeps one average and one worst
@@ -52,9 +54,28 @@
 # key pressed (no key yet, or the last key over 5 s before). Their percentiles
 # are over single events, nearest rank. Other window and app lines are not read.
 #
+# Slow-frame lines, only from the shell (each is one line in the log):
+#   slow frame 2: 28.41 ms = loop 0.31 + batch 0.40 + upload 2.20 + submit 0.50
+#       + swap 25.00 ms; 3 uploads, 12 KB, 9 glyphs; faults 4 minor, 1 major
+#   slow frame 5: 30.00 ms = loop 0.00 + batch 0.00 + upload 0.00 + submit 0.00
+#       + swap 30.00 ms; 0 uploads, 0 KB, 0 glyphs; faults -
+#   slow frames: 2 more not logged
+# The shell logs a frame over 25 ms (whatever --miss-ms says) with its place in
+# the burst, 2 or more, since a burst's first frame follows an idle wait and is
+# not timed. A burst logs at most 4 and counts the rest on a "slow frames:" line
+# just before its drew line. "faults -" means the page faults were not counted
+# (not Linux, or getrusage failed). A burst line's "first" part holds the times
+# of its frames 2, 3 and 4, as many as it drew; a burst of one frame has none.
+# Two sections come between the frame statistics and the timing sections, and
+# like those are printed only when the period holds such lines: the slow
+# frames, with which frame of its burst each was, the p50 and max of each part
+# of its time (nearest rank), how many uploaded (and the KB) or rasterised
+# glyphs, and their page faults; then the first frames, with in how many bursts
+# frame 2, 3 and 4 took over --miss-ms, each over the bursts that drew it.
+#
 # Exit status: 0 with a summary; 1 when the log holds no frame statistics in
-# the period (any timing sections are still printed first); 2 for a bad
-# argument.
+# the period (any slow-frame and timing sections are still printed first); 2
+# for a bad argument.
 set -eu
 
 SINCE=
@@ -130,6 +151,25 @@ function rest(i,   s) {
 # Digits, and for a number inside a start line a comma after them.
 function whole(s) { return s ~ /^[0-9]+$/ }
 function stage(s) { return s ~ /^[0-9]+,?$/ }
+# Milliseconds as the frame lines print them: digits, then maybe a fraction.
+function decimal(s) { return s ~ /^[0-9]+(\.[0-9]+)?$/ }
+# The "first 28.41, 16.70, 16.68 ms" part of a burst line, from field 17: the
+# times of frames 2, 3 and 4, as many as a burst of n frames timed. A part that
+# does not read so is left out, and the burst still counts.
+function first_times(n,   i, k, t, s, comma) {
+    k = 0
+    for (i = 17; k < 3; i++) {
+        s = $i
+        comma = (s ~ /,$/)
+        if (comma) s = substr(s, 1, length(s) - 1)
+        if (!decimal(s)) return
+        t[++k] = s + 0
+        if (!comma) break
+    }
+    if (comma || $(i + 1) != "ms;" || $(i + 2) != "idle" || k > n - 1) return
+    nbf++
+    for (i = 1; i <= k; i++) if (t[i] > missv) bfover[i + 1]++
+}
 # The keys of counts[] in alphabetical order in names[1..n]; returns n.
 function sorted_keys(counts, names,   k, n, raw) {
     n = 0
@@ -143,6 +183,31 @@ function by_reason(counts,   names, n, i) {
     for (i = 1; i <= n; i++) printf "  %-16s %d %s\n", "not shown", counts[names[i]], names[i]
 }
 
+# One part of the slow frames: its p50 (nearest rank) and max.
+function slow_part(label, src,   s) {
+    isort(src, nsl, s)
+    printf "  %-16s p50 %.2f  max %.2f ms\n", label, pct(s, nsl, 50), s[nsl]
+}
+function report_slow() {
+    if (nsl + nsm == 0) return
+    printf "slow frames (slow frame lines): %d, %d more not logged\n", nsl, smore
+    if (nsl == 0) return
+    printf "  %-16s frame 2: %d, frame 3: %d, frame 4: %d, later: %d\n", "which frame", splace[2], splace[3], splace[4], splace[5]
+    slow_part("loop", sloop)
+    slow_part("batch", sbatch)
+    slow_part("upload", supload)
+    slow_part("submit", ssubmit)
+    slow_part("swap", sswap)
+    printf "  %-16s %d of %d had uploads, %d KB in all\n", "uploads", nsup, nsl, skb
+    printf "  %-16s %d of %d rasterised glyphs, %d in all\n", "glyphs", nsgl, nsl, sglyphs
+    if (nsdash < nsl) printf "  %-16s %d minor, %d major; %d of %d counted had a major fault\n", "page faults", sminor, smajor, nsmajor, nsl - nsdash
+    if (nsdash > 0) printf "  %-16s %d of %d (faults -: not Linux, or getrusage failed)\n", "not counted", nsdash, nsl
+}
+# Each of frames 2, 3 and 4 is counted over the bursts that drew it.
+function report_first() {
+    if (nbf == 0) return
+    printf "first frames: in %d bursts with first times, frame 2 over %g ms in %d, frame 3 in %d, frame 4 in %d\n", nbf, missv, bfover[2], bfover[3], bfover[4]
+}
 function report_keys(   ks) {
     if (nks + nkn + nku == 0) return
     printf "key presses (key ...: lines): %d shown, %d not shown, %d more not timed\n", nks, nkn, kuntimed
@@ -209,6 +274,9 @@ $2 == "fps" && $4 == "avg" && $6 == "ms" && $7 == "max" {
 }
 
 # drew 40 frames in 650 ms (avg 16.30 ms, worst 17.10 ms, 1200 quads); idle
+# drew 23 frames in 371 ms (avg 16.85 ms, worst 28.41 ms, 36 quads); first 28.41, 16.70, 16.68 ms; idle
+# The "first" part comes after every field the statistics read, so they are the
+# same with or without it.
 $2 == "drew" && $4 == "frames" && $5 == "in" && $8 == "(avg" {
     n = $3 + 0
     if (n < 2) next
@@ -219,6 +287,46 @@ $2 == "drew" && $4 == "frames" && $5 == "in" && $8 == "(avg" {
     if (bmax[nb] > missv) bmissed++
     if (bq_lo < 0 || q < bq_lo) bq_lo = q
     if (q > bq_hi) bq_hi = q
+    if ($15 == "quads);" && $16 == "first") first_times(n)
+    next
+}
+
+# The slow-frame lines are matched on fixed fields like the timing lines below,
+# and a line that has the fields but not the numbers is skipped.
+
+# slow frame 2: 28.41 ms = loop 0.31 + batch 0.40 + upload 2.20 + submit 0.50 + swap 25.00 ms;
+#     3 uploads, 12 KB, 9 glyphs; faults 4 minor, 1 major  (or "faults -")
+# The frame is the 2nd of its burst or later: the first follows an idle wait and
+# is not timed.
+$2 == "slow" && $3 == "frame" && $4 ~ /^[0-9]+:$/ && decimal($5) && $6 == "ms" && $7 == "=" &&
+    $8 == "loop" && decimal($9) && $10 == "+" && $11 == "batch" && decimal($12) && $13 == "+" &&
+    $14 == "upload" && decimal($15) && $16 == "+" && $17 == "submit" && decimal($18) && $19 == "+" &&
+    $20 == "swap" && decimal($21) && $22 == "ms;" &&
+    whole($23) && $24 == "uploads," && whole($25) && $26 == "KB," && whole($27) && $28 == "glyphs;" &&
+    $29 == "faults" && ($30 == "-" || (whole($30) && $31 == "minor," && whole($32) && $33 == "major")) {
+    place = substr($4, 1, length($4) - 1) + 0
+    if (place < 2) next
+    nsl++
+    # Frames 2, 3 and 4 each, and splace[5] for any later one.
+    splace[(place > 4) ? 5 : place]++
+    sloop[nsl] = $9 + 0; sbatch[nsl] = $12 + 0; supload[nsl] = $15 + 0
+    ssubmit[nsl] = $18 + 0; sswap[nsl] = $21 + 0
+    if ($23 + 0 > 0) nsup++
+    skb += $25
+    if ($27 + 0 > 0) nsgl++
+    sglyphs += $27
+    if ($30 == "-") nsdash++
+    else {
+        sminor += $30; smajor += $32
+        if ($32 + 0 > 0) nsmajor++
+    }
+    next
+}
+
+# slow frames: 2 more not logged  (past the 4 a burst logs, before its drew line)
+$2 == "slow" && $3 == "frames:" && whole($4) && $5 == "more" && $6 == "not" && $7 == "logged" {
+    nsm++
+    smore += $4
     next
 }
 
@@ -371,11 +479,14 @@ function frame_report(   avg, shown) {
     if (shown) print "note: the log keeps one average and one worst frame per window or burst, so percentiles are over those, not over single frames"
 }
 
-# The timing sections follow the frame statistics. They are printed even when
-# there are no frame statistics, which still ends in exit status 1.
+# The slow frames, the first frames and the timing sections follow the frame
+# statistics. They are printed even when there are no frame statistics, which
+# still ends in exit status 1.
 END {
     frames_seen = (nw > 0 || nb > 0)
     if (frames_seen) frame_report()
+    report_slow()
+    report_first()
     report_keys()
     report_starts()
     report_foreground()

@@ -1,0 +1,8 @@
+windows (fps lines): 11, about 655 frames, 11.0 s
+  average frame    16.79 ms (59.5 fps)
+  worst frame      48.00 ms
+  window worst     p50 18.00  p95 48.00  p99 48.00 ms
+  window average   p50 16.67  p95 18.12  p99 18.12 ms
+  missed vsync     2 of 11 windows had a frame over 25 ms
+  quads            3000
+note: the log keeps one average and one worst frame per window or burst, so percentiles are over those, not over single frames

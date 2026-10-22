@@ -1,0 +1,38 @@
+windows (fps lines): 2, 118 frames, 2.0 s
+  average frame    16.95 ms (59.0 fps)
+  worst frame      33.30 ms
+  window worst     p50 17.00  p95 33.30  p99 33.30 ms
+  window average   p50 16.67  p95 17.24  p99 17.24 ms
+  missed vsync     1 of 2 windows had a frame over 25 ms
+  quads            1200 to 1631
+bursts (drew ... idle): 1, 40 frames, 0.7 s
+  average frame    16.67 ms (60.0 fps)
+  worst frame      17.00 ms
+  burst worst      p50 17.00  p95 17.00  p99 17.00 ms
+  burst average    p50 16.67  p95 16.67  p99 16.67 ms
+  missed vsync     0 of 1 bursts had a frame over 25 ms
+  quads            1200
+key repeats (SDL repeat lines): 1 lines from 1 holds
+  first repeat     p50 500 ms after the press (500 to 500)
+note: the log keeps one average and one worst frame per window or burst, so percentiles are over those, not over single frames
+key presses (key ...: lines): 10 shown, 4 not shown, 7 more not timed
+  shown after      p50 17  p95 342  max 342 ms
+  target 2         9 of 10 within 33 ms
+  in a launch      1 of 10 had launch time, up to 320 ms
+  not shown        1 nothing to draw
+  not shown        1 the shell is leaving
+  not shown        2 the window lost focus
+start-ups (start: lines): 2
+  sdl 340 ms, gl 26 ms, renderer 334 ms, assets 300 ms, apps 40 ms; no first frame: the app went to the background (1040 ms to the apps)
+  sdl 352 ms, gl 28 ms, renderer 643 ms, assets 380 ms, apps 50 ms, first frame 51 ms (1504 ms in all)
+foreground (foreground: lines): 3 shown, 1 not shown
+  first frame      p50 140  max 300 ms
+  not shown        1 the app went to the background
+launches (launch <id>: lines): 4, 1 failed
+  com.example.missing: failed after 12 ms: Permission denied
+  com.webos.app.hdmi1: answered in 45 ms
+  io.github.sunnyside007.lumen.shell: answered in 100 ms
+  com.webos.app.browser: answered in 320 ms
+  target 6         2 of 4 within 100 ms
+focus losses (window focus lost lines): 4
+  no key pressed   2 of 4 (no key yet, or the last key over 5 s before)
