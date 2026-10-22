@@ -8,6 +8,7 @@ mod atlas;
 mod capture;
 mod compat;
 mod draw;
+mod faults;
 mod frame_stats;
 mod gl;
 mod icons;

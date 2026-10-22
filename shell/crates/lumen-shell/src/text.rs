@@ -39,6 +39,8 @@ pub struct Text {
     font: Font,
     /// By character and size in whole pixels.
     glyphs: HashMap<(char, u32), Glyph>,
+    /// Glyphs rasterised since `take_rasterised` was last called.
+    rasterised: u32,
 }
 
 impl Text {
@@ -51,7 +53,14 @@ impl Text {
         Ok(Self {
             font,
             glyphs: HashMap::new(),
+            rasterised: 0,
         })
+    }
+
+    /// How many glyphs were rasterised since the last call, for the
+    /// slow-frame lines.
+    pub fn take_rasterised(&mut self) -> u32 {
+        std::mem::take(&mut self.rasterised)
     }
 
     /// How far `text` advances at `px` pixels to the em.
@@ -148,6 +157,7 @@ impl Text {
             .is_some_and(|g| g.uv.is_none() || g.generation == generation);
         if !fresh {
             let (metrics, coverage) = self.font.rasterize(c, size as f32);
+            self.rasterised = self.rasterised.saturating_add(1);
             let uv = if metrics.width == 0 || metrics.height == 0 {
                 None
             } else {
@@ -227,6 +237,24 @@ mod tests {
         assert!(atlas.take_uploads().is_empty(), "both glyphs were cached");
         t.draw(&mut batch, &mut atlas, 0.0, 100.0, 31.0, 1.0, "a", white);
         assert_eq!(atlas.take_uploads().len(), 1, "a new size is a new glyph");
+    }
+
+    #[test]
+    fn rasterised_glyphs_are_counted_until_taken() {
+        let mut t = text();
+        let (mut batch, mut atlas) = (Batch::default(), Atlas::default());
+        let white = Rgba(1.0, 1.0, 1.0, 1.0);
+        assert_eq!(t.take_rasterised(), 0);
+        t.draw(&mut batch, &mut atlas, 0.0, 100.0, 30.0, 1.0, "aa b", white);
+        // "a", the space and "b": a space is rasterised too, to learn it is empty.
+        assert_eq!(t.take_rasterised(), 3);
+        assert_eq!(t.take_rasterised(), 0, "taking resets the count");
+        t.draw(&mut batch, &mut atlas, 0.0, 100.0, 30.0, 1.0, "ba", white);
+        assert_eq!(
+            t.take_rasterised(),
+            0,
+            "cached glyphs are not rasterised again"
+        );
     }
 
     #[test]

@@ -115,6 +115,90 @@ pub fn launch_line(id: &AppId, took: Duration, result: &Result<(), LaunchError>)
     }
 }
 
+/// A frame longer than this gets a `slow frame` line: a frame and a half at
+/// 60 Hz, the same limit as `tools/frame-stats.sh`'s `--miss-ms` default for a
+/// missed vsync (kept equal by hand).
+pub const SLOW_FRAME: Duration = Duration::from_millis(25);
+
+/// Page faults: minor ones found the page in memory, major ones read it back
+/// from swap or disk.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Faults {
+    pub minor: u64,
+    pub major: u64,
+}
+
+impl Faults {
+    /// The faults taken since `earlier`, a reading of the same counters.
+    pub fn since(self, earlier: Self) -> Self {
+        Self {
+            minor: self.minor.saturating_sub(earlier.minor),
+            major: self.major.saturating_sub(earlier.major),
+        }
+    }
+}
+
+/// Where a frame's time went: the parts of the loop that are timed, and what
+/// they did. The rest of the frame (events, springs, icons arriving and, in
+/// `--screenshot` runs, saving one) is its `loop` part. A launch never is:
+/// it ends the burst first, so the frame after it is untimed.
+///
+/// The swap can wait for work an earlier frame handed to the GPU, so a slow
+/// swap is not always its own frame's cost.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FrameSplit {
+    /// Building the frame's batch (`draw::home`), glyphs rasterised included.
+    pub batch: Duration,
+    /// Copying new atlas pixels into the texture.
+    pub upload: Duration,
+    /// Handing the batch to GL.
+    pub submit: Duration,
+    /// Inside `SDL_GL_SwapWindow`.
+    pub swap: Duration,
+    /// Atlas uploads in this frame (new glyphs and icons).
+    pub uploads: usize,
+    /// Their bytes, padding included; shown in KiB, rounded up.
+    pub upload_bytes: usize,
+    /// Glyphs rasterised while building this frame.
+    pub glyphs: u32,
+    /// Since the last frame; `None` where they are not counted.
+    pub faults: Option<Faults>,
+}
+
+/// `slow frame <n>: <ms> ms = loop … + batch … + upload … + submit … + swap … ms;
+/// <u> uploads, <k> KB, <g> glyphs; faults <minor> minor, <major> major` for
+/// the `n`th frame of a burst, which took `took` from the swap before it.
+pub fn slow_frame_line(n: u32, took: Duration, split: &FrameSplit) -> String {
+    let timed = split.batch + split.upload + split.submit + split.swap;
+    let faults = split.faults.map_or_else(
+        || "-".to_owned(),
+        |f| format!("{} minor, {} major", f.minor, f.major),
+    );
+    format!(
+        "slow frame {n}: {} ms = loop {} + batch {} + upload {} + submit {} + swap {} ms; \
+         {} uploads, {} KB, {} glyphs; faults {faults}",
+        fine_ms(took),
+        fine_ms(took.saturating_sub(timed)),
+        fine_ms(split.batch),
+        fine_ms(split.upload),
+        fine_ms(split.submit),
+        fine_ms(split.swap),
+        split.uploads,
+        split.upload_bytes.div_ceil(1024),
+        split.glyphs,
+    )
+}
+
+/// `slow frames: <k> more not logged`, for those past a burst's cap.
+pub fn slow_more_line(more: u32) -> String {
+    format!("slow frames: {more} more not logged")
+}
+
+/// A time in milliseconds to two places, as the frame lines show it.
+pub fn fine_ms(d: Duration) -> String {
+    format!("{:.2}", d.as_secs_f64() * 1000.0)
+}
+
 /// How many presses wait for a frame at once; more are only counted.
 const KEYS_TIMED: usize = 8;
 
@@ -352,6 +436,71 @@ mod tests {
             launch_line(&id, Duration::from_micros(80), &Ok(())),
             "launch amazon: answered in 0 ms"
         );
+    }
+
+    fn micros(n: u64) -> Duration {
+        Duration::from_micros(n)
+    }
+
+    #[test]
+    fn a_slow_frame_line_splits_its_time_and_says_what_it_did() {
+        let split = FrameSplit {
+            batch: micros(400),
+            upload: micros(2200),
+            submit: micros(500),
+            swap: micros(25_000),
+            uploads: 3,
+            upload_bytes: 12 * 1024,
+            glyphs: 9,
+            faults: Some(Faults { minor: 4, major: 1 }),
+        };
+        assert_eq!(
+            slow_frame_line(2, micros(28_410), &split),
+            "slow frame 2: 28.41 ms = loop 0.31 + batch 0.40 + upload 2.20 + submit 0.50 + swap 25.00 ms; \
+             3 uploads, 12 KB, 9 glyphs; faults 4 minor, 1 major"
+        );
+    }
+
+    #[test]
+    fn a_slow_frame_without_fault_counts_or_uploads_says_so() {
+        let split = FrameSplit {
+            swap: micros(30_000),
+            upload_bytes: 1,
+            ..FrameSplit::default()
+        };
+        assert_eq!(
+            slow_frame_line(5, micros(30_000), &split),
+            "slow frame 5: 30.00 ms = loop 0.00 + batch 0.00 + upload 0.00 + submit 0.00 + swap 30.00 ms; \
+             0 uploads, 1 KB, 0 glyphs; faults -"
+        );
+    }
+
+    #[test]
+    fn parts_longer_than_the_frame_leave_no_negative_loop() {
+        let split = FrameSplit {
+            swap: micros(30_000),
+            ..FrameSplit::default()
+        };
+        assert!(slow_frame_line(2, micros(29_000), &split).contains("= loop 0.00 + "));
+    }
+
+    #[test]
+    fn slow_frames_past_the_cap_are_counted() {
+        assert_eq!(slow_more_line(3), "slow frames: 3 more not logged");
+    }
+
+    #[test]
+    fn faults_since_an_earlier_reading_never_go_below_zero() {
+        let earlier = Faults {
+            minor: 10,
+            major: 2,
+        };
+        let later = Faults {
+            minor: 14,
+            major: 2,
+        };
+        assert_eq!(later.since(earlier), Faults { minor: 4, major: 0 });
+        assert_eq!(earlier.since(later), Faults { minor: 0, major: 0 });
     }
 
     #[test]

@@ -14,13 +14,16 @@ use lumen_core::script::Script;
 
 use crate::capture;
 use crate::draw;
+use crate::faults;
 use crate::frame_stats::FrameStats;
 use crate::gl::{self, Gl};
 use crate::info;
 use crate::luna::{Ls2, LunaLauncher};
 use crate::render::{Batch, Renderer, SCREEN_H, SCREEN_W, fit_viewport};
 use crate::sdl::{self, Event, GlContext, Sdl, Window};
-use crate::timing::{self, Foreground, KeyTimes, Phase, SinceKey, StartTimes};
+use crate::timing::{
+    self, Foreground, FrameSplit, KeyTimes, Phase, SLOW_FRAME, SinceKey, StartTimes,
+};
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Options {
@@ -224,13 +227,26 @@ fn open_surface<'a>(sdl: &'a Sdl, opts: &Options) -> Result<Surface<'a>, String>
     }
 }
 
-/// The frames drawn since the screen last settled, for one log line.
+/// How many of a burst's first timed frames its line names.
+const FIRST_TIMED: usize = 3;
+/// How many slow frames a burst logs a line for; the rest are counted.
+const SLOW_LOGGED: u32 = 4;
+
+/// The frames drawn since the screen last settled, for its `drew` line and its
+/// `slow frame` lines.
 #[derive(Debug, Default)]
 struct Burst {
     frames: u32,
     first: Option<Instant>,
     last: Option<Instant>,
     worst: Duration,
+    /// The first timed frames: frames 2, 3 and 4, since frame 1 has nothing
+    /// before it to be timed from.
+    first_timed: [Option<Duration>; FIRST_TIMED],
+    /// Slow frames given a line of their own so far.
+    slow_logged: u32,
+    /// Slow frames past `SLOW_LOGGED`, only counted.
+    slow_more: u32,
 }
 
 impl Burst {
@@ -239,7 +255,12 @@ impl Burst {
     fn frame(&mut self, at: Instant) -> Option<Duration> {
         let took = self.last.map(|last| at.saturating_duration_since(last));
         match took {
-            Some(t) => self.worst = self.worst.max(t),
+            Some(t) => {
+                self.worst = self.worst.max(t);
+                if let Some(slot) = self.first_timed.iter_mut().find(|s| s.is_none()) {
+                    *slot = Some(t);
+                }
+            }
             None => self.first = Some(at),
         }
         self.last = Some(at);
@@ -247,26 +268,56 @@ impl Burst {
         took
     }
 
-    /// The log line for a finished burst, and a fresh start; `None` if no
-    /// frame was drawn.
-    fn finish(&mut self, quads: usize) -> Option<String> {
-        let (Some(first), Some(last)) = (self.first, self.last) else {
+    /// The `slow frame` line for the frame just counted, which took `took`,
+    /// if it took over `SLOW_FRAME` and the burst has logged fewer than
+    /// `SLOW_LOGGED`; past that it is only counted.
+    fn slow_line(&mut self, took: Duration, split: &FrameSplit) -> Option<String> {
+        if took <= SLOW_FRAME {
             return None;
+        }
+        if self.slow_logged >= SLOW_LOGGED {
+            self.slow_more = self.slow_more.saturating_add(1);
+            return None;
+        }
+        self.slow_logged += 1;
+        Some(timing::slow_frame_line(self.frames, took, split))
+    }
+
+    /// The log lines for a finished burst (slow frames not logged, then the
+    /// burst itself), and a fresh start; none if no frame was drawn.
+    fn finish(&mut self, quads: usize) -> Vec<String> {
+        let (Some(first), Some(last)) = (self.first, self.last) else {
+            return Vec::new();
         };
         let span = last.saturating_duration_since(first);
         let avg = match self.frames {
             0 | 1 => Duration::ZERO,
             n => span / (n - 1),
         };
-        let line = format!(
-            "drew {} frames in {:.0} ms (avg {:.2} ms, worst {:.2} ms, {quads} quads); idle",
+        let mut lines = Vec::new();
+        if self.slow_more > 0 {
+            lines.push(timing::slow_more_line(self.slow_more));
+        }
+        let times: Vec<String> = self
+            .first_timed
+            .iter()
+            .flatten()
+            .map(|&t| timing::fine_ms(t))
+            .collect();
+        let firsts = if times.is_empty() {
+            String::new()
+        } else {
+            format!("; first {} ms", times.join(", "))
+        };
+        lines.push(format!(
+            "drew {} frames in {:.0} ms (avg {:.2} ms, worst {:.2} ms, {quads} quads){firsts}; idle",
             self.frames,
             span.as_secs_f64() * 1000.0,
             avg.as_secs_f64() * 1000.0,
             self.worst.as_secs_f64() * 1000.0,
-        );
+        ));
         *self = Self::default();
-        Some(line)
+        lines
     }
 }
 
@@ -571,6 +622,8 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
     let mut batch = Batch::default();
     let mut stats = FrameStats::new(Duration::from_secs(1));
     let mut burst = Burst::default();
+    // The main thread's page faults at the last swap, for the next frame's.
+    let mut faults_seen = faults::thread_faults();
     let mut clock = Clock::new(opts.fixed_dt);
     let mut screenshot = opts.screenshot.clone();
     let mut settled_shot = opts.screenshot_when_settled.clone();
@@ -595,7 +648,7 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
             sdl.poll_event()
         } else {
             shell.nothing_to_draw(Instant::now());
-            if let Some(line) = burst.finish(batch.quad_count()) {
+            for line in burst.finish(batch.quad_count()) {
                 info!("{line}");
             }
             // Deadlines on the loop's clock; --exit-after is in real time.
@@ -688,9 +741,18 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
 
         // SAFETY: the window is live; see above.
         drawable = unsafe { sdl.drawable_size(surface.window) };
+        let batch_from = Instant::now();
         draw::home(&mut batch, &shell.home.view(), &mut assets);
-        renderer.upload(&assets.atlas.take_uploads());
+        let upload_from = Instant::now();
+        let uploads = assets.atlas.take_uploads();
+        renderer.upload(&uploads);
+        let upload_count = uploads.len();
+        let upload_bytes = uploads.iter().map(|u| u.rgba.len()).sum();
+        // Freed here, inside the upload's time, not in the next frame's.
+        drop(uploads);
+        let submit_from = Instant::now();
         renderer.draw(&batch, drawable);
+        let submitted = Instant::now();
         if now >= SCREENSHOT_AFTER
             && let Some(path) = screenshot.take()
         {
@@ -701,9 +763,24 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
             info!("settled at {:.3} s on the loop's clock", now.as_secs_f64());
             shell.quit = true;
         }
+        let swap_from = Instant::now();
         // SAFETY: the window is live and its context is current.
         unsafe { sdl.gl_swap_window(surface.window) };
         let shown = Instant::now();
+        let faults_now = faults::thread_faults();
+        let split = FrameSplit {
+            batch: upload_from.saturating_duration_since(batch_from),
+            upload: submit_from.saturating_duration_since(upload_from),
+            submit: submitted.saturating_duration_since(submit_from),
+            swap: shown.saturating_duration_since(swap_from),
+            uploads: upload_count,
+            upload_bytes,
+            glyphs: assets.text.take_rasterised(),
+            faults: faults_now
+                .zip(faults_seen)
+                .map(|(later, earlier)| later.since(earlier)),
+        };
+        faults_seen = faults_now;
         if let Some(start) = start_line.take() {
             info!("{}", start.line(shown));
         }
@@ -714,7 +791,11 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
             break;
         }
 
-        if let Some(took) = burst.frame(shown)
+        let took = burst.frame(shown);
+        if let Some(line) = took.and_then(|t| burst.slow_line(t, &split)) {
+            info!("{line}");
+        }
+        if let Some(took) = took
             && let Some(report) = stats.record(took)
         {
             info!(
@@ -737,7 +818,7 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
     if let Some(start) = start_line.take() {
         info!("{}", start.line_without_frame("the shell is leaving"));
     }
-    if let Some(line) = burst.finish(batch.quad_count()) {
+    for line in burst.finish(batch.quad_count()) {
         info!("{line}");
     }
     drop(surface);
@@ -753,7 +834,7 @@ fn launch_pending<L: Launcher>(
     clock: &Clock,
 ) {
     if shell.launch_due.is_some() {
-        if let Some(line) = burst.finish(quads) {
+        for line in burst.finish(quads) {
             info!("{line}");
         }
         shell.launch_if_due(|| clock.now());
@@ -1150,10 +1231,10 @@ mod tests {
         let lines = said(|| launch_pending(&mut shell, &mut burst, 10, &Clock::new(None)));
         assert_eq!(
             lines[0],
-            "drew 2 frames in 16 ms (avg 16.00 ms, worst 16.00 ms, 10 quads); idle"
+            "drew 2 frames in 16 ms (avg 16.00 ms, worst 16.00 ms, 10 quads); first 16.00 ms; idle"
         );
         assert!(lines[1].starts_with("launch netflix: answered in "));
-        assert_eq!(burst.finish(0), None, "the wait for luna is no frame");
+        assert!(burst.finish(0).is_empty(), "the wait for luna is no frame");
     }
 
     #[test]
@@ -1270,16 +1351,92 @@ mod tests {
     #[test]
     fn a_burst_reports_frames_and_times_then_resets() {
         let mut burst = Burst::default();
-        assert_eq!(burst.finish(0), None);
+        assert!(burst.finish(0).is_empty());
         let t0 = Instant::now();
         assert_eq!(burst.frame(t0), None, "the first frame has no duration");
         assert_eq!(burst.frame(t0 + ms(16)), Some(ms(16)));
         assert_eq!(burst.frame(t0 + ms(40)), Some(ms(24)));
-        let line = burst.finish(1234).expect("frames were drawn");
         assert_eq!(
-            line,
-            "drew 3 frames in 40 ms (avg 20.00 ms, worst 24.00 ms, 1234 quads); idle"
+            burst.finish(1234),
+            [
+                "drew 3 frames in 40 ms (avg 20.00 ms, worst 24.00 ms, 1234 quads); first 16.00, 24.00 ms; idle"
+            ]
         );
-        assert_eq!(burst.finish(0), None);
+        assert!(burst.finish(0).is_empty());
+    }
+
+    #[test]
+    fn a_burst_names_only_its_first_three_timed_frames() {
+        let mut burst = Burst::default();
+        let t0 = Instant::now();
+        for n in [0, 16, 40, 57, 73] {
+            let _ = burst.frame(t0 + ms(n));
+        }
+        assert_eq!(
+            burst.finish(10),
+            [
+                "drew 5 frames in 73 ms (avg 18.25 ms, worst 24.00 ms, 10 quads); first 16.00, 24.00, 17.00 ms; idle"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_one_frame_burst_has_no_first_times() {
+        let mut burst = Burst::default();
+        let _ = burst.frame(Instant::now());
+        assert_eq!(
+            burst.finish(24),
+            ["drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 24 quads); idle"]
+        );
+    }
+
+    fn swap_only(n: u64) -> FrameSplit {
+        FrameSplit {
+            swap: ms(n),
+            ..FrameSplit::default()
+        }
+    }
+
+    #[test]
+    fn a_frame_over_25_ms_gets_a_line_with_its_place_in_the_burst() {
+        let mut burst = Burst::default();
+        let t0 = Instant::now();
+        let _ = burst.frame(t0);
+        let took = burst.frame(t0 + ms(25)).expect("timed");
+        assert_eq!(
+            burst.slow_line(took, &swap_only(25)),
+            None,
+            "25 ms is not over"
+        );
+        let took = burst.frame(t0 + ms(59)).expect("timed");
+        let line = burst.slow_line(took, &swap_only(30)).expect("over 25 ms");
+        assert!(
+            line.starts_with("slow frame 3: 34.00 ms = loop 4.00 + "),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn at_most_four_slow_frames_a_burst_are_logged_and_the_rest_counted() {
+        let mut burst = Burst::default();
+        let t0 = Instant::now();
+        let _ = burst.frame(t0);
+        let mut logged = 0;
+        for i in 1..=6 {
+            let took = burst.frame(t0 + ms(30 * i)).expect("timed");
+            logged += usize::from(burst.slow_line(took, &swap_only(30)).is_some());
+        }
+        assert_eq!(logged, 4);
+        let lines = burst.finish(10);
+        assert_eq!(lines[0], "slow frames: 2 more not logged");
+        assert!(
+            lines[1].starts_with("drew 7 frames in 180 ms "),
+            "{}",
+            lines[1]
+        );
+        // The next burst starts its own count.
+        let _ = burst.frame(t0 + ms(400));
+        let took = burst.frame(t0 + ms(430)).expect("timed");
+        assert!(burst.slow_line(took, &swap_only(30)).is_some());
     }
 }
