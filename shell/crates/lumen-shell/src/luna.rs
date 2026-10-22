@@ -54,16 +54,28 @@ pub trait Bus: Sync {
     fn call(&self, uri: &str, payload: &Value) -> Result<Value, String>;
 }
 
-// libluna-service2's types, as lunaservice.h declares them.
-type LsHandle = c_void;
-type LsMessage = c_void;
-type LsMessageToken = c_ulong;
-type GMainContext = c_void;
-type FilterFunc = unsafe extern "C" fn(*mut LsHandle, *mut LsMessage, *mut c_void) -> bool;
+// libluna-service2's types, as lunaservice.h declares them. `watch.rs` (the
+// subscriptions) shares them and the `Api` and `Client` below.
+pub(crate) type LsHandle = c_void;
+pub(crate) type LsMessage = c_void;
+pub(crate) type LsMessageToken = c_ulong;
+pub(crate) type GMainContext = c_void;
+pub(crate) type FilterFunc =
+    unsafe extern "C" fn(*mut LsHandle, *mut LsMessage, *mut c_void) -> bool;
+/// `LSCall` and `LSCallOneReply` have the same prototype.
+pub(crate) type CallFn = unsafe extern "C" fn(
+    *mut LsHandle,
+    *const c_char,
+    *const c_char,
+    FilterFunc,
+    *mut c_void,
+    *mut LsMessageToken,
+    *mut LsError,
+) -> bool;
 
 /// `LSError`: initialised, filled in and freed by the library.
 #[repr(C)]
-struct LsError {
+pub(crate) struct LsError {
     error_code: c_int,
     message: *mut c_char,
     file: *const c_char,
@@ -103,27 +115,26 @@ impl LsError {
     }
 }
 
-/// The functions of libluna-service2 and glib that the bus calls.
-struct Api {
+/// The functions of libluna-service2 and glib that the bus and the watch call.
+pub(crate) struct Api {
     error_init: unsafe extern "C" fn(*mut LsError) -> bool,
     error_free: unsafe extern "C" fn(*mut LsError),
     register: unsafe extern "C" fn(*const c_char, *mut *mut LsHandle, *mut LsError) -> bool,
     unregister: unsafe extern "C" fn(*mut LsHandle, *mut LsError) -> bool,
     attach: unsafe extern "C" fn(*mut LsHandle, *mut GMainContext, *mut LsError) -> bool,
-    call_one_reply: unsafe extern "C" fn(
-        *mut LsHandle,
-        *const c_char,
-        *const c_char,
-        FilterFunc,
-        *mut c_void,
-        *mut LsMessageToken,
-        *mut LsError,
-    ) -> bool,
+    /// `LSCallOneReply`: one request, one reply.
+    pub(crate) call_one_reply: CallFn,
+    /// `LSCall`: a subscription, answered until it is cancelled or the client
+    /// unregisters.
+    pub(crate) call: CallFn,
     cancel: unsafe extern "C" fn(*mut LsHandle, LsMessageToken, *mut LsError) -> bool,
-    payload: unsafe extern "C" fn(*mut LsMessage) -> *const c_char,
+    pub(crate) payload: unsafe extern "C" fn(*mut LsMessage) -> *const c_char,
     context_new: unsafe extern "C" fn() -> *mut GMainContext,
-    context_iteration: unsafe extern "C" fn(*mut GMainContext, c_int) -> c_int,
+    pub(crate) context_iteration: unsafe extern "C" fn(*mut GMainContext, c_int) -> c_int,
     context_unref: unsafe extern "C" fn(*mut GMainContext),
+    /// `g_main_context_wakeup`: makes a blocking iteration return. Safe from
+    /// any thread.
+    pub(crate) context_wakeup: unsafe extern "C" fn(*mut GMainContext),
     /// Held so every function above stays valid; none in tests.
     _libs: Vec<Library>,
 }
@@ -141,7 +152,7 @@ unsafe fn sym<T: Copy>(lib: &Library, file: &str, name: &[u8]) -> Result<T, Stri
 }
 
 impl Api {
-    fn load() -> Result<Self, String> {
+    pub(crate) fn load() -> Result<Self, String> {
         let open = |file: &str| {
             // SAFETY: loading either library runs only its own initialisers,
             // which have no preconditions. glib is luna's own dependency, so
@@ -161,11 +172,13 @@ impl Api {
                 unregister: sym(&luna, l, b"LSUnregister\0")?,
                 attach: sym(&luna, l, b"LSGmainContextAttach\0")?,
                 call_one_reply: sym(&luna, l, b"LSCallOneReply\0")?,
+                call: sym(&luna, l, b"LSCall\0")?,
                 cancel: sym(&luna, l, b"LSCallCancel\0")?,
                 payload: sym(&luna, l, b"LSMessageGetPayload\0")?,
                 context_new: sym(&glib, g, b"g_main_context_new\0")?,
                 context_iteration: sym(&glib, g, b"g_main_context_iteration\0")?,
                 context_unref: sym(&glib, g, b"g_main_context_unref\0")?,
+                context_wakeup: sym(&glib, g, b"g_main_context_wakeup\0")?,
                 _libs: vec![luna, glib],
             })
         }
@@ -173,7 +186,11 @@ impl Api {
 
     /// Runs one library function with a fresh `LSError`, turning a failure
     /// into the library's message.
-    fn checked(&self, what: &str, op: impl FnOnce(*mut LsError) -> bool) -> Result<(), String> {
+    pub(crate) fn checked(
+        &self,
+        what: &str,
+        op: impl FnOnce(*mut LsError) -> bool,
+    ) -> Result<(), String> {
         let mut error = LsError::empty();
         // SAFETY: `error` is an LSError for the library to initialise.
         unsafe { (self.error_init)(&mut error) };
@@ -191,14 +208,14 @@ impl Api {
 /// An anonymous client on the bus, dispatched on a glib context of its own,
 /// and unregistered on drop. Anonymous is the registration the hub takes
 /// from an app's jail on webOS 4.10 (plx-native measured it; see the spec).
-struct Client<'a> {
+pub(crate) struct Client<'a> {
     api: &'a Api,
-    handle: *mut LsHandle,
-    context: *mut GMainContext,
+    pub(crate) handle: *mut LsHandle,
+    pub(crate) context: *mut GMainContext,
 }
 
 impl<'a> Client<'a> {
-    fn register(api: &'a Api) -> Result<Self, String> {
+    pub(crate) fn register(api: &'a Api) -> Result<Self, String> {
         // SAFETY: no arguments; the new context is owned here.
         let context = unsafe { (api.context_new)() };
         if context.is_null() {
@@ -1021,11 +1038,13 @@ mod tests {
                 unregister: fake_unregister,
                 attach: fake_attach,
                 call_one_reply: fake_call_one_reply,
+                call: fake_call_one_reply,
                 cancel: fake_cancel,
                 payload: fake_payload,
                 context_new: fake_context_new,
                 context_iteration: fake_context_iteration,
                 context_unref: fake_context_unref,
+                context_wakeup: fake_context_wakeup,
                 _libs: Vec::new(),
             }),
             timeout: Duration::from_millis(timeout_ms),
@@ -1149,6 +1168,10 @@ mod tests {
 
     unsafe extern "C" fn fake_context_unref(_: *mut GMainContext) {
         fake(|s| s.steps.push("unref"));
+    }
+
+    unsafe extern "C" fn fake_context_wakeup(_: *mut GMainContext) {
+        fake(|s| s.steps.push("wakeup"));
     }
 
     /// Delivers the reply to the open call once it is due.

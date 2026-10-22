@@ -18,6 +18,7 @@ mod render;
 mod sdl;
 mod text;
 mod timing;
+mod watch;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

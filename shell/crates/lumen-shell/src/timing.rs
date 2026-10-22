@@ -361,12 +361,179 @@ impl SinceKey {
     }
 }
 
+/// Whether the Magic Remote's pointer is on screen, from the 484 and 485 keys
+/// LG's SDL sends as it appears and goes away. Hidden until the first 484:
+/// LG hides it a few seconds after the remote stops moving.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Pointer {
+    Shown,
+    #[default]
+    Hidden,
+}
+
+impl Pointer {
+    /// `shown` or `hidden`, as the lines say it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Shown => "shown",
+            Self::Hidden => "hidden",
+        }
+    }
+}
+
+/// The idle heartbeat comes this long after the last input, and then this
+/// often, until `IDLE_LONG` without input; after that every `IDLE_LONG`
+/// (docs/specs/look-and-feel.md, "Log lines"). So a 10-minute gap gets 20
+/// lines and an evening without the remote a few.
+pub const IDLE_BEAT: Duration = Duration::from_secs(30);
+pub const IDLE_LONG: Duration = Duration::from_secs(600);
+
+/// When the last input came and when the next heartbeat is due, on the loop's
+/// clock. Input is any key, the pointer codes included, and any mouse event.
+/// The heartbeat bounds a gap in the keys without a clock read: the owner says
+/// "I was pressing at that line".
+#[derive(Debug)]
+pub struct Idle {
+    last_input: Duration,
+    next: Duration,
+}
+
+impl Idle {
+    /// Starts the clock at `now`, as if input had just come.
+    pub fn new(now: Duration) -> Self {
+        Self {
+            last_input: now,
+            next: now + IDLE_BEAT,
+        }
+    }
+
+    /// Input came at `now`.
+    pub fn input(&mut self, now: Duration) {
+        self.last_input = now;
+        self.next = now + IDLE_BEAT;
+    }
+
+    #[cfg(test)]
+    pub fn last_input(&self) -> Duration {
+        self.last_input
+    }
+
+    /// When the next heartbeat is due, for the loop's wait.
+    pub fn next_deadline(&self) -> Duration {
+        self.next
+    }
+
+    /// The heartbeat line if one is due at `now`, which then schedules the
+    /// next: `no input for N s; focused yes; pointer hidden; power Active`.
+    /// A late wake-up (a long frame) gives one line, not the missed ones.
+    pub fn beat(
+        &mut self,
+        now: Duration,
+        focused: bool,
+        pointer: Pointer,
+        power: Option<&str>,
+    ) -> Option<String> {
+        if now < self.next {
+            return None;
+        }
+        let quiet = now.saturating_sub(self.last_input);
+        let step = if quiet < IDLE_LONG {
+            IDLE_BEAT
+        } else {
+            IDLE_LONG
+        };
+        let beats = quiet.as_secs() / step.as_secs() + 1;
+        self.next = self.last_input + step * u32::try_from(beats).unwrap_or(u32::MAX);
+        Some(idle_line(quiet, focused, pointer, power))
+    }
+}
+
+/// `no input for <N> s; focused <yes|no>; pointer <shown|hidden>; power
+/// <state|unknown>`, with `N` in whole seconds.
+pub fn idle_line(quiet: Duration, focused: bool, pointer: Pointer, power: Option<&str>) -> String {
+    format!(
+        "no input for {} s; focused {}; pointer {}; power {}",
+        quiet.as_secs(),
+        if focused { "yes" } else { "no" },
+        pointer.name(),
+        power.unwrap_or("unknown")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
+    }
+
+    fn secs(n: u64) -> Duration {
+        Duration::from_secs(n)
+    }
+
+    #[test]
+    fn the_heartbeat_comes_every_30_s_without_input() {
+        let mut idle = Idle::new(secs(10));
+        assert_eq!(idle.next_deadline(), secs(40));
+        assert_eq!(idle.beat(secs(39), true, Pointer::Hidden, None), None);
+        assert_eq!(
+            idle.beat(secs(40), true, Pointer::Hidden, Some("Active"))
+                .as_deref(),
+            Some("no input for 30 s; focused yes; pointer hidden; power Active")
+        );
+        assert_eq!(idle.next_deadline(), secs(70));
+        assert_eq!(
+            idle.beat(secs(70) + ms(9), false, Pointer::Shown, None)
+                .as_deref(),
+            Some("no input for 60 s; focused no; pointer shown; power unknown")
+        );
+    }
+
+    #[test]
+    fn input_resets_the_heartbeat() {
+        let mut idle = Idle::new(secs(0));
+        idle.input(secs(25));
+        assert_eq!(idle.last_input(), secs(25));
+        assert_eq!(idle.beat(secs(30), true, Pointer::Hidden, None), None);
+        assert_eq!(idle.next_deadline(), secs(55));
+        assert!(idle.beat(secs(55), true, Pointer::Hidden, None).is_some());
+    }
+
+    #[test]
+    fn a_late_wake_up_gives_one_line_and_the_next_whole_beat() {
+        let mut idle = Idle::new(secs(0));
+        // The loop slept through the 30 s and 60 s beats.
+        let line = idle.beat(secs(95), true, Pointer::Hidden, None);
+        assert_eq!(
+            line.as_deref(),
+            Some("no input for 95 s; focused yes; pointer hidden; power unknown")
+        );
+        assert_eq!(idle.next_deadline(), secs(120));
+    }
+
+    #[test]
+    fn after_ten_minutes_the_heartbeat_slows_to_every_ten() {
+        let mut idle = Idle::new(secs(0));
+        assert!(idle.beat(secs(570), true, Pointer::Hidden, None).is_some());
+        assert_eq!(idle.next_deadline(), secs(600));
+        assert_eq!(
+            idle.beat(secs(600), true, Pointer::Hidden, Some("Screen Saver"))
+                .as_deref(),
+            Some("no input for 600 s; focused yes; pointer hidden; power Screen Saver")
+        );
+        assert_eq!(idle.next_deadline(), secs(1200));
+        assert!(idle.beat(secs(1200), true, Pointer::Hidden, None).is_some());
+        assert_eq!(idle.next_deadline(), secs(1800));
+        // Input brings the 30 s beat back.
+        idle.input(secs(1500));
+        assert_eq!(idle.next_deadline(), secs(1530));
+    }
+
+    #[test]
+    fn the_pointer_names_its_state() {
+        assert_eq!(Pointer::Shown.name(), "shown");
+        assert_eq!(Pointer::default(), Pointer::Hidden);
     }
 
     #[test]

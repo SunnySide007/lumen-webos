@@ -25,6 +25,11 @@ pub mod scancode {
     /// Never reaches an app on the B9: LG's compositor takes it.
     pub const WEBOS_HOME: i32 = 384;
     pub const WEBOS_BACK: i32 = 482;
+    /// The Magic Remote's pointer appeared (`SDL_SCANCODE_WEBOS_CURSOR_SHOW`
+    /// in webosbrew's SDL fork). LG sends it as a key-down with no key-up.
+    pub const WEBOS_CURSOR_SHOW: i32 = 484;
+    /// The pointer went away (`SDL_SCANCODE_WEBOS_CURSOR_HIDE`), the same way.
+    pub const WEBOS_CURSOR_HIDE: i32 = 485;
 }
 
 pub const REPEAT_DELAY: Duration = Duration::from_millis(400);
@@ -45,8 +50,9 @@ pub struct Press {
     pub repeat: bool,
 }
 
-/// The action a scancode stands for. Everything else, including 484 and 485
-/// (sent around Magic Remote pointer movement on the B9), is ignored.
+/// The action a scancode stands for. Everything else is no action, including
+/// the pointer codes (`WEBOS_CURSOR_SHOW` and `WEBOS_CURSOR_HIDE`), which the
+/// shell only notes.
 pub fn action_for(code: i32) -> Option<Action> {
     use scancode::*;
     match code {

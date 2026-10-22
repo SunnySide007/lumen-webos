@@ -5,11 +5,12 @@
 //! show as hello-gles (GL renderer, frame times, key codes) goes to the log.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lumen_core::apps::{AppId, Launcher, MockLauncher};
 use lumen_core::home::{BackAtTop, Effect, Home};
-use lumen_core::input::{Input, Press, action_for};
+use lumen_core::input::{Action, Input, Press, action_for, scancode};
 use lumen_core::script::Script;
 
 use crate::capture;
@@ -18,12 +19,13 @@ use crate::faults;
 use crate::frame_stats::FrameStats;
 use crate::gl::{self, Gl};
 use crate::info;
-use crate::luna::{Ls2, LunaLauncher};
+use crate::luna::{self, Ls2, LunaLauncher};
 use crate::render::{Batch, Renderer, SCREEN_H, SCREEN_W, fit_viewport};
 use crate::sdl::{self, Event, GlContext, Sdl, Window};
 use crate::timing::{
-    self, Foreground, FrameSplit, KeyTimes, Phase, SLOW_FRAME, SinceKey, StartTimes,
+    self, Foreground, FrameSplit, Idle, KeyTimes, Phase, Pointer, SLOW_FRAME, SinceKey, StartTimes,
 };
+use crate::watch;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Options {
@@ -340,6 +342,20 @@ struct Shell<L: Launcher> {
     foreground: Foreground,
     /// What arrived since the remote's last key, for focus and lifecycle lines.
     since_key: SinceKey,
+    /// Whether the window has keyboard focus, from SDL's focus events, for
+    /// the heartbeat line.
+    focused: bool,
+    /// The Magic Remote's pointer, from the 484 and 485 keys.
+    pointer: Pointer,
+    /// Whether this SDL can hide the pointer (`SDL_webOSCursorVisibility`).
+    can_hide_pointer: bool,
+    /// An arrow came while the pointer showed: the loop hides it.
+    hide_pointer_due: bool,
+    /// The last input and the next heartbeat (docs/specs/shell-mvp.md,
+    /// "Input diagnostics").
+    idle: Idle,
+    /// What the luna watch thread reads and writes.
+    shared: Arc<watch::Shared>,
 }
 
 impl<L: Launcher> Shell<L> {
@@ -354,6 +370,10 @@ impl<L: Launcher> Shell<L> {
             info!("listing apps failed: {e}");
             home.show_status(format!("Could not list apps: {e}"), now);
         }
+        // The watch counts "last input" from the same moment the heartbeat
+        // does: the start, as if input had just come.
+        let shared = watch::Shared::new();
+        shared.set_last_input(now);
         Self {
             home,
             input: Input::new(),
@@ -365,7 +385,43 @@ impl<L: Launcher> Shell<L> {
             keys: KeyTimes::default(),
             foreground: Foreground::default(),
             since_key: SinceKey::default(),
+            focused: false,
+            pointer: Pointer::default(),
+            can_hide_pointer: false,
+            hide_pointer_due: false,
+            idle: Idle::new(now),
+            shared,
         }
+    }
+
+    /// Any input at `now`: a key (the pointer codes included) or a mouse
+    /// event. The heartbeat and the watch's lines count from it.
+    fn input(&mut self, now: Duration) {
+        self.idle.input(now);
+        self.shared.set_last_input(now);
+    }
+
+    /// The idle heartbeat line, if one is due at `now`. The power state is
+    /// fetched (a lock and a copy) only when one is.
+    fn heartbeat(&mut self, now: Duration) -> Option<String> {
+        if now < self.idle.next_deadline() {
+            return None;
+        }
+        let power = self.shared.power();
+        self.idle
+            .beat(now, self.focused, self.pointer, power.as_deref())
+    }
+
+    /// Whether the loop should hide the pointer now (an arrow came while it
+    /// showed); asked once per arrow.
+    fn take_pointer_hide(&mut self) -> bool {
+        std::mem::take(&mut self.hide_pointer_due)
+    }
+
+    /// The loop hid the pointer. LG's 485, if it comes, says so again; if it
+    /// never comes, the state is still right and no arrow asks again.
+    fn pointer_hidden(&mut self) {
+        self.pointer = Pointer::Hidden;
     }
 
     /// Fires the key repeats due by `now`. Runs before each batch of events.
@@ -422,15 +478,37 @@ impl<L: Launcher> Shell<L> {
                 keycode,
                 repeat,
             } => {
+                let action = action_for(scancode);
                 if !repeat {
-                    let action = action_for(scancode);
                     info!("key down scancode {scancode} keycode {keycode:#x} ({action:?})");
                 }
                 self.heard_key(scancode, at);
+                self.input(now);
+                // LG sends the pointer codes as key-downs with no key-up, so
+                // SDL may mark a later one as a repeat: the state decides,
+                // not the flag. A line goes out when the state changes and
+                // on every fresh press, so LG's own resends still show.
+                if let Some(state) = pointer_state(scancode) {
+                    if self.pointer != state || !repeat {
+                        self.pointer = state;
+                        info!("pointer {}", state.name());
+                    }
+                    return;
+                }
                 // Keys only reach the app in front, so a real press means the
-                // screen is showing (pointer noise and SDL repeats do not count).
-                if !repeat && action_for(scancode).is_some() {
+                // screen is showing (SDL repeats do not count).
+                if !repeat && action.is_some() {
                     self.show("a key press", at);
+                }
+                // An OK pressed while the pointer shows arrives as a click
+                // (B9, 2026-10-22), so an arrow puts the pointer away where
+                // the SDL allows it, as moonlight-tv does.
+                if !repeat
+                    && matches!(action, Some(Action::Move(_)))
+                    && self.pointer == Pointer::Shown
+                    && self.can_hide_pointer
+                {
+                    self.hide_pointer_due = true;
                 }
                 if let Some(press) = self.input.key_down(scancode, repeat, now) {
                     // Only presses are timed, not SDL's repeats or the shell's.
@@ -441,8 +519,23 @@ impl<L: Launcher> Shell<L> {
                 }
             }
             Event::KeyUp { scancode } => {
+                // The key-up SDL makes for a pointer code when the window
+                // loses focus is not input (LG sends none itself), but it
+                // still counts as an event in the focus lines, as before.
+                if pointer_state(scancode).is_some() {
+                    self.since_key.other();
+                    return;
+                }
+                self.input(now);
                 self.heard_key(scancode, at);
                 self.input.key_up(scancode);
+            }
+            Event::MouseButton { button, down, x, y } => {
+                self.mouse_button(button, down, x, y, now, at)
+            }
+            Event::MouseMotion | Event::MouseWheel => {
+                self.input(now);
+                self.since_key.other();
             }
             Event::Window(id) => self.window(id, at),
             Event::Background => {
@@ -469,12 +562,44 @@ impl<L: Launcher> Shell<L> {
         }
     }
 
+    /// A pointer button. Button 1 down is OK, through OK's own path: it is
+    /// timed as key 40, counts as a key for the focus lines, and launches
+    /// after the frame that shows the press. Other buttons are only logged.
+    fn mouse_button(&mut self, button: u8, down: bool, x: i32, y: i32, now: Duration, at: Instant) {
+        self.input(now);
+        if !down {
+            info!("mouse button {button} up at {x},{y}");
+            self.since_key.other();
+            if button == 1 {
+                self.input.key_up(scancode::RETURN);
+            }
+            return;
+        }
+        if button != 1 {
+            info!("mouse button {button} down at {x},{y}: ignored");
+            self.since_key.other();
+            return;
+        }
+        info!("mouse button 1 down at {x},{y}: taken as OK");
+        self.since_key.key(at);
+        self.show("a click", at);
+        if let Some(press) = self.input.key_down(scancode::RETURN, false, now) {
+            self.keys.pressed(scancode::RETURN, at);
+            self.press(press, now);
+        }
+    }
+
     fn window(&mut self, id: u8, at: Instant) {
         use sdl::window::*;
         if let Some(name) = window_name(id) {
             info!("{}", self.since_key.line(&format!("window {name}"), at));
         }
         self.since_key.other();
+        match id {
+            FOCUS_GAINED => self.focused = true,
+            FOCUS_LOST => self.focused = false,
+            _ => {}
+        }
         match id {
             HIDDEN | MINIMIZED => self.hide("the window was hidden", at),
             SHOWN => self.show("shown", at),
@@ -552,6 +677,15 @@ impl<L: Launcher> Shell<L> {
     }
 }
 
+/// The pointer state a scancode announces: 484 shown, 485 hidden.
+fn pointer_state(scancode: i32) -> Option<Pointer> {
+    match scancode {
+        scancode::WEBOS_CURSOR_SHOW => Some(Pointer::Shown),
+        scancode::WEBOS_CURSOR_HIDE => Some(Pointer::Hidden),
+        _ => None,
+    }
+}
+
 /// The window events that get a focus line. Exposed and resized are left out:
 /// a PC sends them while a window is dragged.
 fn window_name(id: u8) -> Option<&'static str> {
@@ -574,6 +708,9 @@ pub fn run(opts: Options, started: Instant) -> Result<(), String> {
     let mut start = StartTimes::new(started);
     let sdl = Sdl::load()?;
     info!("SDL {}", sdl.version());
+    if on_tv() {
+        info!("{}", sdl.pointer_line());
+    }
 
     // webOS SDL: deliver BACK and EXIT to the app instead of closing it, and
     // hide the Magic Remote pointer quickly. Other SDL builds ignore these.
@@ -633,6 +770,13 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
     }
     let mut shell = Shell::new(launcher(), clock.now());
     start.mark(Phase::Apps, Instant::now());
+    shell.can_hide_pointer = sdl.can_hide_pointer();
+    // The luna watch (power state, the app in front, screensaver requests)
+    // runs on its own thread for the life of the loop and stops when this
+    // drops, after the loop. Nothing to watch off the TV, and nothing under
+    // a fixed clock, whose "last input" times are not real time.
+    let _watch = (on_tv() && !clock.is_fixed())
+        .then(|| watch::start(Arc::clone(&shell.shared), luna::SELF_ID, clock.start));
     // Logged once, with the first frame or with why there was none.
     let mut start_line = Some(start);
 
@@ -663,6 +807,10 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
                     .map(|_| SCREENSHOT_AFTER),
                 // The same for icons; showing the shell again wakes the loop.
                 (shell.visible && assets.icons.any_loading()).then(|| clock.now() + ICON_POLL),
+                // The idle heartbeat. Not under a fixed clock, which would
+                // jump 30 s at a time through it: there it only comes if the
+                // keys or frames take the clock past it.
+                (!clock.is_fixed()).then(|| shell.idle.next_deadline()),
             ]
             .into_iter()
             .flatten()
@@ -703,6 +851,12 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
         }
         while let Some((event, at)) = sdl.poll_event() {
             shell.event(event, now, at);
+        }
+        if shell.take_pointer_hide() && sdl.set_pointer_visible(false) {
+            shell.pointer_hidden();
+        }
+        if let Some(line) = shell.heartbeat(now) {
+            info!("{line}");
         }
         if !shell.visible
             && let Some(start) = start_line.take()
@@ -895,7 +1049,6 @@ fn save_screenshot(renderer: &Renderer, drawable: (i32, i32), path: &std::path::
 mod tests {
     use super::*;
     use lumen_core::apps::{App, LaunchError};
-    use lumen_core::input::scancode;
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| (*s).to_owned()).collect()
@@ -1112,6 +1265,202 @@ mod tests {
         assert!(!shell.keys.is_waiting());
     }
 
+    fn click(button: u8, down: bool) -> Event {
+        Event::MouseButton {
+            button,
+            down,
+            x: 1408,
+            y: 431,
+        }
+    }
+
+    #[test]
+    fn a_left_click_is_ok_through_oks_own_path() {
+        let mut shell = shell();
+        let lines = said(|| {
+            send(&mut shell, click(1, true), 0);
+            send(&mut shell, click(1, false), 150);
+        });
+        assert_eq!(
+            lines,
+            [
+                "mouse button 1 down at 1408,431: taken as OK",
+                "mouse button 1 up at 1408,431",
+            ]
+        );
+        assert!(shell.wants_frame(), "the press pulse is drawn first");
+        assert!(shell.launcher.launched().is_empty(), "not before the frame");
+        assert!(shell.keys.is_waiting(), "timed like a press");
+        let shown = said(|| shell.frame_shown(at(17)));
+        assert_eq!(shown, ["key 40: shown after 17 ms"]);
+        assert!(shell.launch_if_due(|| ms(17)));
+        assert_eq!(shell.launcher.launched(), &[AppId::new("netflix")]);
+        assert!(!shell.input.is_holding(), "the up released it");
+    }
+
+    #[test]
+    fn a_click_counts_as_a_key_for_the_focus_lines_and_shows_the_shell() {
+        let mut shell = shell();
+        send(&mut shell, Event::Window(sdl::window::HIDDEN), 0);
+        let lines = said(|| {
+            send(&mut shell, click(1, true), 1_000);
+            send(&mut shell, Event::Window(sdl::window::FOCUS_LOST), 3_500);
+        });
+        assert_eq!(lines[0], "mouse button 1 down at 1408,431: taken as OK");
+        assert_eq!(lines[1], "in front again (a click): drawing resumes");
+        assert_eq!(
+            lines[2],
+            "window focus lost: last key 2.5 s ago, 0 other events since"
+        );
+    }
+
+    #[test]
+    fn other_buttons_are_logged_and_ignored() {
+        let mut shell = shell();
+        let lines = said(|| {
+            send(&mut shell, click(3, true), 0);
+            send(&mut shell, click(3, false), 100);
+        });
+        assert_eq!(
+            lines,
+            [
+                "mouse button 3 down at 1408,431: ignored",
+                "mouse button 3 up at 1408,431",
+            ]
+        );
+        assert!(!shell.wants_frame());
+        assert!(!shell.keys.is_waiting());
+    }
+
+    #[test]
+    fn the_pointer_codes_track_the_pointer_and_their_key_ups_are_not_input() {
+        let mut shell = shell();
+        let lines = said(|| {
+            send(&mut shell, down(scancode::WEBOS_CURSOR_SHOW), 1_000);
+            send(&mut shell, down(scancode::WEBOS_CURSOR_HIDE), 6_000);
+        });
+        assert_eq!(lines, ["pointer shown", "pointer hidden"]);
+        assert_eq!(shell.pointer, Pointer::Hidden);
+        assert_eq!(shell.idle.last_input(), ms(6_000));
+        // SDL's keyboard reset at a focus loss releases them; LG never does.
+        // Such a key-up is not input, but it is still one more event in the
+        // focus lines, as it was before the pointer was tracked.
+        let up = Event::KeyUp {
+            scancode: scancode::WEBOS_CURSOR_HIDE,
+        };
+        let lines = said(|| {
+            send(&mut shell, up, 120_000);
+            send(&mut shell, Event::Window(sdl::window::FOCUS_LOST), 120_000);
+        });
+        assert_eq!(shell.idle.last_input(), ms(6_000));
+        assert!(!shell.input.is_holding());
+        assert_eq!(
+            lines[0],
+            "window focus lost: no key yet, 3 other events since"
+        );
+        // LG sends no key-up for 484, so SDL may flag the next one as a
+        // repeat: the code, not the flag, sets the state and counts as input.
+        let repeated_show = Event::KeyDown {
+            scancode: scancode::WEBOS_CURSOR_SHOW,
+            keycode: 0,
+            repeat: true,
+        };
+        let lines = said(|| send(&mut shell, repeated_show, 130_000));
+        assert_eq!(lines, ["pointer shown"]);
+        assert_eq!(shell.pointer, Pointer::Shown);
+        assert_eq!(shell.idle.last_input(), ms(130_000));
+        // A repeat that changes nothing logs nothing; a fresh 484 does.
+        assert!(said(|| send(&mut shell, repeated_show, 131_000)).is_empty());
+        assert_eq!(
+            said(|| send(&mut shell, down(scancode::WEBOS_CURSOR_SHOW), 132_000)),
+            ["pointer shown"]
+        );
+        assert!(!shell.keys.is_waiting(), "no action, nothing timed");
+    }
+
+    #[test]
+    fn an_arrow_hides_a_shown_pointer_where_the_sdl_can() {
+        let mut shell = shell();
+        send(&mut shell, down(scancode::WEBOS_CURSOR_SHOW), 0);
+        key(&mut shell, scancode::RIGHT, 100);
+        assert!(!shell.take_pointer_hide(), "this SDL cannot hide it");
+        shell.can_hide_pointer = true;
+        key(&mut shell, scancode::RIGHT, 200);
+        assert!(shell.take_pointer_hide());
+        assert!(!shell.take_pointer_hide(), "asked once per arrow");
+        // Not for OK, nor for a repeat.
+        key(&mut shell, scancode::RETURN, 300);
+        assert!(!shell.take_pointer_hide());
+        let held_right = Event::KeyDown {
+            scancode: scancode::RIGHT,
+            keycode: 0,
+            repeat: true,
+        };
+        send(&mut shell, held_right, 350);
+        assert!(!shell.take_pointer_hide());
+        // Once the loop has hidden it, no arrow asks again until LG shows it.
+        shell.pointer_hidden();
+        assert_eq!(shell.pointer, Pointer::Hidden);
+        key(&mut shell, scancode::DOWN, 400);
+        assert!(!shell.take_pointer_hide());
+        send(&mut shell, down(scancode::WEBOS_CURSOR_SHOW), 450);
+        key(&mut shell, scancode::DOWN, 500);
+        assert!(shell.take_pointer_hide());
+        // Nor once LG itself has hidden it.
+        send(&mut shell, down(scancode::WEBOS_CURSOR_HIDE), 600);
+        key(&mut shell, scancode::DOWN, 700);
+        assert!(!shell.take_pointer_hide());
+    }
+
+    #[test]
+    fn the_heartbeat_counts_from_the_last_input_of_any_kind() {
+        let mut shell = shell();
+        assert_eq!(shell.heartbeat(ms(29_000)), None);
+        send(&mut shell, Event::MouseMotion, 10_000);
+        assert_eq!(shell.heartbeat(ms(30_000)), None, "the motion was input");
+        send(&mut shell, Event::Window(sdl::window::FOCUS_GAINED), 10_001);
+        assert_eq!(
+            shell.heartbeat(ms(40_000)).as_deref(),
+            Some("no input for 30 s; focused yes; pointer hidden; power unknown")
+        );
+        assert_eq!(shell.idle.next_deadline(), ms(70_000));
+        send(&mut shell, Event::Window(sdl::window::FOCUS_LOST), 50_000);
+        assert_eq!(
+            shell.heartbeat(ms(70_000)).as_deref(),
+            Some("no input for 60 s; focused no; pointer hidden; power unknown")
+        );
+        // A key-up is input too, and so are an SDL repeat and the wheel.
+        send(
+            &mut shell,
+            Event::KeyUp {
+                scancode: scancode::RIGHT,
+            },
+            80_000,
+        );
+        assert_eq!(shell.idle.last_input(), ms(80_000));
+        let held_right = Event::KeyDown {
+            scancode: scancode::RIGHT,
+            keycode: 0,
+            repeat: true,
+        };
+        send(&mut shell, held_right, 81_000);
+        assert_eq!(shell.idle.last_input(), ms(81_000));
+        send(&mut shell, Event::MouseWheel, 82_000);
+        assert_eq!(shell.idle.last_input(), ms(82_000));
+        // The watch counts from the start too, as if input had just come.
+        assert_eq!(
+            Shell::new(MockLauncher::default(), ms(5))
+                .shared
+                .last_input(),
+            ms(5)
+        );
+        assert_eq!(
+            shell.shared.last_input(),
+            ms(82_000),
+            "shared with the watch"
+        );
+    }
+
     #[test]
     fn a_launch_then_background_leaves_the_press_unshown() {
         let mut shell = shell();
@@ -1248,8 +1597,11 @@ mod tests {
             send(&mut shell, Event::Window(sdl::window::FOCUS_LOST), 5_300);
         });
         assert_eq!(
-            lines[0],
-            "window focus lost: last key 5.3 s ago, 2 other events since"
+            lines,
+            [
+                "pointer hidden",
+                "window focus lost: last key 5.3 s ago, 2 other events since"
+            ]
         );
     }
 

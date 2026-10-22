@@ -39,6 +39,10 @@ const EVENT_APP_DID_ENTER_FOREGROUND: u32 = 0x106;
 const EVENT_WINDOW: u32 = 0x200;
 const EVENT_KEYDOWN: u32 = 0x300;
 const EVENT_KEYUP: u32 = 0x301;
+const EVENT_MOUSEMOTION: u32 = 0x400;
+const EVENT_MOUSEBUTTONDOWN: u32 = 0x401;
+const EVENT_MOUSEBUTTONUP: u32 = 0x402;
+const EVENT_MOUSEWHEEL: u32 = 0x403;
 
 /// `SDL_WindowEventID` values the shell reacts to.
 pub mod window {
@@ -136,6 +140,20 @@ pub enum Event {
     Background,
     /// The app is back in front.
     Foreground,
+    /// A button of the Magic Remote's pointer (or a mouse) went down or up at
+    /// `x`,`y`; `button` 1 is the left one, which is OK while the pointer
+    /// shows (docs/specs/shell-mvp.md, "Input diagnostics").
+    MouseButton {
+        button: u8,
+        down: bool,
+        x: i32,
+        y: i32,
+    },
+    /// The pointer moved. Where to is not used, only that it did.
+    MouseMotion,
+    /// The Magic Remote's wheel turned (the B9 sends 0x403 while the pointer
+    /// is up). Input, nothing more.
+    MouseWheel,
     Other(u32),
 }
 
@@ -146,10 +164,22 @@ fn read_u32(bytes: &[u8], at: usize) -> u32 {
 /// Decodes the parts of an `SDL_Event` the shell uses. Window events are read
 /// at upstream's offsets (the `event` byte at 12) until a TV log shows LG
 /// moved those too; app-lifecycle events carry nothing beyond their type.
+/// Mouse events are at upstream's offsets in both layouts: the B9's own
+/// 0x400, 0x401 and 0x402 events (2026-10-22) have `which` at 12, the button
+/// at 16, its state at 17 and `x`,`y` at 20 and 24, as `SDL_MouseButtonEvent`
+/// declares them.
 pub fn parse_event(raw: &RawEvent, layout: KeyLayout) -> Event {
     let bytes = &raw.0;
     let state = layout.state_offset();
     match read_u32(bytes, 0) {
+        ty @ (EVENT_MOUSEBUTTONDOWN | EVENT_MOUSEBUTTONUP) => Event::MouseButton {
+            button: bytes[16],
+            down: ty == EVENT_MOUSEBUTTONDOWN,
+            x: read_u32(bytes, 20) as i32,
+            y: read_u32(bytes, 24) as i32,
+        },
+        EVENT_MOUSEMOTION => Event::MouseMotion,
+        EVENT_MOUSEWHEEL => Event::MouseWheel,
         EVENT_QUIT => Event::Quit,
         EVENT_KEYDOWN => Event::KeyDown {
             scancode: read_u32(bytes, state + 4) as i32,
@@ -355,6 +385,9 @@ pub struct Sdl {
     poll_event: unsafe extern "C" fn(*mut RawEvent) -> c_int,
     wait_event_timeout: unsafe extern "C" fn(*mut RawEvent, c_int) -> c_int,
     get_ticks: unsafe extern "C" fn() -> u32,
+    /// webOS only: shows or hides the Magic Remote pointer. webosbrew's SDL
+    /// fork has it; whether LG's 2.0.5 on the B9 does, the log says.
+    webos_cursor_visibility: Option<unsafe extern "C" fn(c_int)>,
     key_layout: KeyLayout,
     raw_keys_logged: Cell<u32>,
     raw_kinds_logged: RefCell<Vec<u64>>,
@@ -456,6 +489,9 @@ impl Sdl {
                 poll_event: sym(&lib, b"SDL_PollEvent\0")?,
                 wait_event_timeout: sym(&lib, b"SDL_WaitEventTimeout\0")?,
                 get_ticks: sym(&lib, b"SDL_GetTicks\0")?,
+                // Declared without a return value: webosbrew's header makes it
+                // `void`, and on every ABI here a caller may ignore one anyway.
+                webos_cursor_visibility: sym(&lib, b"SDL_webOSCursorVisibility\0").ok(),
                 key_layout,
                 raw_keys_logged: Cell::new(0),
                 raw_kinds_logged: RefCell::new(Vec::new()),
@@ -686,9 +722,43 @@ impl Sdl {
         (event, at)
     }
 
+    /// Whether this SDL can hide the Magic Remote pointer.
+    pub fn can_hide_pointer(&self) -> bool {
+        self.webos_cursor_visibility.is_some()
+    }
+
+    /// The `pointer:` line for the log, saying whether arrows will hide the
+    /// pointer (docs/specs/look-and-feel.md, "Log lines").
+    pub fn pointer_line(&self) -> String {
+        pointer_line(self.can_hide_pointer())
+    }
+
+    /// Shows or hides the Magic Remote pointer. Returns false, and does
+    /// nothing, where the SDL has no such call.
+    pub fn set_pointer_visible(&self, visible: bool) -> bool {
+        let Some(set) = self.webos_cursor_visibility else {
+            return false;
+        };
+        // SAFETY: `SDL_webOSCursorVisibility(SDL_bool)` takes one int and
+        // needs only an initialised video subsystem, which `init` gave it.
+        unsafe { set(c_int::from(visible)) };
+        true
+    }
+
     pub fn quit(&self) {
         // SAFETY: SDL_Quit is safe to call after (or without) SDL_Init.
         unsafe { (self.quit)() };
+    }
+}
+
+/// `pointer: SDL_webOSCursorVisibility found in LG's SDL; arrows hide the
+/// pointer`, or `... not in LG's SDL; the pointer stays as LG leaves it`.
+pub fn pointer_line(can_hide: bool) -> String {
+    if can_hide {
+        "pointer: SDL_webOSCursorVisibility found in LG's SDL; arrows hide the pointer".to_owned()
+    } else {
+        "pointer: SDL_webOSCursorVisibility not in LG's SDL; the pointer stays as LG leaves it"
+            .to_owned()
     }
 }
 
@@ -815,8 +885,138 @@ mod tests {
 
     #[test]
     fn unknown_events_pass_through() {
-        let raw = raw_with(0x400, |_| {});
-        assert_eq!(parse_event(&raw, KeyLayout::Upstream), Event::Other(0x400));
+        let raw = raw_with(0x700, |_| {});
+        assert_eq!(parse_event(&raw, KeyLayout::Upstream), Event::Other(0x700));
+    }
+
+    /// A raw event from a `raw event 0x...: 01 04 00 00|9f 45 ...` log line.
+    fn raw_from_log(hex: &str) -> RawEvent {
+        let mut raw = RawEvent::zeroed();
+        let bytes: Vec<u8> = hex
+            .split(['|', ' '])
+            .filter(|s| !s.is_empty())
+            .map(|s| u8::from_str_radix(s, 16).expect("hex byte"))
+            .collect();
+        assert_eq!(bytes.len(), RAW_BYTES);
+        raw.0[..RAW_BYTES].copy_from_slice(&bytes);
+        raw
+    }
+
+    /// The B9's own mouse events (OLED55B9PUA, firmware 05.50.00, LG's SDL
+    /// 2.0.5): `tools/out/archive/tv-check-20261022T015118Z/run.log` lines
+    /// 111 and 113 and `...T044903Z/run2.log` lines 30, 31, 650 and 651.
+    const B9_MOUSE: [(&str, Event); 7] = [
+        (
+            "01 04 00 00|9f 45 00 00|01 00 00 00|02 00 00 00|01 01 01 00|80 05 00 00|af 01 00 00|3c 7e 63 00|6c 63 09 01|48 b3 60 00|48 b3 60 00|79 02 8a f3",
+            Event::MouseButton {
+                button: 1,
+                down: true,
+                x: 1408,
+                y: 431,
+            },
+        ),
+        (
+            "02 04 00 00|29 46 00 00|01 00 00 00|02 00 00 00|01 00 01 00|88 05 00 00|b1 01 00 00|fb ff ff ff|00 00 00 00|c9 42 d7 f5|08 e9 84 00|00 00 00 00",
+            Event::MouseButton {
+                button: 1,
+                down: false,
+                x: 1416,
+                y: 433,
+            },
+        ),
+        (
+            "00 04 00 00|0d 1d 00 00|01 00 00 00|02 00 00 00|00 00 00 00|04 04 00 00|3b 02 00 00|04 04 00 00|3b 02 00 00|38 04 00 00|0a 00 00 00|04 04 00 00",
+            Event::MouseMotion,
+        ),
+        (
+            "01 04 00 00|d3 30 00 00|01 00 00 00|02 00 00 00|01 01 01 00|46 02 00 00|9d 01 00 00|f1 ff ff ff|fe ff ff ff|c9 e2 db f6|e0 09 24 01|d8 09 24 01",
+            Event::MouseButton {
+                button: 1,
+                down: true,
+                x: 582,
+                y: 413,
+            },
+        ),
+        (
+            "02 04 00 00|6a 31 00 00|01 00 00 00|02 00 00 00|01 00 01 00|45 02 00 00|97 01 00 00|fa ff ff ff|ff ff ff ff|c9 e2 db f6|d0 29 29 01|c8 29 29 01",
+            Event::MouseButton {
+                button: 1,
+                down: false,
+                x: 581,
+                y: 407,
+            },
+        ),
+        (
+            "01 04 00 00|f2 e0 03 00|01 00 00 00|02 00 00 00|01 01 01 00|a6 02 00 00|df 01 00 00|ff ff ff ff|fa ff ff ff|c9 22 d5 f6|08 e9 84 00|00 00 00 00",
+            Event::MouseButton {
+                button: 1,
+                down: true,
+                x: 678,
+                y: 479,
+            },
+        ),
+        (
+            "02 04 00 00|89 e1 03 00|01 00 00 00|02 00 00 00|01 00 01 00|9c 02 00 00|e0 01 00 00|01 00 00 00|f6 ff ff ff|c9 22 d5 f6|e8 32 c3 00|e0 32 c3 00",
+            Event::MouseButton {
+                button: 1,
+                down: false,
+                x: 668,
+                y: 480,
+            },
+        ),
+    ];
+
+    #[test]
+    fn parses_the_b9s_mouse_events_at_upstream_offsets_in_both_layouts() {
+        for (hex, want) in B9_MOUSE {
+            let raw = raw_from_log(hex);
+            assert_eq!(parse_event(&raw, KeyLayout::Lg), want, "{hex}");
+            assert_eq!(parse_event(&raw, KeyLayout::Upstream), want, "{hex}");
+        }
+    }
+
+    #[test]
+    fn the_wheel_is_an_event_of_its_own() {
+        let raw = raw_with(EVENT_MOUSEWHEEL, |_| {});
+        assert_eq!(parse_event(&raw, KeyLayout::Lg), Event::MouseWheel);
+    }
+
+    #[test]
+    fn a_mouse_events_stamp_is_at_byte_4_too() {
+        let raw = raw_from_log(B9_MOUSE[0].0);
+        assert_eq!(event_time(&raw), 0x459f);
+    }
+
+    #[test]
+    fn the_button_comes_from_the_event_not_the_state_byte() {
+        // A down event whose state byte reads released still counts as down:
+        // the type is what SDL dispatches on.
+        let raw = raw_with(EVENT_MOUSEBUTTONDOWN, |b| {
+            b[16] = 3;
+            b[17] = 0;
+            b[20..24].copy_from_slice(&(-7i32).to_ne_bytes());
+        });
+        assert_eq!(
+            parse_event(&raw, KeyLayout::Upstream),
+            Event::MouseButton {
+                button: 3,
+                down: true,
+                x: -7,
+                y: 0
+            }
+        );
+    }
+
+    #[test]
+    fn the_pointer_line_says_whether_arrows_hide_it() {
+        assert_eq!(
+            pointer_line(true),
+            "pointer: SDL_webOSCursorVisibility found in LG's SDL; arrows hide the pointer"
+        );
+        assert_eq!(
+            pointer_line(false),
+            "pointer: SDL_webOSCursorVisibility not in LG's SDL; the pointer stays as LG leaves it"
+        );
     }
 
     #[test]
