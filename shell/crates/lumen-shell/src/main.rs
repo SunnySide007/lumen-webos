@@ -17,6 +17,7 @@ mod render;
 mod sdl;
 mod text;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// Where the log goes when `LUMEN_LOG` is not set. A native app on the TV has
@@ -29,9 +30,17 @@ fn default_log_path() -> &'static str {
     }
 }
 
+/// The log, then a fallback beside it for when the log will not open (a file
+/// left by another user, say); `tools/tv.sh log` on main shows both.
+fn log_paths() -> [PathBuf; 2] {
+    let log =
+        PathBuf::from(std::env::var("LUMEN_LOG").unwrap_or_else(|_| default_log_path().to_owned()));
+    let fallback = log.with_file_name("lumen-shell.fallback.log");
+    [log, fallback]
+}
+
 fn main() -> ExitCode {
-    let log_path = std::env::var("LUMEN_LOG").unwrap_or_else(|_| default_log_path().to_owned());
-    log::init(&log_path);
+    log::init(&log_paths());
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     info!(
