@@ -51,11 +51,14 @@ x=         80         440        800        1160       1520 (to 1840)
 | Action | Simulator (PC keyboard) | B9 remote (measured) |
 |---|---|---|
 | Up, Down, Left, Right | arrow keys: 82, 81, 80, 79 | the same: 82, 81, 80, 79 |
-| Select | Return (40), keypad Enter (88) | OK: 40 |
+| Select | Return (40), keypad Enter (88) | OK: 40; while the pointer shows, OK arrives as a click of pointer button 1 instead, which the shell takes as Select ("Input diagnostics") |
 | Back | Escape (41) | BACK: 482 (AC Back, 270, is accepted too) |
 
-* Everything else is ignored, including 484 and 485, which arrive around
-  Magic Remote pointer movement (probably pointer shown and hidden).
+* 484 and 485 are the Magic Remote's pointer appearing and going away
+  (webosbrew's SDL names them `SDL_SCANCODE_WEBOS_CURSOR_SHOW` and
+  `_HIDE`; the B9 sends 484 as the remote moves and 485 about 5 s after it
+  stops). They are key-downs with no key-up; the shell notes them and acts
+  on neither. Everything else is ignored.
 * **HOME never reaches the shell.** On the B9, LG's compositor takes it and
   opens LG's Home, which is also today's escape hatch. Short and long Home
   presses belong to the key filter in `takeover/`, so the shell has no Home
@@ -554,6 +557,115 @@ Not in this plan: Phase 4 items, the held-key speed-up and the start-up
 time (its 923 ms in `draw::Assets` may share a fix with H3; it is a target of
 its own).
 
+**Stage 1 ran on 2026-10-22** (df2a4d0; "Measured on the B9", 14). Read
+against the table: on the B9 the wait shows in `submit`, the GL draw call,
+not in the swap, so "time in the swap" above reads "time in submit" there.
+H4 holds, refined: the slow frame is the third of a burst from idle, not the
+second, with frames 2 and 3 together taking two vsyncs (the queue filling),
+so most "misses" probably lose nothing on screen but step the springs 9 then
+about 31 ms. H3 is confirmed: every slow frame with an upload spent 9–25 ms
+in it. H5 is out for the motion. H1 is against: one frame, not a run of
+them, and the next frame is back at 16.7 ms. H2 stays open for the few real
+mid-burst misses, with nothing uploaded. The slow-motion video of the taps
+has not been read yet. Stage 2 waits; stage 3's design (springs stepped by
+whole vsyncs, uploads kept out of the frame that reads the atlas, and
+whether that also cuts start-up's assets time) is being worked out on the PC
+first.
+
+## Input diagnostics
+
+Keys go missing for minutes at a time on the B9 ("Measured on the B9", 13
+and 14), and the log could not say why: whether the presses reached the TV,
+whether something else was in front, or whether the shell had the focus at
+all. A reading of the three 2026-10-22 logs (research note, 2026-10-21):
+every focus loss with no key came 112–120 s after the last input the shell
+saw, as `FOCUS_LOST` and `LEAVE` in the same millisecond with no hidden or
+background event, which is LG's screensaver taking the screen after about
+two minutes without "user action". And an OK pressed while the pointer
+shows arrives as a click (0x401/0x402, pointer button 1, at upstream SDL's
+offsets), not as key 40, which the shell ignored: that is the launch that
+"never arrived" in run 14. So the shell gains the lines below (approved
+2026-10-22; formats also in look-and-feel.md, "Log lines", which
+`tools/frame-stats.sh` summarises in an "input" section).
+
+```text
+pointer shown
+pointer hidden
+mouse button <b> down at <x>,<y>: taken as OK
+mouse button <b> down at <x>,<y>: ignored
+mouse button <b> up at <x>,<y>
+pointer: SDL_webOSCursorVisibility found in LG's SDL; arrows hide the pointer
+pointer: SDL_webOSCursorVisibility not in LG's SDL; the pointer stays as LG leaves it
+power <state>: last input <S.s> s ago
+front app <id>: last input <S.s> s ago
+screensaver request: allowed; last input <S.s> s ago
+luna watch <what>: <error text>
+no input for <N> s; focused <yes|no>; pointer <shown|hidden>; power <state|unknown>
+```
+
+* **Input** is any key, 484 and 485 included, and any pointer event (a
+  button, a move or the wheel). The key-up SDL makes for 484 or 485 when the
+  window loses focus is not input (LG never sends one), though it still
+  counts as one of the "other events" in the focus lines, as before. Since
+  LG sends no key-up for 484 and 485, SDL may flag a later one as a repeat;
+  the shell reads the state from the code, not the flag.
+* **The pointer** is `shown` from a 484 until a 485, `hidden` before the
+  first. `sdl.rs` decodes pointer buttons and moves at upstream's offsets,
+  which the B9's own events confirm (the four 0x401/0x402 pairs in the
+  2026-10-22 logs are the tests' fixtures). Their `which` field at bytes
+  12–15 reads 2, the same value LG's key events carry there, so that field
+  is an input-device id ("Still open", 3).
+* **A click is OK.** Pointer button 1 down goes through Select's own path:
+  it is timed as `key 40: shown after N ms`, counts as a key for the focus
+  lines, shows the press pulse first and launches after that frame. Its
+  release releases the key. Other buttons are logged and ignored. The
+  position is logged, not used: nothing is pointed at.
+* **Arrows hide the pointer** when LG's SDL exports
+  `SDL_webOSCursorVisibility` (webosbrew's fork has it; `dlsym` at start-up
+  says whether LG's 2.0.5 does, in the `pointer:` line), as moonlight-tv
+  does, so the OK that follows comes as a key. Each arrow while the pointer
+  shows asks once; the shell then takes the pointer as hidden, and LG's
+  485, if it sends one, says so again.
+* **The luna watch** (`watch.rs`) runs on a thread of its own, with an
+  anonymous client and a glib context of its own, as the launcher's calls
+  do, and holds three subscriptions (`LSCall`, `subscribe: true`) for the
+  life of the shell: `tvpower/power/getPowerState` (`Active`, `Screen
+  Saver`, `Screen Off`), `applicationManager/getForegroundAppInfo` (which
+  names what takes the focus), and `tvpower/power/registerScreenSaverRequest`
+  as `<appId>.wakelock`. A change of state or of app logs one line; a
+  screensaver request is answered on `responseScreenSaverRequest` with
+  `{clientName, ack: true, timestamp}`, so **the screensaver is allowed and
+  only logged** (the panel is an OLED). A measurement run that wants it off
+  can later answer `false` behind a flag; nothing persists, the
+  subscriptions die with the process. A subscription the hub refuses, or a
+  message that cannot be read or is over 64 KB, logs one `luna watch` line
+  for that subscription and nothing more until it answers again; `luna
+  watch thread:` lines say when the thread itself could not start, load the
+  library or register (`tools/frame-stats.sh` lists the three
+  subscriptions' failures, not these). Other services' strings reach the
+  log trimmed, with control characters as spaces and cut to 200 characters.
+  The thread dispatches its context blocking, is woken at exit, and is
+  given 2 s to unregister before the exit goes on without it. It starts
+  before the first frame, after the apps are listed, so the next run's
+  `start:` line says whether it costs anything there.
+* **The heartbeat** comes 30 s after the last input, then every 30 s until
+  10 minutes without input, then every 10 minutes, on the loop's clock (so
+  not under `--fixed-dt`, where it only comes if the keys or frames carry
+  the clock past it). `focused` follows SDL's focus events. It bounds a
+  gap without a clock read: the owner says "I was pressing at that line",
+  and the next lines say whether the TV saw the press.
+* **What the next run decides.** With the owner's OK the run also records
+  the remote's evdev nodes read-only to `/tmp` (`cat /dev/input/event1`,
+  `event3`, `event4`; 16-byte records on this kernel) and takes two read-only
+  looks (`luna-send getPowerState`; `grep -a` of LG's SDL for its `SDL_webOS`
+  exports). Presses in the recording but not in the shell's log mean the
+  loss is in LG's input path; none means the remote or its service, which
+  fresh batteries or a re-pair would answer. A `front app` or `power` line
+  in the same second as a focus loss with no key names the screensaver.
+
+Not in this: pointing at tiles with the pointer, and turning the screensaver
+off.
+
 ## Measured on the B9
 
 The main session's hello-gles run answered the remote's scancodes, that
@@ -640,13 +752,39 @@ and one worst frame per burst, so the counts are over bursts, not frames.
     20 s and then 28 s; whether presses were lost in those gaps is not yet
     confirmed.
 
+Stage 1 of the frame-time plan (df2a4d0, the slow-frame lines) ran on the
+same set on 2026-10-22, 04:55–05:23 UTC, opened by hand with nothing else
+of ours running (report: `tools/out/archive/tv-check-20261022T044903Z` on
+main):
+
+14. **Where a slow frame's time goes.** 35 s of motion: 14 bursts, 1,308
+    frames, 16.80 ms on average; 11 bursts had a frame over 25 ms, the worst
+    34.82 ms; 17 slow-frame lines, one more not logged. Their time is in
+    `submit` (p50 29.16 ms, max 33.76), not the swap (max 1.80 ms): on this
+    driver the draw call blocks until a buffer is free. 8 of the 17 are
+    frame 3 of a burst from idle, and nearly every burst from idle reads
+    `first 9, 30, 17 ms`: frames 2 and 3 take two vsyncs together, the queue
+    filling. The 5 with uploads spent 9.02–24.53 ms in `upload` for 2–5
+    uploads of 3–10 KB (once a 128 KB icon). 5 more missed mid-burst (25–35
+    ms in submit, nothing uploaded; 41.44 ms once after a return to the
+    front). No major page fault in any slow frame of the motion; 2 in one
+    frame after 47 s without focus, with 5.8 MB of the shell's 35.6 MB
+    resident in swap. Key to frame: 73 of 74 within 33 ms, the one at 35 ms
+    in a slow frame. Start-up 1,594 ms (sdl 165, gl 167, renderer 112, assets
+    983, apps 104, first frame 63). Then no key for 118 s with no focus
+    loss, a focus loss 118.3 s after the last key, and an OK that came as a
+    pointer click (0x401 at 1792645177.3) while the pointer showed, which
+    the build ignored. The read in "Input diagnostics" follows from this.
+
 Still open:
 
 1. ~~How fast the remote repeats.~~ Answered on 2026-10-22 (7).
 2. ~~Which event brings the shell back to the front.~~ Answered on
    2026-10-22 (11): from LG's app list, `window restored` comes first.
 3. What the u32 at bytes 12–15 means. Another input (a USB keyboard, LG's
-   phone app) may show a different value.
+   phone app) may show a different value. The B9's pointer events carry 2
+   in their `which` (input-device id) field at the same bytes, so a device
+   id is the likely answer ("Input diagnostics").
 4. Where the shell gets icons for apps whose folders the jail doesn't mount:
    LG's own apps, store apps and the inputs (B3, 2026-10-21). Only
    developer-mode apps' icons resolve inside the jail. Reaching the others
@@ -657,11 +795,17 @@ Still open:
    and the shell sometimes lost focus to LG's UI. In the library build's run
    it lost focus about two minutes after launch, with no key pressed. B1's
    run, opened by hand from LG's app list, got keys from the start; the
-   2026-10-22 runs, opened the same way, still lost keys at times (13).
-6. Why most bursts miss a vsync (6), and which frame of a burst it is.
+   2026-10-22 runs, opened the same way, still lost keys at times (13, 14).
+   The focus losses with no key fit LG's screensaver, and the lost OK was a
+   click; whether the other presses reached the TV at all, the next run's
+   lines and evdev recording decide ("Input diagnostics").
+6. Why most bursts miss a vsync (6). Answered in part on 2026-10-22 (14):
+   it is frame 3 of a burst from idle, waiting in the draw call, and uploads
+   into the atlas; the fix is stage 3 of the frame-time plan.
 
 ## Not in this spec
 
-The Home key filter (`takeover/`), the Magic Remote pointer, glass and blur,
-Top Shelf content, the Control Center, parallax, app editing and reordering
-(Phase 4), and sound.
+The Home key filter (`takeover/`), pointing at tiles with the Magic Remote's
+pointer (its state and a click as OK are in "Input diagnostics"), glass and
+blur, Top Shelf content, the Control Center, parallax, app editing and
+reordering (Phase 4), and sound.
