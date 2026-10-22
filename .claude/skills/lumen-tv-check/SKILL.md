@@ -130,7 +130,8 @@ Agree first on what the owner does on the remote while the clock runs:
   are no statistics at all. The owner moves for the whole window, the same way
   each time: hold RIGHT along row 0 to its end, DOWN through every row, then
   LEFT and UP back, repeating. No OK (it may launch a real app), and no BACK
-  on the top row (it closes the shell).
+  on the top row (it closes the shell). A build with the key-diagnostics
+  lines takes a click while the pointer shows as OK, so no clicks either.
 * **Focus and keys (B9, 2026-10-21):** after `tv.sh launch`, no remote key
   reached the shell until the owner woke the Magic Remote's pointer. The shell
   also lost focus to LG's UI twice with nothing on our side, and every key
@@ -146,11 +147,12 @@ Agree first on what the owner does on the remote while the clock runs:
   confirm that the shell is the app in front by eye either. The log says so:
   `key down`, `fps` and `drew` lines are coming in, and no `the window lost
   focus: drawing stops` has come since the last `in front again`.
-* **A build that lists apps through `luna-send`** (B3 on) shows no apps when
-  launched as an app. Inside the app's jail `luna-send` fails with
-  `Permission denied` (B9, 2026-10-21), so there is nothing to move through.
-  Measure a build with mock tiles (B2's) until the shell gets its apps another
-  way.
+* **A build that lists apps through `luna-send`** (B3's first version) shows
+  no apps when launched as an app. Inside the app's jail `luna-send` fails
+  with `Permission denied` (B9, 2026-10-21), so there is nothing to move
+  through. Builds that call luna through the library (c500289 on) list
+  30 tiles from inside the jail (2026-10-22); measure those, or a build with
+  mock tiles (B2's).
 
 Then, quickly one after the other:
 
@@ -221,6 +223,32 @@ What the log holds, for reading the output:
   each launch (target 6, 100 ms).
 * `window focus lost: …`: how long since the last key. The output counts the
   focus losses with no key pressed.
+* The key-diagnostics lines (written on `claude/shell-timing`, K1–K5, not yet
+  run on the TV; formats in [look-and-feel.md, "Key
+  diagnostics"](../../../docs/specs/look-and-feel.md#key-diagnostics)).
+  "Input" is any key, 484 and 485 included, and any mouse event.
+  * `pointer shown` and `pointer hidden`: scancodes 484 and 485, the Magic
+    Remote's pointer appearing and going.
+  * `mouse button <b> down at <x>,<y>: taken as OK`: a left click while the
+    pointer shows. It is a launch, timed as `key 40`, so step C's "no OK"
+    covers clicks too. `…: ignored` is any other button; `mouse button <b>
+    up` is the release.
+  * `pointer: SDL_webOSCursorVisibility found …` or `… not in LG's SDL …`:
+    once at start-up, whether arrows hide a shown pointer.
+  * `power <state>: last input … s ago`: LG's power state (`Active`,
+    `Screen Saver`).
+  * `front app <id>: last input … s ago`: what came in front. A line naming
+    `com.webos.app.screensaver` or another app explains a focus loss.
+  * `screensaver request: allowed; last input … s ago`: LG asked to start
+    the screensaver, and the shell let it.
+  * `luna watch <what>: <error text>`: one of the three subscriptions was
+    refused; it logs nothing more until it answers again. `luna watch
+    thread:` lines mean the watch itself could not start.
+  * `no input for <N> s; focused …; pointer …; power …`: every 30 s with no
+    input, up to 10 min, then every 10 min. These lines bound a gap without
+    a `T0` read: the owner can say "I was pressing at that line".
+  * `frame-stats.sh` will summarise them in an "input" section (another
+    session is writing it).
 * `key down scancode …` and `luna <method>: N ms` are not timing lines; the
   script leaves them out.
 * The log times only a burst's first and slow frames, not every frame. The
@@ -272,10 +300,11 @@ For comparison, the B9 (OLED55B9PUA, firmware 05.50.00) has measured:
 
 | Build | Result |
 |---|---|
-| hello-gles, about 3,000 quads | a steady 60.0 fps, 16.67 ms average, 17–19 ms worst frame per second ([b9.md](../../../docs/device/b9.md)) |
-| the home grid, B1, moving | about 520 frames in 13 bursts averaging 16.2–16.7 ms; worst frame at or under 17.8 ms in 11 bursts, 19.6 ms once, and one 33.3 ms miss; 856–1,631 quads (`docs/specs/shell-mvp.md` on the shell branch) |
+| hello-gles (0932965, 2026-10-20), about 3,000 quads | a steady 60.0 fps, 16.67 ms average, 17–19 ms worst frame per second ([b9.md](../../../docs/device/b9.md)) |
+| the home grid, B1 (3572bf3, 2026-10-20), moving | about 520 frames in 13 bursts averaging 16.2–16.7 ms; worst frame at or under 17.8 ms in 11 bursts, 19.6 ms once, and one 33.3 ms miss; 856–1,631 quads (`docs/specs/shell-mvp.md` on the shell branch) |
 | hello-gles, about 3,000 quads, this skill's first run (2026-10-21; 30 s after 5 s of warm-up; Phase 1's DNS capture running) | 60.0 fps, 16.68 ms average; window worst frame p50 17.55 ms, p95 24.57 ms, longest 24.89 ms (5 of 30 windows above 19 ms); no frame over 25 ms |
 | the home grid, B2 (3543c41, mock tiles), moving for about 4.4 s only (2026-10-21; DNS capture running) | about 270 frames in 6 bursts, 16.68 ms average (60.0 fps); 3 frames of 25.41, 26.17 and 31.84 ms; 26–51 quads. Too short to judge B2's shader cost |
+| the home grid, c500289, 09711d7 and df2a4d0, moving (2026-10-22; reports in `tools/out/archive/tv-check-20261022T*`) | averages 16.80–16.84 ms, but a frame over 25 ms in most bursts (37 of 50, 16 of 20, 11 of 14); [look-and-feel.md, target 1](../../../docs/specs/look-and-feel.md#snappy) |
 
 A reading of "holds 60 fps" means an average near 16.67 ms (up to about
 16.8 ms) with the missed vsyncs counted and named, not hidden. A frame of

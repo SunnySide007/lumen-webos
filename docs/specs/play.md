@@ -43,7 +43,7 @@ and the B9's measured input stack is in [b9.md](../device/b9.md#input-devices).
 
 | | Milestone | Needs | Can run beside |
 |---|---|---|---|
-| P0 | `lumen-tv-check` skill | — | P1 |
+| P0 | `lumen-tv-check` skill (done: on main on 2026-10-22, 8ec43a9) | — | P1 |
 | P1 | One controller working end to end (parked) | — | P0 |
 | P2 | The shell reads the pad | P1, shell B3 merged | P3 |
 | P3 | RetroArch on the B9, measured | P1 (for input) | P2 |
@@ -70,8 +70,13 @@ project skill in `.claude/skills/lumen-tv-check/` does that check:
 It never runs a TV step without asking.
 
 **Done when:** the skill measures `hello-gles` on the B9 and gets b9.md's
-steady 60 fps, then runs the home screen's owed B2 frame-time check from the
+steady 60 fps, then runs the home screen's B2 frame-time check from the
 shell worktree.
+
+**Done on 2026-10-22.** The skill is on main (8ec43a9). It measured
+`hello-gles` at 60.0 fps on 2026-10-21, and ran the B2/B3 frame-time check
+on 2026-10-22 (c500289, report `tools/out/archive/tv-check-20261022T015118Z`;
+the numbers are in [look-and-feel.md](look-and-feel.md#snappy), target 1).
 
 **Undo:** the skill is a repo file; the app it installs is removed with
 `tools/tv.sh remove`.
@@ -134,7 +139,7 @@ Tonight's TV scripts are kept in `tools/out/play-p1/` (not in git): `pad-read`,
 pad is still paired with the TV until it's unpaired.
 
 **While P1 is parked:**
-* P0 carries on.
+* P0 carried on and is done (2026-10-22).
 * P3 can measure RetroArch with the Magic Remote, and its pad check waits.
 * P6's phone-as-a-pad route matters more now.
 * P2 and P4 wait.

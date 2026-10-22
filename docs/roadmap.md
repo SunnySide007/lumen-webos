@@ -42,7 +42,9 @@ Off the TV (Stage A):
 On the TV ([runbook](runbooks/phase1-tv.md)):
 
 - [x] plx-native 0.8.0 installed from the verified IPK; signed in, plays from Plex
-- [ ] 24 h baseline capture, fetched and summarised
+- [ ] 24 h baseline capture, fetched and summarised. Both tries stopped
+  early: the first (from 19:01 PDT 2026-10-20) after about 4 h, the second
+  (from 18:48 PDT 2026-10-21) after about 1 h 8 min. Stage C needs a new one
 - [ ] `b9-aggressive.hosts` and `allowlist.txt` refined from the capture (owner reviewed)
 - [ ] Glasshouse 0.118.0 installed (owner confirmed), dashboard on 127.0.0.1 only
 - [ ] Stage 1, ads & telemetry tier: store-safe check and app checklist pass
@@ -62,7 +64,9 @@ run first, side by side.
 
 - [x] Research with sources (`docs/research.md`, "Play")
 - [x] Input, Bluetooth, USB and network survey of the B9 (`docs/device/b9.md`)
-- [ ] P0: `lumen-tv-check` skill
+- [x] P0: `lumen-tv-check` skill: on main on 2026-10-22 (8ec43a9); it
+  measured hello-gles on 2026-10-21 and the home screen's B2/B3 frame time
+  on 2026-10-22 (c500289)
 - [ ] P1: one controller working end to end. Parked 2026-10-21: the Series pad
   sends nothing by cable and won't connect over Bluetooth; it comes back with
   more research and the USB helper ([spec](specs/play.md#p1-one-controller-working-end-to-end))

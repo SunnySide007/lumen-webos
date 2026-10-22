@@ -12,8 +12,8 @@ target, not a result, until a run on the B9 backs it (CONTRIBUTING.md, rule
 05.50.00.
 
 Today's layout and motion values are in `docs/specs/shell-mvp.md` (on branch
-`claude/shell-ls2` until the shell merges). This spec doesn't repeat them; it
-sets the bar they are judged against.
+`claude/shell-timing` until the shell merges). This spec doesn't repeat them;
+it sets the bar they are judged against.
 
 ## Principles
 
@@ -34,15 +34,15 @@ sets the bar they are judged against.
 
 | # | Target | Measured so far | Target | How it's measured | Checked in |
 |---|---|---|---|---|---|
-| 1 | Frame time while moving | B1 grid, 13 bursts (~520 frames): averages 16.2–16.7 ms, worst ≤ 17.8 ms in 11, one 19.6 ms, one missed vsync (33.3 ms). B2/B3 (shape shader, atlas), 2026-10-22: c500289 with Phase 1's capture running, 50 bursts (2,611 frames): average 16.83 ms, a frame over 25 ms in 37, worst 50.6 ms; 09711d7 with no capture, 20 bursts (1,399 frames, 23 s drawn): average 16.82 ms, a frame over 25 ms in 16, worst 35.1 ms. The misses come mostly in a single tap's burst and in Down's scroll (shell-mvp.md, "Measured on the B9" 6) | *Proposed:* each burst averages ≤ 16.8 ms; worst ≤ 20 ms in ≥ 95% of bursts; at most 1 missed vsync (> 25 ms) per 10 s of motion | `lumen-tv-check`: 30 s of navigation after 5 s skipped, summarised by `tools/frame-stats.sh` | Phase 3, then again with each Phase 4 feature on screen |
-| 2 | Key press to the first frame that shows it, inside the shell | 09711d7, 2026-10-22: all 72 presses shown were within 20 ms: 1–7 ms from a settled screen, 16–20 ms when the press lands mid-burst; one more came as the window hid and wasn't shown. Measured from SDL's stamp on the event, assuming LG's SDL stamps it on arrival | *Proposed:* ≤ 2 frames (≤ 33 ms) for 95% of presses | New log line (below) | Phase 3 |
+| 1 | Frame time while moving | B1 grid (3572bf3, 2026-10-20), 13 bursts (~520 frames): averages 16.2–16.7 ms, worst ≤ 17.8 ms in 11, one 19.6 ms, one missed vsync (33.3 ms). B2/B3 (shape shader, atlas), 2026-10-22: c500289 with Phase 1's capture running, 50 bursts (2,611 frames): average 16.83 ms, a frame over 25 ms in 37 (and in 32 of 43 one-second windows: about 7 per 10 s), worst 50.6 ms; 09711d7 with no capture, 20 bursts (1,399 frames, 23 s drawn): average 16.82 ms, a frame over 25 ms in 16 (about 7 per 10 s), worst 35.1 ms. The misses come mostly in a single tap's burst and in Down's scroll (shell-mvp.md, "Measured on the B9" 6). Stage 1 (df2a4d0, 2026-10-22, no capture), 14 bursts (1,308 frames, 21.7 s drawn): average 16.80 ms, a frame over 25 ms in 11 (about 5 per 10 s), worst 34.82 ms; where the time goes is under "What stage 1 found" below | *Proposed:* each burst averages ≤ 16.8 ms; worst ≤ 20 ms in ≥ 95% of bursts; at most 1 missed vsync (> 25 ms) per 10 s of motion | `lumen-tv-check`: 30 s of navigation after 5 s skipped, summarised by `tools/frame-stats.sh` | Phase 3, then again with each Phase 4 feature on screen |
+| 2 | Key press to the first frame that shows it, inside the shell | 09711d7, 2026-10-22: all 72 presses shown were within 20 ms: 1–7 ms from a settled screen, 16–20 ms when the press lands mid-burst; one more came as the window hid and wasn't shown. df2a4d0, 2026-10-22: 73 of 74 presses in the motion window within 33 ms (p50 17 ms), the other 35 ms, during a slow frame. Measured from SDL's stamp on the event, assuming LG's SDL stamps it on arrival | *Proposed:* ≤ 2 frames (≤ 33 ms) for 95% of presses | New log line (below) | Phase 3 |
 | 3 | Remote to screen, end to end | Not measured | *Proposed:* no slower than LG's Home bar on the same remote, within 1 frame | Slow-motion video on the owner's phone (240 fps, about 4 ms a frame), 10 presses on Lumen and 10 on LG's Home | Phase 3 |
-| 4 | Cold start to first frame | B1: 444 ms (352 ms of it is SDL's window and GL context). B3: 1,504 ms: GL ready at 380 ms, then 1,023 ms in `Renderer::new` and `draw::Assets` (shader compile and font/atlas set-up), then 50 ms of luna. c500289: 1,197 ms. 09711d7, split by the `start:` line: 1,395 ms: SDL 163, GL 138, renderer 59, assets 923, apps 63, first frame 49 | *Proposed:* ≤ 600 ms to a first frame; icons and titles may fill in after | New start-up log line (below) | Phase 3 |
-| 5 | Home key to the shell, warm | Not possible yet (no takeover). The shell's half, 09711d7: its first frame 170 ms after `window restored` when picked from LG's app list; 13 ms after a focus gain and 2 ms after a restore on two other returns | < 150 ms ([roadmap](../roadmap.md)) | Slow-motion video, and the foreground log line (below) | Phase 3 |
-| 6 | Launch | c500289 called luna inside the key handler: HDMI 1 answered in 320 ms and no pulse frame was drawn. 09711d7 draws the pulse frame first (1 ms after OK), then calls: HDMI 1 answered in 18 ms, Homebrew Channel in 573 ms | *Proposed:* pulse on the next frame; the launch call answered in ≤ 100 ms. The app's own start is reported next to LG's Home launching the same app, not targeted | Log line, slow-motion video | Phase 3 |
-| 7 | Held key | The shell repeats after 400 ms, then every 120 ms. The remote (LG's SDL repeats, 16 holds on 2026-10-22): first after about 505 ms (491–522), then every 50 ms | Owner's call, 2026-10-22: keep it. Speeding up after 1.5 s held (every 80 ms), as tvOS does, was tried in the simulator and not kept | `SDL repeat` log lines; the owner's feel | Phase 3 |
-| 8 | Settled CPU | 0.2% of a core (B1: 20 ms of CPU in 10 s) | *Proposed:* ≤ 1% | Clock ticks in `/proc/<pid>/stat` over 10 s | Phase 3; again in Phase 4, since glass must not add idle drawing |
-| 9 | Memory | 18 MB resident (B1); 39.7 MB (c500289, about 10 minutes after its start). The B9 has about 330 MB free and is already using swap | *Proposed:* ≤ 64 MB resident; GPU textures ≤ 24 MB | `VmRSS` in `/proc/<pid>/status`; texture sizes from the code | Phase 3 and 4 |
+| 4 | Cold start to first frame | B1 (3572bf3): 444 ms (352 ms of it is SDL's window and GL context). B3: 1,504 ms: GL ready at 380 ms, then 1,023 ms in `Renderer::new` and `draw::Assets` (shader compile and font/atlas set-up), then 50 ms of luna. c500289, 2026-10-22: 1,197 ms. Split by the `start:` line, 2026-10-22: 09711d7, 1,395 ms: SDL 163, GL 138, renderer 59, assets 923, apps 63, first frame 49; df2a4d0, 1,594 ms: SDL 165, GL 167, renderer 112, assets 983, apps 104, first frame 63 | *Proposed:* ≤ 600 ms to a first frame; icons and titles may fill in after | New start-up log line (below) | Phase 3 |
+| 5 | Home key to the shell, warm | Not possible yet (no takeover). The shell's half, 09711d7: its first frame 170 ms after `window restored` when picked from LG's app list; 13 ms after a focus gain and 2 ms after a restore on two other returns. df2a4d0, 2026-10-22: 10 and 2 ms after a focus gain | < 150 ms ([roadmap](../roadmap.md)) | Slow-motion video, and the foreground log line (below) | Phase 3 |
+| 6 | Launch | c500289 called luna inside the key handler: HDMI 1 answered in 320 ms and no pulse frame was drawn. 09711d7 draws the pulse frame first (1 ms after OK), then calls: HDMI 1 answered in 18 ms, Homebrew Channel in 573 ms. df2a4d0: none; the OK on HDMI 1 never came as a key ("What blocks measuring now") | *Proposed:* pulse on the next frame; the launch call answered in ≤ 100 ms. The app's own start is reported next to LG's Home launching the same app, not targeted | Log line, slow-motion video | Phase 3 |
+| 7 | Held key | The shell repeats after 400 ms, then every 120 ms. The remote (LG's SDL repeats, 16 holds in the c500289 and 09711d7 runs, 2026-10-22): first after about 505 ms (491–522), then every 50 ms. df2a4d0's 5 holds agree (p50 508 ms, 497–519) | Owner's call, 2026-10-22: keep it. Speeding up after 1.5 s held (every 80 ms), as tvOS does, was tried in the simulator and not kept | `SDL repeat` log lines; the owner's feel | Phase 3 |
+| 8 | Settled CPU | 0.2% of a core (B1, 3572bf3, 2026-10-20: 20 ms of CPU in 10 s) | *Proposed:* ≤ 1% | Clock ticks in `/proc/<pid>/stat` over 10 s | Phase 3; again in Phase 4, since glass must not add idle drawing |
+| 9 | Memory | 18 MB resident (B1, 3572bf3); 39.7 MB (c500289, 2026-10-22, about 10 minutes after its start); 35.6 MB resident and 5.8 MB swapped out (df2a4d0, 2026-10-22, about 10 minutes after its start). The B9 had about 335 MB available and 188 MB of swap in use at the 2026-10-20 survey ([b9.md](../device/b9.md#memory)) | *Proposed:* ≤ 64 MB resident; GPU textures ≤ 24 MB | `VmRSS` in `/proc/<pid>/status`; texture sizes from the code | Phase 3 and 4 |
 
 Memory is on the list because a page-in from swap is a stall no frame budget
 survives.
@@ -105,6 +105,8 @@ slow frames: <K> more not logged
   the texture, `glTexSubImage2D`), `submit` (handing the batch to GL) and
   `swap` (inside `SDL_GL_SwapWindow`). The swap can wait for GPU work an
   earlier frame handed over, so a slow swap isn't always its own frame's cost.
+  On the B9 the wait for the next vsync shows in `submit`, not in `swap`
+  (below).
 * Uploads and KB are the frame's atlas uploads; glyphs, the glyphs it
   rasterised. `faults` are the main thread's page faults since the previous
   frame (`getrusage(RUSAGE_THREAD)`). A major fault read a page back from swap
@@ -118,14 +120,118 @@ slow frames: <K> more not logged
   (shell-mvp.md, on `claude/shell-timing`): which frame of a burst is slow,
   and where its time goes.
 
+#### What stage 1 found
+
+df2a4d0 on the B9, 2026-10-22 04:55–05:23 UTC, opened by hand, no capture
+running (report `tools/out/archive/tv-check-20261022T044903Z`). In the 35 s
+motion window: 14 bursts, 17 slow-frame lines and 1 more not logged.
+
+1. **The vsync wait shows in `submit`, not `swap`.** On this driver the
+   draw call blocks until a buffer is free: submit p50 29.16 ms in the slow
+   frames, swap at most 1.80 ms. On the B9, read the plan's "time in the
+   swap" as time in `submit`.
+2. **Most misses are frame 3 of a burst after idle.** 8 of the 17 lines,
+   and nearly every burst from idle has the same shape: frame 2 about 9 ms,
+   frame 3 about 30 ms, frame 4 back to 16.7 ms (`first 9.22, 30.69,
+   17.56`). Frames 2 and 3 together take about two vsyncs: the buffer queue
+   filling after the idle wait. Probably no frame is lost on screen, but the
+   springs step 9 ms, then about 31 ms, for frames shown 16.7 ms apart. It is
+   one frame, not several, so it counts against H1 (a slow GPU clock after
+   idle). The slow-motion video decides whether it shows.
+3. **Atlas uploads block 9–25 ms (H3 confirmed).** Every slow frame with an
+   upload (5 of 17) spent 9.02–24.53 ms in `upload` for 2–5 uploads of
+   3–10 KB: a wait for the GPU to finish with the 8 MB atlas, not a copy.
+4. **A few real mid-burst misses.** Frames 44, 46, 51, 63 and 444 took
+   25–35 ms in `submit` with nothing uploaded. After the shell came back to
+   the front, four more missed the same way, the worst 41.44 ms.
+5. **No major page faults during the motion (H5 out):** 82 minor, 0 major
+   in the window's slow frames. One frame after 47 s without focus had 2
+   major faults.
+
+Frame 1 of a burst is never timed, so frame 2's or 3's wait may pay for
+frame 1's work, and frame 1's uploads and glyphs are in no line.
+
+#### Key diagnostics
+
+Decided 2026-10-22; written by the shell on `claude/shell-timing` (K1–K5),
+not yet run on the TV. Each line starts with `[<unix seconds>] ` like the
+others.
+
+```text
+pointer shown
+pointer hidden
+mouse button <b> down at <x>,<y>: taken as OK
+mouse button <b> down at <x>,<y>: ignored
+mouse button <b> up at <x>,<y>
+pointer: SDL_webOSCursorVisibility found in LG's SDL; arrows hide the pointer
+pointer: SDL_webOSCursorVisibility not in LG's SDL; the pointer stays as LG leaves it
+power <state>: last input <S.s> s ago
+front app <id>: last input <S.s> s ago
+screensaver request: allowed; last input <S.s> s ago
+luna watch <what>: <error text>
+no input for <N> s; focused <yes|no>; pointer <shown|hidden>; power <state|unknown>
+```
+
+* "Input" is any key, 484 and 485 included, and any mouse event (a button,
+  a move or the wheel). The key-up SDL makes for 484 or 485 at a focus loss
+  is not input.
+* `pointer shown` and `pointer hidden`: scancodes 484 and 485, which
+  SDL-webOS names `SDL_SCANCODE_WEBOS_CURSOR_SHOW` and
+  `SDL_SCANCODE_WEBOS_CURSOR_HIDE`. The shell keeps the pointer's state from
+  them.
+* `mouse button`: every press and release, not only the first. A left-button
+  (button 1) down while the pointer shows is taken as OK and timed as
+  `key 40: shown after <N> ms`. Any other button is logged as ignored.
+* `pointer:` once at start-up. If LG's SDL exports
+  `SDL_webOSCursorVisibility`, an arrow hides a shown pointer, so the next OK
+  arrives as key 40. If not, the pointer stays as LG leaves it.
+* `power`: each change of state from `tvpower/power/getPowerState`
+  (subscribed), for example `Active` or `Screen Saver`; the first reply's
+  state counts as a change.
+* `front app`: each change from `applicationManager/getForegroundAppInfo`
+  (subscribed): what came in front, for example `com.webos.app.screensaver`.
+* `screensaver request`: each request from `registerScreenSaverRequest`,
+  answered `ack: true`. The screensaver is allowed and only logged, for the
+  OLED's sake.
+* The three subscriptions run on a thread of their own. A refused one logs
+  one `luna watch <what>` line and nothing more until it answers again;
+  `luna watch thread:` lines say when the thread itself could not start,
+  load the library or register. Other services' strings reach the log
+  trimmed, control characters as spaces, cut to 200 characters.
+* `no input for`: a heartbeat every 30 s with no input, for up to 10 min,
+  then every 10 min. It bounds a gap without a clock read.
+* `tools/frame-stats.sh` will gain an "input" section for these lines
+  (another session is writing it).
+
+Why: every focus loss with no key in the 2026-10-22 logs came 112–120 s after
+the last input the shell saw, which matches LG's screensaver (research note
+`missing-keys.md`, not in the repo). Whether the presses in those gaps
+reached the TV at all is open. An evdev recording of the remote's input
+devices during the next run (read-only, with the owner's OK) decides it.
+
 ### What blocks measuring now
 
 * **Keys:** after `tools/tv.sh launch`, keys didn't reach the shell
   (shell-mvp.md, "Still open" 5). B1, opened by hand from LG's app list, got
   them. The 2026-10-22 runs opened the shell by hand, and keys still went
-  missing at times (shell-mvp.md, "Measured on the B9" 13). So a run's window
-  comes from the log's own first and last key, not from a clock read, and the
-  log, not the screen, says whether the shell is in front.
+  missing at times (shell-mvp.md, "Measured on the B9" 13). In df2a4d0's run
+  no key came for 118 s right after the motion, with no focus loss, and then
+  the shell lost focus 118.3 s after the last key. The 10 filmed taps and the
+  OK on HDMI 1 never arrived as keys. So a run's window comes
+  from the log's own first and last key, not from a clock read, and the log,
+  not the screen, says whether the shell is in front.
+* **Why, so far:** every focus loss with no key came 112–120 s after the last
+  input the shell saw, which matches LG's screensaver. That is a symptom:
+  why the presses stopped arriving is open. The key-diagnostics lines (above)
+  name what comes in front, and the evdev recording during the next run
+  tells presses that never reached the TV from presses that went elsewhere.
+* **OK with the pointer up:** while the Magic Remote's pointer shows, OK
+  arrives as a left mouse click, not as key 40. Builds up to df2a4d0 ignore
+  clicks. In df2a4d0's run the HDMI 1 OK, if it came while the pointer
+  showed, was the click logged at 1792645177.3, after the shell had focus
+  again. The key-diagnostics build takes such a click as OK.
+* **The slow-motion video:** the taps filmed for H4 never reached the shell,
+  so H4 and targets 3 and 5 still need a filmed run.
 
 ## Pretty
 
@@ -241,10 +347,11 @@ The roadmap's Phase 4 is done when all three pass.
 1. The owed B2/B3 run on the TV, opened by hand: the frame time of the moving
    grid with the shape shader. Every pretty item spends against that number.
    Run on 2026-10-22: most bursts miss a vsync (target 1), so the misses are
-   looked into before any pretty item.
+   looked into before any pretty item. Stage 1 of that look ran the same day
+   (df2a4d0, "What stage 1 found").
 2. The log lines above, then targets 1–9 measured. The lines ran on the B9 on
-   2026-10-22 (targets 2, 4, 6 and the shell's half of 5); 3 and 5 still need
-   the slow-motion video.
+   2026-10-22 (targets 2, 4, 6 and the shell's half of 5); 3 and 5 still
+   need the slow-motion video.
 3. The cheap fixes: the `style` module, dither, kerning; icons through the
    root copy.
 4. Phase 4, in this order: focus light and tilt, Top Shelf, glass (B, frosted
