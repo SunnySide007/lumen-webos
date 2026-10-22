@@ -82,7 +82,8 @@ setup() {
 }
 
 # A fake ssh on PATH stands in for the TV: it runs the remote command locally,
-# with /tmp/ mapped to a test directory.
+# with /tmp/ mapped to a test directory, and the apps' jails (/var/palm/jail)
+# to a jail directory beside it.
 fake_ssh() {
     mkdir -p "$BATS_TEST_TMPDIR/bin" "$BATS_TEST_TMPDIR/tvroot"
     cat >"$BATS_TEST_TMPDIR/bin/ssh" <<EOF
@@ -90,7 +91,7 @@ fake_ssh() {
 printf '%s\n' "\$*" >>"$BATS_TEST_TMPDIR/ssh-args"
 for last; do :; done
 case "\$*" in *" -N "*) exit 0 ;; esac
-exec sh -c "\$(printf '%s' "\$last" | sed "s#/tmp/#$BATS_TEST_TMPDIR/tvroot/#g")"
+exec sh -c "\$(printf '%s' "\$last" | sed -e "s#/tmp/#$BATS_TEST_TMPDIR/tvroot/#g" -e "s#/var/palm/jail#$BATS_TEST_TMPDIR/tvroot/jail#g")"
 EOF
     chmod +x "$BATS_TEST_TMPDIR/bin/ssh"
     PATH="$BATS_TEST_TMPDIR/bin:$PATH"
@@ -114,4 +115,81 @@ EOF
     run "$TV" tunnel 9090
     [ "$status" -eq 0 ]
     grep -q -- "-N -o ExitOnForwardFailure=yes -L 127.0.0.1:9090:127.0.0.1:8080" "$BATS_TEST_TMPDIR/ssh-args"
+}
+
+# log: the shell writes /tmp/lumen-shell.log, and lumen-shell.fallback.log next
+# to it when the first cannot be opened. A jailed app's /tmp is under
+# /var/palm/jail.
+@test "log prints every lumen-shell log in /tmp, each under its path" {
+    fake_ssh
+    tvroot="$BATS_TEST_TMPDIR/tvroot"
+    printf 'main one\nmain two\n' >"$tvroot/lumen-shell.log"
+    printf 'fallback one\n' >"$tvroot/lumen-shell.fallback.log"
+    printf 'install text\n' >"$tvroot/lumen-install.log"
+    mkdir -p "$tvroot/jail/app/tmp"
+    printf 'jailed text\n' >"$tvroot/jail/app/tmp/lumen-shell.log"
+    run "$TV" log
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"# $tvroot/lumen-shell.log"$'\n'"main one"$'\n'"main two"* ]]
+    [[ "$output" == *"# $tvroot/lumen-shell.fallback.log"$'\n'"fallback one"* ]]
+    # Other logs and the jails are left alone while /tmp has the shell's.
+    [[ "$output" != *"install text"* ]]
+    [[ "$output" != *"jailed text"* ]]
+}
+
+@test "log prints the last 200 lines of each log" {
+    fake_ssh
+    tvroot="$BATS_TEST_TMPDIR/tvroot"
+    for f in lumen-shell.log lumen-shell.fallback.log; do
+        i=1
+        while [ "$i" -le 250 ]; do
+            printf 'row-%03d\n' "$i"
+            i=$((i + 1))
+        done >"$tvroot/$f"
+    done
+    run "$TV" log
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"row-250"* ]]
+    [[ "$output" == *"row-051"* ]]
+    [[ "$output" != *"row-050"* ]]
+    # Two headers and 200 lines under each.
+    [ "${#lines[@]}" -eq 402 ]
+}
+
+@test "log reads only the fallback log when that is all there is" {
+    fake_ssh
+    printf 'fallback only\n' >"$BATS_TEST_TMPDIR/tvroot/lumen-shell.fallback.log"
+    run "$TV" log
+    [ "$status" -eq 0 ]
+    [[ "$output" == "# $BATS_TEST_TMPDIR/tvroot/lumen-shell.fallback.log"$'\n'"fallback only" ]]
+}
+
+@test "log falls back to the app's jail when /tmp has none" {
+    fake_ssh
+    jail="$BATS_TEST_TMPDIR/tvroot/jail/app/tmp"
+    mkdir -p "$jail" "$BATS_TEST_TMPDIR/tvroot/jail/other/tmp"
+    printf 'jailed main\n' >"$jail/lumen-shell.log"
+    printf 'jailed fallback\n' >"$jail/lumen-shell.fallback.log"
+    run "$TV" log
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"# $jail/lumen-shell.log"$'\n'"jailed main"* ]]
+    [[ "$output" == *"# $jail/lumen-shell.fallback.log"$'\n'"jailed fallback"* ]]
+}
+
+@test "log finds a jail that holds only the fallback log" {
+    fake_ssh
+    jail="$BATS_TEST_TMPDIR/tvroot/jail/app/tmp"
+    mkdir -p "$jail"
+    printf 'jailed fallback\n' >"$jail/lumen-shell.fallback.log"
+    run "$TV" log
+    [ "$status" -eq 0 ]
+    [[ "$output" == "# $jail/lumen-shell.fallback.log"$'\n'"jailed fallback" ]]
+}
+
+@test "log says so when there is no log anywhere" {
+    fake_ssh
+    mkdir -p "$BATS_TEST_TMPDIR/tvroot/jail/app/tmp"
+    run "$TV" log
+    [ "$status" -eq 0 ]
+    [ "$output" = "no lumen-shell.log yet" ]
 }

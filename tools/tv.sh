@@ -10,7 +10,8 @@
 #   tools/tv.sh launch <app id>     start an app
 #   tools/tv.sh close <app id>      stop an app
 #   tools/tv.sh remove <app id>     uninstall an app
-#   tools/tv.sh log                 print the Lumen shell's log from its last run
+#   tools/tv.sh log                 print the Lumen shell's logs from its last run
+#                                   (lumen-shell.log, and the .fallback.log if any)
 #   tools/tv.sh push <local> <remote>
 #                                   upload a file; <remote> must be under
 #                                   /media/developer/temp/ or /tmp/
@@ -129,12 +130,29 @@ cmd_remove() {
     tv_ssh "luna-send-pub -n 1 -f luna://com.webos.appInstallService/dev/remove '{\"id\":\"$1\"}' </dev/null"
 }
 
-# A native app may run inside webOS's jail, which gives it a private /tmp.
+# A native app may run inside webOS's jail, which gives it a private /tmp. The
+# shell writes lumen-shell.log there, and lumen-shell.fallback.log beside it when
+# the first cannot be opened. Both are printed, each under its path; the jail is
+# searched only when /tmp has none.
 cmd_log() {
+    # Single quotes on purpose: this runs on the TV, under busybox sh.
     # shellcheck disable=SC2016
-    tv_ssh 'f=/tmp/lumen-shell.log
-        [ -f "$f" ] || f=$(find /var/palm/jail -name lumen-shell.log 2>/dev/null | head -n 1)
-        if [ -n "$f" ] && [ -f "$f" ]; then echo "# $f"; tail -n 200 "$f"; else echo "no lumen-shell.log yet"; fi'
+    tv_ssh 'n=0
+        for f in /tmp/lumen-shell*.log; do
+            [ -f "$f" ] || continue
+            echo "# $f"; tail -n 200 "$f"; n=1
+        done
+        if [ "$n" = 0 ]; then
+            d=$(find /var/palm/jail -name "lumen-shell*.log" 2>/dev/null | head -n 1)
+            d=${d%/*}
+            if [ -n "$d" ]; then
+                for f in "$d"/lumen-shell*.log; do
+                    [ -f "$f" ] || continue
+                    echo "# $f"; tail -n 200 "$f"; n=1
+                done
+            fi
+        fi
+        [ "$n" = 1 ] || echo "no lumen-shell.log yet"'
 }
 
 # Uploads go only to scratch space: never over system or app files. The path
