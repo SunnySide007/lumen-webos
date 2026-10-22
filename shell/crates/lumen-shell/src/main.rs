@@ -16,9 +16,11 @@ mod luna;
 mod render;
 mod sdl;
 mod text;
+mod timing;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Instant;
 
 /// Where the log goes when `LUMEN_LOG` is not set. A native app on the TV has
 /// no console, so the file is the only record of a run there.
@@ -40,6 +42,8 @@ fn log_paths() -> [PathBuf; 2] {
 }
 
 fn main() -> ExitCode {
+    // Start-up phases count from here (the `start:` log line).
+    let started = Instant::now();
     log::init(&log_paths());
 
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -56,7 +60,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match app::run(opts) {
+    match app::run(opts, started) {
         Ok(()) => {
             info!("clean exit");
             ExitCode::SUCCESS

@@ -95,6 +95,12 @@ fn stamped(args: std::fmt::Arguments<'_>) -> String {
 
 /// Writes one line, stamped, to stderr and the log file.
 pub fn write(args: std::fmt::Arguments<'_>) {
+    #[cfg(test)]
+    CAPTURED.with(|lines| {
+        if let Some(lines) = lines.borrow_mut().as_mut() {
+            lines.push(args.to_string());
+        }
+    });
     let line = stamped(args);
     let _ = std::io::stderr().write_all(line.as_bytes());
     if let Ok(mut sink) = SINK.lock()
@@ -108,6 +114,21 @@ pub fn write(args: std::fmt::Arguments<'_>) {
 #[macro_export]
 macro_rules! info {
     ($($arg:tt)*) => { $crate::log::write(format_args!($($arg)*)) };
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The lines this test thread logs while `capture` runs.
+    static CAPTURED: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `f` and returns the lines it logged on this thread, without stamps,
+/// so a test can check what the shell said and in what order.
+#[cfg(test)]
+pub fn capture(f: impl FnOnce()) -> Vec<String> {
+    CAPTURED.with(|lines| *lines.borrow_mut() = Some(Vec::new()));
+    f();
+    CAPTURED.with(|lines| lines.borrow_mut().take().unwrap_or_default())
 }
 
 #[cfg(test)]

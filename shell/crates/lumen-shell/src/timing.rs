@@ -1,0 +1,532 @@
+//! The shell's timing lines (docs/specs/look-and-feel.md on main, "Log
+//! lines"): how long a press takes to reach the screen, how long start-up and
+//! coming back to the front take, and how long a launch waits for luna. Each
+//! type builds its lines as strings, so the formats are pinned by the tests
+//! below and `tools/frame-stats.sh` (on main) can rely on them; the loop only
+//! logs them.
+//!
+//! "Shown" means `SDL_GL_SwapWindow` returned. With vsync the frame is then
+//! queued, not yet on the panel, so the screen may lag the line by up to one
+//! refresh (16.7 ms at 60 Hz); the remote-to-screen time is measured with a
+//! slow-motion video instead (target 3).
+
+use std::time::{Duration, Instant};
+
+use lumen_core::apps::{AppId, LaunchError};
+
+/// The start-up phases, in the order they end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    /// SDL loaded and initialised.
+    Sdl,
+    /// The window, its GL context and vsync.
+    Gl,
+    /// Shaders compiled and buffers made.
+    Renderer,
+    /// The font and the atlas, and the icon loader started.
+    Assets,
+    /// The apps listed (luna on the TV).
+    Apps,
+}
+
+impl Phase {
+    const ALL: [Self; 5] = [
+        Self::Sdl,
+        Self::Gl,
+        Self::Renderer,
+        Self::Assets,
+        Self::Apps,
+    ];
+
+    /// The phase's name in the `start:` line.
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Sdl => "sdl",
+            Self::Gl => "gl",
+            Self::Renderer => "renderer",
+            Self::Assets => "assets",
+            Self::Apps => "apps",
+        }
+    }
+}
+
+/// When each start-up phase ended, counted from `main()`'s first line.
+#[derive(Debug)]
+pub struct StartTimes {
+    zero: Instant,
+    marks: [Option<Instant>; Phase::ALL.len()],
+}
+
+impl StartTimes {
+    /// Phases are counted from `zero`.
+    pub fn new(zero: Instant) -> Self {
+        Self {
+            zero,
+            marks: [None; Phase::ALL.len()],
+        }
+    }
+
+    /// `phase` ended at `at`.
+    pub fn mark(&mut self, phase: Phase, at: Instant) {
+        self.marks[phase as usize] = Some(at);
+    }
+
+    /// `start: sdl N, gl N, renderer N, assets N, apps N, first frame N ms`.
+    pub fn line(&self, first_frame: Instant) -> String {
+        format!(
+            "start: {}, first frame {} ms",
+            self.phases(),
+            whole_ms(first_frame.saturating_duration_since(self.zero))
+        )
+    }
+
+    /// `start: sdl N, gl N, renderer N, assets N, apps N ms; no first frame: <why>`.
+    pub fn line_without_frame(&self, why: &str) -> String {
+        format!("start: {} ms; no first frame: {why}", self.phases())
+    }
+
+    /// Each phase's end from the start; `-` for one never reached.
+    fn phases(&self) -> String {
+        let mut out = String::new();
+        for (phase, mark) in Phase::ALL.iter().zip(self.marks) {
+            if !out.is_empty() {
+                out.push_str(", ");
+            }
+            let shown = mark.map_or_else(
+                || "-".to_owned(),
+                |at| whole_ms(at.saturating_duration_since(self.zero)),
+            );
+            out.push_str(&format!("{} {shown}", phase.name()));
+        }
+        out
+    }
+}
+
+/// A time in whole milliseconds, rounded, as every timing line shows it.
+fn whole_ms(d: Duration) -> String {
+    format!("{:.0}", d.as_secs_f64() * 1000.0)
+}
+
+/// `launch <id>: answered in N ms`, or `failed after N ms: <error>`.
+pub fn launch_line(id: &AppId, took: Duration, result: &Result<(), LaunchError>) -> String {
+    match result {
+        Ok(()) => format!("launch {id}: answered in {} ms", whole_ms(took)),
+        Err(e) => format!("launch {id}: failed after {} ms: {e}", whole_ms(took)),
+    }
+}
+
+/// How many presses wait for a frame at once; more are only counted.
+const KEYS_TIMED: usize = 8;
+
+#[derive(Debug, Clone, Copy)]
+struct Waiting {
+    scancode: i32,
+    at: Instant,
+    in_launch: Duration,
+}
+
+/// Presses read but not yet on screen, each with the time SDL stamped it.
+#[derive(Debug, Default)]
+pub struct KeyTimes {
+    waiting: [Option<Waiting>; KEYS_TIMED],
+    untimed: u32,
+    last_launch: Option<(Instant, Instant)>,
+}
+
+/// Launch time below this is not worth naming in a key's line.
+const LAUNCH_NAMED: Duration = Duration::from_millis(1);
+
+impl KeyTimes {
+    /// A press went down at `at`; its time runs until a frame shows it. A
+    /// press SDL stamped during the last launch, but read only after it, owes
+    /// its wait to that launch.
+    pub fn pressed(&mut self, scancode: i32, at: Instant) {
+        let in_launch = match self.last_launch {
+            Some((start, end)) if at < end => end.saturating_duration_since(at.max(start)),
+            _ => Duration::ZERO,
+        };
+        match self.waiting.iter_mut().find(|w| w.is_none()) {
+            Some(slot) => {
+                *slot = Some(Waiting {
+                    scancode,
+                    at,
+                    in_launch,
+                })
+            }
+            None => self.untimed = self.untimed.saturating_add(1),
+        }
+    }
+
+    /// The loop was blocked in a launch from `start` to `end`.
+    pub fn launched(&mut self, start: Instant, end: Instant) {
+        for w in self.waiting.iter_mut().flatten() {
+            w.in_launch += end.saturating_duration_since(w.at.max(start));
+        }
+        self.last_launch = Some((start, end));
+    }
+
+    #[cfg(test)]
+    pub fn is_waiting(&self) -> bool {
+        self.untimed > 0 || self.waiting.iter().any(Option::is_some)
+    }
+
+    /// A frame finished swapping at `at`: one line per press it showed.
+    pub fn shown(&mut self, at: Instant) -> Vec<String> {
+        self.settle(at, "shown after", None)
+    }
+
+    /// No frame will show the waiting presses, for the reason `why`.
+    pub fn not_shown(&mut self, at: Instant, why: &str) -> Vec<String> {
+        self.settle(at, "not shown after", Some(why))
+    }
+
+    /// Lines for every waiting press, which then waits no more. With nothing
+    /// waiting this allocates nothing, so it can run after every frame.
+    fn settle(&mut self, at: Instant, verb: &str, why: Option<&str>) -> Vec<String> {
+        let mut lines = Vec::new();
+        for w in self.waiting.iter_mut().filter_map(Option::take) {
+            let mut line = format!(
+                "key {}: {verb} {} ms",
+                w.scancode,
+                whole_ms(at.saturating_duration_since(w.at))
+            );
+            if w.in_launch >= LAUNCH_NAMED {
+                line.push_str(&format!(" ({} ms in launch)", whole_ms(w.in_launch)));
+            }
+            if let Some(why) = why {
+                line.push_str(&format!(": {why}"));
+            }
+            lines.push(line);
+        }
+        if self.untimed > 0 {
+            lines.push(format!("keys: {} more presses not timed", self.untimed));
+            self.untimed = 0;
+        }
+        lines
+    }
+}
+
+/// The time from coming back to the front to the first frame shown.
+#[derive(Debug, Default)]
+pub struct Foreground {
+    since: Option<Instant>,
+}
+
+impl Foreground {
+    /// The shell came back to the front at `at`. A second sign of it before
+    /// a frame keeps the first time.
+    pub fn came_back(&mut self, at: Instant) {
+        self.since.get_or_insert(at);
+    }
+
+    #[cfg(test)]
+    pub fn is_waiting(&self) -> bool {
+        self.since.is_some()
+    }
+
+    /// `foreground: first frame after N ms`, once per return.
+    pub fn shown(&mut self, at: Instant) -> Option<String> {
+        let since = self.since.take()?;
+        Some(format!(
+            "foreground: first frame after {} ms",
+            whole_ms(at.saturating_duration_since(since))
+        ))
+    }
+
+    /// `foreground: not shown after N ms: <why>`.
+    pub fn not_shown(&mut self, at: Instant, why: &str) -> Option<String> {
+        let since = self.since.take()?;
+        Some(format!(
+            "foreground: not shown after {} ms: {why}",
+            whole_ms(at.saturating_duration_since(since))
+        ))
+    }
+}
+
+/// What the shell heard since the remote's last key, for the focus and
+/// lifecycle lines: a focus lost long after the last key was not the owner's.
+#[derive(Debug, Default)]
+pub struct SinceKey {
+    last_key: Option<Instant>,
+    others: u32,
+}
+
+impl SinceKey {
+    /// A remote key (one the shell acts on) went down or up at `at`.
+    pub fn key(&mut self, at: Instant) {
+        self.last_key = Some(at);
+        self.others = 0;
+    }
+
+    /// Any other event.
+    pub fn other(&mut self) {
+        self.others = self.others.saturating_add(1);
+    }
+
+    /// `<what>: last key S.s s ago, M other events since`, or
+    /// `<what>: no key yet, M other events since`.
+    pub fn line(&self, what: &str, at: Instant) -> String {
+        match self.last_key {
+            Some(key) => format!(
+                "{what}: last key {:.1} s ago, {} other events since",
+                at.saturating_duration_since(key).as_secs_f64(),
+                self.others
+            ),
+            None => format!("{what}: no key yet, {} other events since", self.others),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    #[test]
+    fn the_start_line_lists_each_phase_from_mains_first_line() {
+        let zero = Instant::now();
+        let mut start = StartTimes::new(zero);
+        start.mark(Phase::Sdl, zero + ms(152));
+        start.mark(Phase::Gl, zero + ms(380));
+        start.mark(Phase::Renderer, zero + ms(905));
+        start.mark(Phase::Assets, zero + ms(1390));
+        start.mark(Phase::Apps, zero + ms(1446));
+        assert_eq!(
+            start.line(zero + ms(1504)),
+            "start: sdl 152, gl 380, renderer 905, assets 1390, apps 1446, first frame 1504 ms"
+        );
+    }
+
+    #[test]
+    fn a_start_without_a_frame_says_why() {
+        let zero = Instant::now();
+        let mut start = StartTimes::new(zero);
+        start.mark(Phase::Sdl, zero + ms(10));
+        start.mark(Phase::Gl, zero + ms(20));
+        start.mark(Phase::Renderer, zero + ms(30));
+        start.mark(Phase::Assets, zero + ms(40));
+        start.mark(Phase::Apps, zero + ms(50));
+        assert_eq!(
+            start.line_without_frame("the window lost focus"),
+            "start: sdl 10, gl 20, renderer 30, assets 40, apps 50 ms; no first frame: the window lost focus"
+        );
+    }
+
+    #[test]
+    fn a_phase_never_reached_shows_a_dash() {
+        let zero = Instant::now();
+        let mut start = StartTimes::new(zero);
+        start.mark(Phase::Sdl, zero + ms(10));
+        assert_eq!(
+            start.line_without_frame("the shell is leaving"),
+            "start: sdl 10, gl -, renderer -, assets -, apps - ms; no first frame: the shell is leaving"
+        );
+    }
+
+    #[test]
+    fn a_launch_line_says_how_long_luna_took_to_answer() {
+        let id = AppId::new("com.webos.app.hdmi1");
+        assert_eq!(
+            launch_line(&id, ms(320), &Ok(())),
+            "launch com.webos.app.hdmi1: answered in 320 ms"
+        );
+    }
+
+    #[test]
+    fn a_failed_launch_line_says_after_how_long_and_why() {
+        let id = AppId::new("netflix");
+        let err = Err(LaunchError("no reply in 5000 ms".to_owned()));
+        assert_eq!(
+            launch_line(&id, ms(5003), &err),
+            "launch netflix: failed after 5003 ms: no reply in 5000 ms"
+        );
+    }
+
+    #[test]
+    fn a_sub_millisecond_launch_reads_0_ms() {
+        let id = AppId::new("amazon");
+        assert_eq!(
+            launch_line(&id, Duration::from_micros(80), &Ok(())),
+            "launch amazon: answered in 0 ms"
+        );
+    }
+
+    #[test]
+    fn a_press_is_shown_by_the_next_swap() {
+        let t = Instant::now();
+        let mut keys = KeyTimes::default();
+        keys.pressed(79, t);
+        assert!(keys.is_waiting());
+        assert_eq!(keys.shown(t + ms(17)), ["key 79: shown after 17 ms"]);
+        assert!(!keys.is_waiting());
+        assert!(
+            keys.shown(t + ms(34)).is_empty(),
+            "each press is shown once"
+        );
+    }
+
+    #[test]
+    fn two_presses_before_one_frame_both_get_a_line() {
+        let t = Instant::now();
+        let mut keys = KeyTimes::default();
+        keys.pressed(79, t);
+        keys.pressed(81, t + ms(5));
+        assert_eq!(
+            keys.shown(t + ms(20)),
+            ["key 79: shown after 20 ms", "key 81: shown after 15 ms"]
+        );
+    }
+
+    #[test]
+    fn a_launch_while_waiting_is_named() {
+        let t = Instant::now();
+        let mut keys = KeyTimes::default();
+        keys.pressed(40, t);
+        keys.launched(t + ms(15), t + ms(335));
+        assert_eq!(
+            keys.not_shown(t + ms(335), "the window lost focus"),
+            ["key 40: not shown after 335 ms (320 ms in launch): the window lost focus"]
+        );
+    }
+
+    #[test]
+    fn a_press_read_after_a_launch_counts_the_launch_it_waited_through() {
+        // Late enough that `t - 5 ms` exists even just after boot.
+        let t = Instant::now() + ms(10);
+        let mut keys = KeyTimes::default();
+        keys.launched(t, t + ms(320));
+        // Stamped by SDL 100 ms into the launch, read once it was answered.
+        keys.pressed(79, t + ms(100));
+        // One before the launch began counts only the launch.
+        keys.pressed(80, t - ms(5));
+        assert_eq!(
+            keys.shown(t + ms(340)),
+            [
+                "key 79: shown after 240 ms (220 ms in launch)",
+                "key 80: shown after 345 ms (320 ms in launch)",
+            ]
+        );
+        keys.pressed(81, t + ms(400));
+        assert_eq!(
+            keys.shown(t + ms(417)),
+            ["key 81: shown after 17 ms"],
+            "a press after the launch owes it nothing"
+        );
+    }
+
+    #[test]
+    fn a_press_hidden_before_any_frame_says_why() {
+        let t = Instant::now();
+        let mut keys = KeyTimes::default();
+        keys.pressed(82, t);
+        assert_eq!(
+            keys.not_shown(t + ms(40), "the app went to the background"),
+            ["key 82: not shown after 40 ms: the app went to the background"]
+        );
+        assert!(!keys.is_waiting());
+    }
+
+    #[test]
+    fn presses_beyond_the_buffer_are_counted() {
+        let t = Instant::now();
+        let mut keys = KeyTimes::default();
+        for i in 0..11 {
+            keys.pressed(79, t + ms(i));
+        }
+        let lines = keys.shown(t + ms(20));
+        assert_eq!(lines.len(), KEYS_TIMED + 1);
+        assert_eq!(lines[0], "key 79: shown after 20 ms");
+        assert_eq!(lines[KEYS_TIMED], "keys: 3 more presses not timed");
+        keys.pressed(79, t + ms(30));
+        assert_eq!(keys.shown(t + ms(47)), ["key 79: shown after 17 ms"]);
+    }
+
+    #[test]
+    fn nothing_waiting_yields_no_lines() {
+        let t = Instant::now();
+        let mut keys = KeyTimes::default();
+        assert!(!keys.is_waiting());
+        assert!(keys.shown(t).is_empty());
+        assert!(keys.not_shown(t, "nothing to draw").is_empty());
+    }
+
+    #[test]
+    fn foreground_counts_from_the_event_that_brought_the_shell_back() {
+        let t = Instant::now();
+        let mut fg = Foreground::default();
+        assert_eq!(fg.shown(t), None, "the start-up is not a foreground");
+        fg.came_back(t);
+        assert_eq!(
+            fg.shown(t + ms(48)).as_deref(),
+            Some("foreground: first frame after 48 ms")
+        );
+        assert_eq!(fg.shown(t + ms(64)), None, "once per return");
+    }
+
+    #[test]
+    fn hidden_again_before_a_frame_says_why() {
+        let t = Instant::now();
+        let mut fg = Foreground::default();
+        fg.came_back(t);
+        assert_eq!(
+            fg.not_shown(t + ms(12), "the window lost focus").as_deref(),
+            Some("foreground: not shown after 12 ms: the window lost focus")
+        );
+        assert_eq!(fg.shown(t + ms(30)), None);
+        assert_eq!(fg.not_shown(t + ms(30), "the window was hidden"), None);
+    }
+
+    #[test]
+    fn a_second_foreground_event_keeps_the_first_time() {
+        let t = Instant::now();
+        let mut fg = Foreground::default();
+        fg.came_back(t);
+        fg.came_back(t + ms(10));
+        assert_eq!(
+            fg.shown(t + ms(30)).as_deref(),
+            Some("foreground: first frame after 30 ms")
+        );
+    }
+
+    #[test]
+    fn a_window_line_says_how_long_since_the_last_key() {
+        let t = Instant::now();
+        let mut since = SinceKey::default();
+        since.key(t);
+        for _ in 0..37 {
+            since.other();
+        }
+        assert_eq!(
+            since.line("window focus lost", t + ms(132_400)),
+            "window focus lost: last key 132.4 s ago, 37 other events since"
+        );
+    }
+
+    #[test]
+    fn before_any_key_it_says_so() {
+        let t = Instant::now();
+        let mut since = SinceKey::default();
+        since.other();
+        assert_eq!(
+            since.line("app background", t),
+            "app background: no key yet, 1 other events since"
+        );
+    }
+
+    #[test]
+    fn other_events_count_since_the_last_key() {
+        let t = Instant::now();
+        let mut since = SinceKey::default();
+        since.other();
+        since.other();
+        since.key(t);
+        since.other();
+        assert_eq!(
+            since.line("window hidden", t + ms(60)),
+            "window hidden: last key 0.1 s ago, 1 other events since"
+        );
+    }
+}

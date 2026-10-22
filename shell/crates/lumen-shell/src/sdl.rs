@@ -9,7 +9,7 @@
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use libloading::Library;
 
@@ -183,6 +183,27 @@ fn event_time(raw: &RawEvent) -> u32 {
     read_u32(&raw.0, 4)
 }
 
+/// An event queued longer than this is taken to be stamped on some other clock.
+const MAX_EVENT_AGE_MS: u32 = 10_000;
+
+/// How long ago SDL stamped an event. `event_ms` and `now_ms` are both read
+/// from SDL's millisecond clock, which wraps after 49.7 days. `None` if the
+/// stamp cannot be on that clock: never set (0), from the future (it wraps to
+/// weeks), or older than `MAX_EVENT_AGE_MS`.
+fn event_age(event_ms: u32, now_ms: u32) -> Option<Duration> {
+    if event_ms == 0 {
+        return None;
+    }
+    let age = now_ms.wrapping_sub(event_ms);
+    (age <= MAX_EVENT_AGE_MS).then(|| Duration::from_millis(u64::from(age)))
+}
+
+/// The moment an event was stamped, given when it was `read` and SDL's clock
+/// then; `None` if the stamp is not on SDL's clock (`event_age`).
+fn event_instant(read: Instant, event_ms: u32, now_ms: u32) -> Option<Instant> {
+    event_age(event_ms, now_ms).map(|age| read.checked_sub(age).unwrap_or(read))
+}
+
 /// The key pressed last, with times on SDL's clock.
 #[derive(Debug, Clone, Copy)]
 struct Held {
@@ -333,10 +354,12 @@ pub struct Sdl {
     gl_get_drawable_size: Option<unsafe extern "C" fn(Window, *mut c_int, *mut c_int)>,
     poll_event: unsafe extern "C" fn(*mut RawEvent) -> c_int,
     wait_event_timeout: unsafe extern "C" fn(*mut RawEvent, c_int) -> c_int,
+    get_ticks: unsafe extern "C" fn() -> u32,
     key_layout: KeyLayout,
     raw_keys_logged: Cell<u32>,
     raw_kinds_logged: RefCell<Vec<u64>>,
     layout_warned: Cell<bool>,
+    clock_warned: Cell<bool>,
     repeat_times: RefCell<RepeatTimes>,
     /// Held so every function pointer above stays valid; dropped last.
     _lib: Library,
@@ -432,10 +455,12 @@ impl Sdl {
                 gl_get_drawable_size: sym(&lib, b"SDL_GL_GetDrawableSize\0").ok(),
                 poll_event: sym(&lib, b"SDL_PollEvent\0")?,
                 wait_event_timeout: sym(&lib, b"SDL_WaitEventTimeout\0")?,
+                get_ticks: sym(&lib, b"SDL_GetTicks\0")?,
                 key_layout,
                 raw_keys_logged: Cell::new(0),
                 raw_kinds_logged: RefCell::new(Vec::new()),
                 layout_warned: Cell::new(false),
+                clock_warned: Cell::new(false),
                 repeat_times: RefCell::new(RepeatTimes::default()),
                 _lib: lib,
             })
@@ -567,7 +592,8 @@ impl Sdl {
         (w, h)
     }
 
-    pub fn poll_event(&self) -> Option<Event> {
+    /// The next event, if one is queued, with the time SDL stamped it.
+    pub fn poll_event(&self) -> Option<(Event, Instant)> {
         let mut raw = RawEvent::zeroed();
         // SAFETY: `raw` is large and aligned enough for any SDL2 event, with
         // room to spare for LG's layout.
@@ -577,7 +603,7 @@ impl Sdl {
     /// Waits for an event for up to `timeout`, or for as long as it takes with
     /// `None`. SDL 2.0.5 (the B9's) waits by checking every 10 ms; newer SDLs
     /// sleep until an event arrives.
-    pub fn wait_event(&self, timeout: Option<Duration>) -> Option<Event> {
+    pub fn wait_event(&self, timeout: Option<Duration>) -> Option<(Event, Instant)> {
         let ms = timeout.map_or(-1, |t| {
             // Rounded up to whole milliseconds. SDL may still wake a little
             // early (it counts whole ticks) or, on 2.0.5, up to 10 ms late;
@@ -590,10 +616,34 @@ impl Sdl {
         (unsafe { (self.wait_event_timeout)(&mut raw, ms) } != 0).then(|| self.decode(&raw))
     }
 
+    /// When SDL stamped `raw`, as an `Instant`. A stamp that is not on SDL's
+    /// clock (warned once) gives the time the shell read the event instead,
+    /// which leaves out the time it sat in the queue.
+    fn stamped_at(&self, raw: &RawEvent) -> Instant {
+        let read = Instant::now();
+        // SAFETY: SDL_GetTicks takes no arguments and only reads SDL's clock;
+        // the pointer stays valid while `_lib`, which `self` owns, is loaded.
+        let now_ms = unsafe { (self.get_ticks)() };
+        let stamp = event_time(raw);
+        match event_instant(read, stamp, now_ms) {
+            Some(at) => at,
+            None => {
+                if !self.clock_warned.replace(true) {
+                    crate::info!(
+                        "an event stamped {stamp} ms when SDL's clock reads {now_ms} ms: key \
+                         times count from when the shell reads each event"
+                    );
+                }
+                read
+            }
+        }
+    }
+
     /// Parses `raw`, logging the first events of each kind byte for byte,
     /// timing SDL's first key repeats, and warning once if key events look
-    /// misread.
-    fn decode(&self, raw: &RawEvent) -> Event {
+    /// misread. Returns the event with the time SDL stamped it.
+    fn decode(&self, raw: &RawEvent) -> (Event, Instant) {
+        let at = self.stamped_at(raw);
         let event = parse_event(raw, self.key_layout);
         if let Some(line) = self.repeat_times.borrow_mut().note(event, event_time(raw)) {
             crate::info!("{line}");
@@ -633,7 +683,7 @@ impl Sdl {
                 self.key_layout
             );
         }
-        event
+        (event, at)
     }
 
     pub fn quit(&self) {
@@ -875,5 +925,39 @@ mod tests {
             times.note(down(79, true), 400).as_deref(),
             Some("SDL repeat 1 of scancode 79: 500 ms after the press, 500 ms after the last")
         );
+    }
+
+    #[test]
+    fn event_age_counts_back_from_sdls_clock() {
+        assert_eq!(event_age(1000, 1025), Some(Duration::from_millis(25)));
+        assert_eq!(event_age(1000, 1000), Some(Duration::ZERO));
+    }
+
+    #[test]
+    fn event_age_survives_the_clock_wrapping() {
+        assert_eq!(event_age(u32::MAX - 9, 5), Some(Duration::from_millis(15)));
+    }
+
+    #[test]
+    fn a_stamp_from_the_future_old_or_missing_is_not_on_sdls_clock() {
+        assert_eq!(event_age(2000, 1000), None, "from the future");
+        assert_eq!(event_age(1001, 1000), None, "1 ms in the future");
+        assert_eq!(event_age(1000, 1000 + 10_001), None, "older than 10 s");
+        assert_eq!(event_age(0, 5), None, "never stamped");
+    }
+
+    #[test]
+    fn an_event_exactly_10_s_old_still_counts() {
+        assert_eq!(event_age(1000, 11_000), Some(Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn an_event_is_placed_back_by_its_age() {
+        let read = Instant::now() + Duration::from_secs(1);
+        assert_eq!(
+            event_instant(read, 1000, 1025),
+            Some(read - Duration::from_millis(25))
+        );
+        assert_eq!(event_instant(read, 2000, 1000), None);
     }
 }
