@@ -239,37 +239,68 @@ file system root put in front of every path, `luna-send` included. On the
 TV it is unset. It gives a caller nothing new: whoever can set the
 environment of a root command through `exec` can already run any command.
 
+## Measured on the B9
+
+2026-10-23, OLED55B9PUA, firmware 05.50.00, BusyBox v1.24.1; build 3a89955
+on `claude/shell-timing`, after installing an IPK whose folder modes
+`fix_modes.py` had fixed (the four checked folders were then 0755 root, and
+`pwd -P` matched).
+
+* **The hand test passed,** run over SSH as root as
+  `sh <app folder>/lumen-icons.sh </dev/null`: the first run printed
+  `lumen-icons: changed, 81 copied, 0 refused` in 2.8 s, the second
+  `unchanged` in 1.1 s. The copy held 83 files (81 icons, `.sum` and
+  `status`), 816 KB, no links; `lg-icons` was the only new entry in Lumen's
+  folder.
+* **A run over SSH needed `</dev/null`.** Without it every run failed: on
+  the B9, luna-send exits 0 and prints nothing when its stdin is a pipe, as
+  an SSH session's is, and answers (21,390 bytes) with `/dev/null`; seen
+  three times each way on 2026-10-23. The script now gives luna-send
+  `/dev/null` itself, and an empty answer fails as
+  `listLaunchPoints answered nothing`. That version has not yet run on the
+  TV; the hand test above gave the whole script `/dev/null` from outside.
+* **The `exec` route passed,** as root through luna:
+  `{"returnValue":true,"stdoutString":"lumen-icons: unchanged\n",…}`. That
+  run had the script's own redirect, so it does not show what stdin
+  `exec`'s child gets.
+* **The jailed shell may call `exec`:** its refresh logged
+  `luna exec: 7716 ms`, a line logged only for a reply with
+  `returnValue: true`, so the hub lets the anonymous client call it.
+  Nothing waits for it, as designed.
+* **`30 tiles, 30 with icons`** (was 4): that count is of tiles given an
+  icon path, the copy's or their own. 29 drew their icon. One still shows
+  its letter: `com.open.hidden.menu`, a developer-mode app whose `icon.png`
+  is not a PNG (`Invalid PNG signature.`), which the loader refuses, as it
+  should.
+
 ## What the TV must still show
 
 Each is a step in the check list.
 
-1. Whether the hub lets the jailed shell's anonymous client call `exec`.
-2. That busybox on the B9 has what the script uses. Answered in part on
-   2026-10-23 (BusyBox v1.24.1): `readlink -f`, `head -c`, `grep -oE`,
-   `cmp`, `tr` and the rest are there, `cksum` is not, so the script uses
-   `sha256sum`, which the B9 has (Lumen's TV tools run it there). Still to
-   see: `sha256sum` reading stdin, `ls -lnL`, `ln -sn` and `pwd -P`. The tests ran under dash with GNU tools, and under
-   busybox 1.36.1.
-3. That the four checked folders are real, root's and 0755 once a
-   `fix_modes.py`'d IPK is installed. On 2026-10-23 all six folders down to
-   Lumen's were owner 0 and real, and all 0777: LG's two by developer mode,
-   the other four from an IPK packaged without `fix_modes.py`. An earlier
-   install that night of an IPK with fixed modes had set them 0755, so an
-   install does reset an existing folder's mode.
-
-   And that `pwd -P` in Lumen's folder prints
-   `/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell`.
-   If `/media/developer` were a link or reached through another path, every
-   run would refuse with "is not where it should be (<the real path>)". The
-   first run of this version on the TV is by hand, so this is seen there
-   first (docs/safety.md, rule 3).
+1. ~~Whether the hub lets the jailed shell's anonymous client call `exec`.~~
+   It does (above).
+2. ~~That busybox on the B9 has what the script uses.~~ It does
+   (2026-10-23, BusyBox v1.24.1): `readlink -f`, `head -c`, `grep -oE`,
+   `cmp`, `tr`, `sha256sum` reading stdin, `ls -lnL`, `ln -n` and `pwd -P`
+   are there; `cksum` is not, so the script uses `sha256sum`. The tests ran
+   under dash with GNU tools, and under busybox 1.36.1.
+3. ~~That the four checked folders are real, root's and 0755 once a
+   `fix_modes.py`'d IPK is installed, and that `pwd -P` in Lumen's folder
+   is its expected path.~~ Both held on 2026-10-23. Before that install all
+   six folders down to Lumen's were owner 0, real, and 0777: LG's two by
+   developer mode, the other four from an IPK packaged without
+   `fix_modes.py`. An install of an IPK with fixed modes set the four to
+   0755, so an install does reset an existing folder's mode.
 4. That a path the jail does not mount fails with "no such file", not
    "permission denied": the shell tries the copy only when the original
    cannot be resolved.
 5. Whether installing a new IPK over the old keeps the folder's `lg-icons/`
    or removes it. If it removes it, the copy is made by hand again after
    each install, until the owner chooses to make it automatic.
-6. How long a run takes, changed and unchanged.
+6. ~~How long a run takes, changed and unchanged.~~ 2.8 s and 1.1 s by
+   hand; 7.7 s through the jailed shell's `exec` (above).
+7. That the script's own `</dev/null` lets a run over SSH succeed without
+   one from outside.
 
 ## Known limits
 

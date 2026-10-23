@@ -17,6 +17,8 @@ setup() {
 #!/bin/sh
 printf '%s\n' "$@" >"$LUNA_ARGS"
 [ -z "${FAKE_LUNA_FAIL:-}" ] || exit 1
+# As on the B9: with any stdin but /dev/null it answers nothing, and exits 0.
+[ "$(readlink /proc/self/fd/0)" = /dev/null ] || exit 0
 cat "$POINTS"
 EOF
     chmod +x "$ROOT/usr/bin/luna-send"
@@ -275,6 +277,33 @@ usr/palm/plugins/inputapps/assets/small/HDMI_4.png" ]
     [ "$status" -eq 1 ]
     [[ "$output" == *"listLaunchPoints refused"* ]]
     [ -e "$OUT/marker" ]
+    [ "$(ls -A "$APP")" = "lg-icons" ]
+}
+
+@test "luna-send gets /dev/null, whatever the script's stdin is" {
+    png "$ROOT/usr/palm/applications/a/i.png"
+    points /usr/palm/applications/a/i.png
+    # Over SSH the script's stdin is a pipe.
+    run sh -c 'printf "" | sh "$1"' _ "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "lumen-icons: changed, 1 copied, 0 refused" ]
+}
+
+@test "an empty answer from luna says so, and keeps the copy there was" {
+    : >"$POINTS"
+    run sh "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [ "$output" = "lumen-icons: listLaunchPoints answered nothing" ]
+    [ "$(ls -A "$APP")" = "" ]
+    png "$ROOT/usr/palm/applications/a/i.png"
+    points /usr/palm/applications/a/i.png
+    run sh "$SCRIPT"
+    [ "$status" -eq 0 ]
+    : >"$POINTS"
+    run sh "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [ "$output" = "lumen-icons: listLaunchPoints answered nothing" ]
+    [ -f "$OUT/usr/palm/applications/a/i.png" ]
     [ "$(ls -A "$APP")" = "lg-icons" ]
 }
 

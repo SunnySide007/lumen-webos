@@ -151,9 +151,13 @@ rm -rf "$WORK" "$NEW"
 mkdir "$WORK" || fail "cannot make $WORK"
 
 reply=$WORK/points.json
-"$LUNA_SEND" -n 1 -w 4000 "$LAUNCH_POINTS" '{}' >"$reply" 2>/dev/null ||
+# On the B9 luna-send exits 0 and prints nothing when its stdin is a pipe,
+# as an SSH session's is; with /dev/null it answers (2026-10-23, the quirk
+# tools/tv.sh works around too).
+"$LUNA_SEND" -n 1 -w 4000 "$LAUNCH_POINTS" '{}' </dev/null >"$reply" 2>/dev/null ||
     fail "luna-send failed"
 size=$(wc -c <"$reply")
+[ $((size)) -gt 0 ] || fail "listLaunchPoints answered nothing"
 [ $((size)) -le "$MAX_REPLY" ] || fail "listLaunchPoints answered over $MAX_REPLY bytes"
 grep -q '"returnValue" *: *true' "$reply" || fail "listLaunchPoints refused"
 
