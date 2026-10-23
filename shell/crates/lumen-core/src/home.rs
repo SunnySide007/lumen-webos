@@ -11,26 +11,14 @@ use crate::apps::{App, AppId, LaunchError};
 use crate::focus::{Dir, GridFocus, Move};
 use crate::input::{Action, Press};
 use crate::layout::{self, Rect};
+use crate::style;
 
-pub const LIFT: Tuning = Tuning {
-    omega: 30.0,
-    epsilon: 0.001,
-    rest_speed: 0.01,
-};
-pub const SCROLL: Tuning = Tuning {
-    omega: 20.0,
-    epsilon: 0.25,
-    rest_speed: 2.0,
-};
-pub const BUMP: Tuning = Tuning {
-    omega: 20.0,
-    epsilon: 0.25,
-    rest_speed: 2.0,
-};
-/// How far a blocked move nudges the focused tile, in px.
-pub const BUMP_PEAK: f32 = 14.0;
-/// How far Select dips the focused tile's lift.
-pub const PRESS_DIP: f32 = 0.5;
+// The springs' values live in `style`.
+pub const LIFT: Tuning = style::LIFT;
+pub const SCROLL: Tuning = style::SCROLL;
+pub const BUMP: Tuning = style::BUMP;
+pub const BUMP_PEAK: f32 = style::BUMP_PEAK;
+pub const PRESS_DIP: f32 = style::PRESS_DIP;
 pub const STATUS_FOR: Duration = Duration::from_secs(2);
 
 /// What Back does with focus already on row 0.

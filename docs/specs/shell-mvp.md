@@ -164,8 +164,14 @@ screen coordinates do not.
 | Letter (no icon) | the title's first letter, 96 px at rest, centred, growing with the tile |
 | Title | 30 px, below the focused tile only: capitals 14 px under its lifted edge, centred, fading in with the lift; cut to the lifted width (368 px), ending in `…` |
 | Top Shelf title | 72 px, left at x 80, baseline 60 px above the shelf's lower edge; the caption "TOP SHELF" (24 px, dim) above it |
-| Status pill | top right of the safe area, 28 px |
+| Status pill | top right of the safe area, 28 px, 28 px in from its sides and 18 px from its top and bottom, fully round |
 | No apps | 48 px |
+
+The look's values (colours, gradients, type sizes, radii, the shadow, the
+focus scale, spacing and the springs' speeds) live in one module,
+`lumen-core`'s `style` (look-and-feel.md, "Tokens"). `layout` and `home`
+keep their names for them as aliases, and `draw.rs` takes its colours from
+it. Geometry that follows from them stays in `layout`.
 
 Checks the numbers pass (each becomes a unit test):
 
@@ -324,6 +330,7 @@ pub trait Launcher {
   |---|---|
   | `input` | scancode → key map; the press, release, repeat and stuck-key state machine; `next_deadline()` |
   | `focus` | grid focus: move by direction → moved or blocked |
+  | `style` | every look value: colours, type sizes, radii, shadow, focus scale, spacing, the springs' tunings |
   | `layout` | the numbers above: tile rects, lift, scroll per row, safe area |
   | `anim` | the critically damped spring |
   | `apps` | `App`, `Launcher`, `MockLauncher` |

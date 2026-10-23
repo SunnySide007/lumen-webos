@@ -1,6 +1,9 @@
 //! Where everything sits, in the fixed 1920x1080 space the UI is designed for
 //! (docs/specs/shell-mvp.md, "Layout"). "Content" coordinates scroll with the
-//! grid; screen coordinates do not.
+//! grid; screen coordinates do not. Look values (gaps, radii, type sizes, the
+//! focus scale and shadow) live in `style`; the names here are aliases.
+
+use crate::style;
 
 pub const SCREEN_W: f32 = 1920.0;
 pub const SCREEN_H: f32 = 1080.0;
@@ -47,47 +50,45 @@ impl Rect {
     }
 }
 
-/// tvOS's guide: 80 px in from the sides, 60 px from the top and bottom.
-pub const SAFE: Rect = Rect::new(80.0, 60.0, 1760.0, 960.0);
+/// The safe area, `style::SAFE_X` and `style::SAFE_Y` in from the edges.
+pub const SAFE: Rect = Rect::new(
+    style::SAFE_X,
+    style::SAFE_Y,
+    SCREEN_W - 2.0 * style::SAFE_X,
+    SCREEN_H - 2.0 * style::SAFE_Y,
+);
 
 pub const COLUMNS: usize = 5;
 /// 5:3, the shape of a tvOS app icon.
 pub const TILE_W: f32 = 320.0;
 pub const TILE_H: f32 = 192.0;
-pub const TILE_RADIUS: f32 = 12.0;
-pub const COLUMN_GAP: f32 = 40.0;
+pub const TILE_RADIUS: f32 = style::TILE_RADIUS;
+pub const COLUMN_GAP: f32 = style::COLUMN_GAP;
 pub const COLUMN_PITCH: f32 = TILE_W + COLUMN_GAP;
 
 /// The placeholder Top Shelf band, in content coordinates.
 pub const TOP_SHELF: Rect = Rect::new(0.0, 0.0, SCREEN_W, 640.0);
 pub const ROW0_Y: f32 = 700.0;
-pub const ROW_PITCH: f32 = 280.0;
+pub const ROW_PITCH: f32 = TILE_H + style::ROW_GAP;
 /// Screen y where a focused row below row 0 sits.
 pub const FOCUS_ROW_Y: f32 = 340.0;
-/// How much a fully lifted tile grows, about its centre.
-pub const FOCUS_SCALE: f32 = 1.15;
+pub const FOCUS_SCALE: f32 = style::FOCUS_SCALE;
 
-/// The soft shadow under a lifted tile, offset down and fading out over
-/// `SHADOW_BLUR` pixels either side of the tile's edge.
-pub const SHADOW_BLUR: f32 = 24.0;
-pub const SHADOW_OFFSET: f32 = 18.0;
-pub const SHADOW_OPACITY: f32 = 0.4;
+pub const SHADOW_BLUR: f32 = style::SHADOW_BLUR;
+pub const SHADOW_OFFSET: f32 = style::SHADOW_OFFSET;
+pub const SHADOW_OPACITY: f32 = style::SHADOW_OPACITY;
 
 /// A tile's icon: its longer side, at rest. It grows with the tile.
 pub const ICON_SIZE: f32 = 120.0;
-/// The first letter of the title, on a tile with no icon, at rest.
-pub const LETTER_PX: f32 = 96.0;
+pub const LETTER_PX: f32 = style::LETTER_PX;
 
-/// Text sizes in pixels to the em (Inter SemiBold), and spacing.
-pub const TITLE_PX: f32 = 30.0;
-/// From a lifted tile's lower edge to the top of the capitals of its title.
-pub const TITLE_GAP: f32 = 14.0;
-pub const SHELF_TITLE_PX: f32 = 72.0;
-pub const SHELF_CAPTION_PX: f32 = 24.0;
-/// From the Top Shelf title's baseline to the shelf's lower edge.
-pub const SHELF_TITLE_GAP: f32 = 60.0;
-pub const STATUS_PX: f32 = 28.0;
-pub const EMPTY_PX: f32 = 48.0;
+pub const TITLE_PX: f32 = style::TITLE_PX;
+pub const TITLE_GAP: f32 = style::TITLE_GAP;
+pub const SHELF_TITLE_PX: f32 = style::SHELF_TITLE_PX;
+pub const SHELF_CAPTION_PX: f32 = style::SHELF_CAPTION_PX;
+pub const SHELF_TITLE_GAP: f32 = style::SHELF_TITLE_GAP;
+pub const STATUS_PX: f32 = style::STATUS_PX;
+pub const EMPTY_PX: f32 = style::EMPTY_PX;
 
 pub const fn row_of(index: usize) -> usize {
     index / COLUMNS

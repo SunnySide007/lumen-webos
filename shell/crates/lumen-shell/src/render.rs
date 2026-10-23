@@ -14,6 +14,8 @@
 
 use std::ffi::c_void;
 
+use lumen_core::style::Color;
+
 use crate::atlas::{ATLAS_H, ATLAS_W, Upload, Uv};
 use crate::gl::{self, Gl};
 
@@ -36,6 +38,11 @@ pub struct Rgba(pub f32, pub f32, pub f32, pub f32);
 impl Rgba {
     pub const fn rgb8(r: u8, g: u8, b: u8) -> Self {
         Self(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0)
+    }
+
+    /// A colour from `lumen_core::style`.
+    pub const fn of(c: Color) -> Self {
+        Self(c.r, c.g, c.b, c.a)
     }
 
     pub const fn alpha(self, a: f32) -> Self {

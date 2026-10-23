@@ -14,3 +14,4 @@ pub mod home;
 pub mod input;
 pub mod layout;
 pub mod script;
+pub mod style;

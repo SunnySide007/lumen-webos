@@ -6,43 +6,30 @@
 use lumen_core::apps::App;
 use lumen_core::home::{TileView, View};
 use lumen_core::layout::{self, SAFE, SCREEN_H, SCREEN_W};
+use lumen_core::style::{self, Color};
 
 use crate::atlas::Atlas;
 use crate::icons::Icons;
 use crate::render::{Batch, Rgba};
 use crate::text::Text;
 
-const BG_TOP: Rgba = Rgba::rgb8(14, 18, 34);
-const BG_BOTTOM: Rgba = Rgba::rgb8(0, 0, 0);
-const SHELF_TOP: Rgba = Rgba::rgb8(46, 56, 98);
-const SHELF_BOTTOM: Rgba = Rgba::rgb8(14, 18, 34);
-const TEXT: Rgba = Rgba::rgb8(235, 238, 245);
-const TEXT_DIM: Rgba = Rgba::rgb8(140, 148, 165);
-const SHADOW: Rgba = Rgba(0.0, 0.0, 0.0, 1.0);
-const PILL: Rgba = Rgba(0.0, 0.0, 0.0, 0.75);
-const WHITE: Rgba = Rgba(1.0, 1.0, 1.0, 1.0);
-
-/// Resting tiles are this bright; lifting brings a tile to full brightness.
-const REST_SHADE: f32 = 0.8;
-/// How much lighter a tile's top edge is than its bottom.
-const TILE_SHEEN: f32 = 0.14;
-
-/// Tile colours for apps that bring none, by position in the launcher's list:
-/// with rows of 5 and 8 colours, no tile shares a colour with the tile beside,
-/// above or below it.
-const PALETTE: [Rgba; 8] = [
-    Rgba::rgb8(196, 58, 58),
-    Rgba::rgb8(214, 120, 46),
-    Rgba::rgb8(190, 152, 44),
-    Rgba::rgb8(64, 156, 92),
-    Rgba::rgb8(44, 140, 160),
-    Rgba::rgb8(58, 104, 196),
-    Rgba::rgb8(112, 82, 190),
-    Rgba::rgb8(170, 70, 140),
-];
+// The look's values live in `lumen_core::style`.
+const BG_TOP: Rgba = Rgba::of(style::BACKGROUND.top);
+const BG_BOTTOM: Rgba = Rgba::of(style::BACKGROUND.bottom);
+const SHELF_TOP: Rgba = Rgba::of(style::SHELF.top);
+const SHELF_BOTTOM: Rgba = Rgba::of(style::SHELF.bottom);
+const TEXT: Rgba = Rgba::of(style::TEXT);
+const TEXT_DIM: Rgba = Rgba::of(style::TEXT_DIM);
+const SHADOW: Rgba = Rgba::of(style::SHADOW);
+const PILL: Rgba = Rgba::of(style::PILL);
+const ON_TILE: Rgba = Rgba::of(style::ON_TILE);
+const WHITE: Rgba = Rgba::of(style::WHITE);
+const REST_SHADE: f32 = style::TILE_REST_SHADE;
+const TILE_SHEEN: f32 = style::TILE_SHEEN;
+const PALETTE: [Color; 8] = style::TILE_PALETTE;
 
 pub fn tile_color(index: usize) -> Rgba {
-    PALETTE[index % PALETTE.len()]
+    Rgba::of(PALETTE[index % PALETTE.len()])
 }
 
 /// The app's own colour, or the palette's for its place in the list.
@@ -192,7 +179,7 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
     if let Some((uv, w, h)) = icon {
         let side = layout::ICON_SIZE * zoom / w.max(h) as f32;
         let (iw, ih) = (w as f32 * side, h as f32 * side);
-        batch.image(cx - iw / 2.0, cy - ih / 2.0, iw, ih, uv, WHITE);
+        batch.image(cx - iw / 2.0, cy - ih / 2.0, iw, ih, uv, ON_TILE);
         return;
     }
     // Still loading: the plain tile, so its letter does not flash up first.
@@ -223,7 +210,7 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
         px,
         scale,
         &letter,
-        WHITE,
+        ON_TILE,
     );
 }
 
@@ -256,7 +243,7 @@ fn title(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
 /// Top Shelf when focus is on row 0, where launches usually happen.
 fn status(batch: &mut Batch, text: &str, assets: &mut Assets) {
     let px = layout::STATUS_PX;
-    let (pad_x, pad_y) = (28.0, 18.0);
+    let (pad_x, pad_y) = (style::PILL_PAD_X, style::PILL_PAD_Y);
     let t = &mut assets.text;
     // A long error (from luna, say) must not run off the screen.
     let text = t.fit(text, px, SAFE.w - 2.0 * pad_x);
