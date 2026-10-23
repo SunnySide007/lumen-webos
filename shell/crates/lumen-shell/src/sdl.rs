@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use libloading::Library;
+use lumen_core::pace;
 
 pub const INIT_VIDEO: u32 = 0x0000_0020;
 pub const INIT_EVENTS: u32 = 0x0000_4000;
@@ -389,6 +390,11 @@ pub struct Sdl {
     /// webOS only: shows or hides the Magic Remote pointer. webosbrew's SDL
     /// fork has it; whether LG's 2.0.5 on the B9 does, the log says.
     webos_cursor_visibility: Option<unsafe extern "C" fn(c_int)>,
+    /// Since SDL 2.0.0, so always there in practice; optional all the same.
+    get_window_display_mode: Option<unsafe extern "C" fn(Window, *mut c_void) -> c_int>,
+    /// webOS only: the panel's refresh rate. LG's SDL 2.0.5 on the B9
+    /// exports it (`grep -a` of /usr/lib/libSDL2-2.0.so.0, 2026-10-22).
+    webos_get_refresh_rate: Option<unsafe extern "C" fn(*mut c_int) -> c_int>,
     key_layout: KeyLayout,
     raw_keys_logged: Cell<u32>,
     raw_kinds_logged: RefCell<Vec<u64>>,
@@ -493,6 +499,12 @@ impl Sdl {
                 // Declared without a return value: webosbrew's header makes it
                 // `void`, and on every ABI here a caller may ignore one anyway.
                 webos_cursor_visibility: sym(&lib, b"SDL_webOSCursorVisibility\0").ok(),
+                get_window_display_mode: sym(&lib, b"SDL_GetWindowDisplayMode\0").ok(),
+                // `SDL_bool SDL_webOSGetRefreshRate(int *rate)`, as LG's
+                // SDL_webOS.h declares it (openlgtv/buildroot-nc4,
+                // package/sdl2/webos/002-webos-apis.patch). SDL_bool is an
+                // enum, int-sized on every ABI here.
+                webos_get_refresh_rate: sym(&lib, b"SDL_webOSGetRefreshRate\0").ok(),
                 key_layout,
                 raw_keys_logged: Cell::new(0),
                 raw_kinds_logged: RefCell::new(Vec::new()),
@@ -746,6 +758,79 @@ impl Sdl {
         true
     }
 
+    /// What this SDL says the refresh rate is, both ways it can say it: the
+    /// display mode's paces motion (`lumen_core::pace`), LG's is only logged
+    /// (`Refresh::webos`). The loop reads it once, at the first idle rather
+    /// than before the first frame: LG's call may ask luna, which takes time.
+    ///
+    /// # Safety
+    /// `window` must be live.
+    pub unsafe fn refresh(&self, window: Window) -> Refresh {
+        let from = Instant::now();
+        let webos = self.webos_refresh_rate();
+        // SAFETY: forwarded from the caller.
+        let mode = unsafe { self.display_mode_rate(window) };
+        Refresh {
+            webos,
+            mode,
+            took: from.elapsed(),
+        }
+    }
+
+    fn webos_refresh_rate(&self) -> Rate {
+        let Some(get) = self.webos_get_refresh_rate else {
+            return Rate::Absent;
+        };
+        let mut hz: c_int = 0;
+        // SAFETY: the type is the declared prototype (see `bind`), and the
+        // call writes one int through a valid pointer. Video is initialised.
+        let ok = unsafe { get(&mut hz) } != 0;
+        if ok {
+            Rate::Hz(i64::from(hz))
+        } else {
+            Rate::Failed
+        }
+    }
+
+    /// The refresh rate of the display mode `window` is shown in. Read at
+    /// upstream's offset (`refresh_rate`, byte 12 of `SDL_DisplayMode`),
+    /// which LG's SDL is not known to keep: `Refresh` takes only a plausible
+    /// rate.
+    ///
+    /// # Safety
+    /// `window` must be live.
+    unsafe fn display_mode_rate(&self, window: Window) -> Rate {
+        /// Upstream's `SDL_DisplayMode`, with room to spare for LG's.
+        #[repr(C)]
+        struct DisplayMode {
+            _format: u32,
+            _w: c_int,
+            _h: c_int,
+            refresh_rate: c_int,
+            _driver_data: *mut c_void,
+            _spare: [u64; 4],
+        }
+        let Some(query) = self.get_window_display_mode else {
+            return Rate::Absent;
+        };
+        let mut mode = DisplayMode {
+            _format: 0,
+            _w: 0,
+            _h: 0,
+            refresh_rate: 0,
+            _driver_data: std::ptr::null_mut(),
+            _spare: [0; 4],
+        };
+        // SAFETY: the window is live (caller) and `mode` is larger and as
+        // aligned as upstream's `SDL_DisplayMode`.
+        let ok = unsafe { query(window, (&raw mut mode).cast()) } == 0;
+        if ok {
+            Rate::Hz(i64::from(mode.refresh_rate))
+        } else {
+            Rate::Failed
+        }
+    }
+
     pub fn quit(&self) {
         // SAFETY: SDL_Quit is safe to call after (or without) SDL_Init.
         unsafe { (self.quit)() };
@@ -760,6 +845,82 @@ pub fn pointer_line(can_hide: bool) -> String {
     } else {
         "pointer: SDL_webOSCursorVisibility not in LG's SDL; the pointer stays as LG leaves it"
             .to_owned()
+    }
+}
+
+/// One answer to "how fast does the panel refresh?".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rate {
+    /// This SDL has no such call.
+    Absent,
+    /// The call said it could not tell.
+    Failed,
+    /// What it answered, plausible or not.
+    Hz(i64),
+}
+
+impl std::fmt::Display for Rate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Absent => f.write_str("absent"),
+            Self::Failed => f.write_str("failed"),
+            Self::Hz(hz) => write!(f, "{hz} Hz"),
+        }
+    }
+}
+
+/// Where the pacing period came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RateSource {
+    DisplayMode,
+    Default,
+}
+
+/// What SDL said about the panel's refresh rate at start-up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Refresh {
+    /// `SDL_webOSGetRefreshRate`: LG's own answer. Logged, never paced by:
+    /// the B9 reports `tv.hw.supportFrc` true and no
+    /// `tv.hw.SoCOutputFrameRate` (getConfigs, 2026-10-23), so an SDL that
+    /// reads those, as an open-source copy of this call does, answers
+    /// 120 Hz, the panel's rate, while GL swaps at 60.
+    pub webos: Rate,
+    /// `SDL_GetWindowDisplayMode`'s rate.
+    pub mode: Rate,
+    /// How long the two reads took.
+    pub took: Duration,
+}
+
+impl Refresh {
+    /// The period to pace motion by: the display mode's rate if plausible
+    /// (`lumen_core::pace::period_of`), else 60 Hz. LG's answer is not used
+    /// (see `webos`).
+    pub fn period(&self) -> (Duration, RateSource) {
+        match self.mode {
+            Rate::Hz(hz) => pace::period_of(hz).map(|p| (p, RateSource::DisplayMode)),
+            Rate::Absent | Rate::Failed => None,
+        }
+        .unwrap_or((pace::DEFAULT_PERIOD, RateSource::Default))
+    }
+
+    /// `motion paced: 16.667 ms a frame, from the display mode;
+    /// SDL_webOSGetRefreshRate 120 Hz, display mode 60 Hz; read in 0.4 ms`.
+    /// The source is `the display mode` or `the 60 Hz default`; each read is
+    /// `<n> Hz` (whatever it said), `absent` or `failed`.
+    pub fn line(&self) -> String {
+        let (period, source) = self.period();
+        let source = match source {
+            RateSource::DisplayMode => "the display mode".to_owned(),
+            RateSource::Default => format!("the {} Hz default", pace::DEFAULT_HZ),
+        };
+        format!(
+            "motion paced: {:.3} ms a frame, from {source}; SDL_webOSGetRefreshRate {}, \
+             display mode {}; read in {:.1} ms",
+            period.as_secs_f64() * 1000.0,
+            self.webos,
+            self.mode,
+            self.took.as_secs_f64() * 1000.0
+        )
     }
 }
 
@@ -1160,5 +1321,72 @@ mod tests {
             Some(read - Duration::from_millis(25))
         );
         assert_eq!(event_instant(read, 2000, 1000), None);
+    }
+
+    fn refresh(webos: Rate, mode: Rate) -> Refresh {
+        Refresh {
+            webos,
+            mode,
+            took: Duration::from_micros(400),
+        }
+    }
+
+    #[test]
+    fn the_display_modes_rate_paces_else_60_hz() {
+        let hz = |n: u64| Duration::from_secs(1) / u32::try_from(n).unwrap();
+        assert_eq!(
+            refresh(Rate::Absent, Rate::Hz(240)).period(),
+            (hz(240), RateSource::DisplayMode)
+        );
+        for webos in [Rate::Absent, Rate::Failed, Rate::Hz(50), Rate::Hz(120)] {
+            assert_eq!(
+                refresh(webos, Rate::Hz(100)).period(),
+                (hz(100), RateSource::DisplayMode),
+                "LG's {webos:?} is only logged"
+            );
+        }
+        for mode in [Rate::Absent, Rate::Failed, Rate::Hz(0), Rate::Hz(10_000)] {
+            assert_eq!(
+                refresh(Rate::Absent, mode).period(),
+                (pace::DEFAULT_PERIOD, RateSource::Default),
+                "{mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lgs_120_hz_with_a_60_hz_display_mode_paces_at_60() {
+        assert_eq!(
+            refresh(Rate::Hz(120), Rate::Hz(60)).period(),
+            (pace::DEFAULT_PERIOD, RateSource::DisplayMode),
+            "the B9's panel with FRC, against GL's 60"
+        );
+    }
+
+    #[test]
+    fn lgs_120_hz_with_the_display_mode_failed_paces_at_60() {
+        assert_eq!(
+            refresh(Rate::Hz(120), Rate::Failed).period(),
+            (pace::DEFAULT_PERIOD, RateSource::Default)
+        );
+    }
+
+    #[test]
+    fn the_motion_paced_line_says_where_the_period_came_from() {
+        assert_eq!(
+            refresh(Rate::Hz(120), Rate::Hz(60)).line(),
+            "motion paced: 16.667 ms a frame, from the display mode; \
+             SDL_webOSGetRefreshRate 120 Hz, display mode 60 Hz; read in 0.4 ms"
+        );
+        assert_eq!(
+            refresh(Rate::Absent, Rate::Hz(240)).line(),
+            "motion paced: 4.167 ms a frame, from the display mode; \
+             SDL_webOSGetRefreshRate absent, display mode 240 Hz; read in 0.4 ms"
+        );
+        assert_eq!(
+            refresh(Rate::Failed, Rate::Hz(0)).line(),
+            "motion paced: 16.667 ms a frame, from the 60 Hz default; \
+             SDL_webOSGetRefreshRate failed, display mode 0 Hz; read in 0.4 ms"
+        );
     }
 }

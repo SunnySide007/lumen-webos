@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use lumen_core::apps::{AppId, Launcher, MockLauncher};
 use lumen_core::home::{BackAtTop, Effect, Home, LIFT};
 use lumen_core::input::{Action, Input, Press, action_for, scancode};
+use lumen_core::pace::Pacer;
 use lumen_core::script::Script;
 
 use crate::capture;
@@ -18,6 +19,7 @@ use crate::draw;
 use crate::faults;
 use crate::frame_stats::FrameStats;
 use crate::gl::{self, Gl};
+use crate::icons::Icons;
 use crate::info;
 use crate::luna::{self, Ls2, LunaLauncher};
 use crate::render::{Batch, Renderer, SCREEN_H, SCREEN_W, fit_viewport};
@@ -50,6 +52,10 @@ pub struct Options {
 const SCREENSHOT_AFTER: Duration = Duration::from_millis(1500);
 /// How often a settled screen looks for icons while the loader has some.
 const ICON_POLL: Duration = Duration::from_millis(16);
+/// How long the screen stays settled before glyphs are made ahead: three
+/// refreshes at 60 Hz, so the burst's last frames, at most two still queued
+/// on the B9, have gone out and the GPU is done with the atlas.
+const WARM_AFTER: Duration = Duration::from_millis(50);
 /// How long after Select its launch waits: the press pulse's dip is at its
 /// deepest 1/ω of the lift spring after the kick, 33 ms.
 const LAUNCH_AFTER: Duration = Duration::from_nanos((1e9 / LIFT.omega as f64) as u64);
@@ -101,34 +107,89 @@ impl Options {
     }
 }
 
-/// The loop's time. Real by default; with `--fixed-dt` a virtual clock that
-/// advances exactly one step per frame drawn and, while the screen is
-/// settled, jumps straight to the next deadline instead of waiting for it,
-/// so the same keys always give the same frames.
+/// The loop's time. Real by default, paced by `lumen_core::pace` while frames
+/// are drawn with vsync: each frame of a burst shows one period of motion
+/// more than the one before, and a frame shows one period after its pass.
+/// With `--fixed-dt` a virtual clock that advances exactly one step per frame
+/// drawn and, while the screen is settled, jumps straight to the next
+/// deadline instead of waiting for it, so the same keys always give the same
+/// frames; it is never paced.
 #[derive(Debug)]
 struct Clock {
     start: Instant,
     step: Option<Duration>,
     virtual_now: Duration,
+    /// With vsync and the real clock.
+    pacer: Option<Pacer>,
+}
+
+/// One pass of the loop: its time on the loop's clock, and the real time it
+/// was read at (the same unless paced).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Pass {
+    now: Duration,
+    real: Duration,
 }
 
 impl Clock {
-    fn new(step: Option<Duration>) -> Self {
+    /// `period` paces a real clock (vsync on); a fixed step is never paced.
+    fn new(step: Option<Duration>, period: Option<Duration>) -> Self {
         Self {
             start: Instant::now(),
             step,
             virtual_now: Duration::ZERO,
+            pacer: period.filter(|_| step.is_none()).map(Pacer::new),
         }
     }
 
+    /// Paces a real clock by `period` from the next burst on; a fixed step
+    /// is never paced.
+    fn pace(&mut self, period: Duration) {
+        if self.step.is_none() {
+            self.pacer = Some(Pacer::new(period));
+        }
+    }
+
+    /// A pass read now. Its `now` is what presses, repeats and deadlines go
+    /// by; its `real` is what a paced frame is drawn for.
+    fn pass(&self) -> Pass {
+        if self.step.is_some() {
+            return Pass {
+                now: self.virtual_now,
+                real: self.virtual_now,
+            };
+        }
+        let real = self.start.elapsed();
+        Pass {
+            now: self.pacer.map_or(real, |p| p.time(real)),
+            real,
+        }
+    }
+
+    /// The time a pass read now would have.
     fn now(&self) -> Duration {
-        match self.step {
-            Some(_) => self.virtual_now,
-            None => self.start.elapsed(),
+        self.pass().now
+    }
+
+    /// The motion time the frame drawn in the pass at `now` shows: paced, one
+    /// period on, the earliest vsync it can reach, so a press made in the
+    /// pass already moves something in that frame; otherwise `now`.
+    fn shows(&self, now: Duration) -> Duration {
+        self.pacer.map_or(now, |p| p.shows(now))
+    }
+
+    /// When key repeats fall due in `pass`: its real time when paced, never
+    /// after its `now`, so motion running ahead of real time fires no repeat
+    /// before the key-up that would stop it.
+    fn input_time(&self, pass: Pass) -> Duration {
+        match self.pacer {
+            Some(_) => pass.real.min(pass.now),
+            None => pass.now,
         }
     }
 
-    /// Real time since the start, whatever the clock: `--exit-after` uses it.
+    /// Real time since the start, whatever the clock: `--exit-after` and the
+    /// idle waits use it.
     fn real(&self) -> Duration {
         self.start.elapsed()
     }
@@ -137,10 +198,28 @@ impl Clock {
         self.step.is_some()
     }
 
-    fn frame_drawn(&mut self) {
+    /// A frame was drawn in `pass`.
+    fn frame_drawn(&mut self, pass: Pass) {
         if let Some(step) = self.step {
             self.virtual_now += step;
         }
+        if let Some(pacer) = &mut self.pacer {
+            pacer.drawn(pass.now, pass.real);
+        }
+    }
+
+    /// The screen settled, or a launch cut the burst off: the next frame
+    /// starts a burst.
+    fn idle(&mut self) {
+        if let Some(pacer) = &mut self.pacer {
+            pacer.idle();
+        }
+    }
+
+    /// The vsyncs skipped since the last call, for the burst line; `None`
+    /// when not paced.
+    fn take_skipped(&mut self) -> Option<u32> {
+        self.pacer.as_mut().map(Pacer::take_skipped)
     }
 
     /// With a fixed step, moves the clock on to `t` (never back).
@@ -290,7 +369,9 @@ impl Burst {
 
     /// The log lines for a finished burst (slow frames not logged, then the
     /// burst itself), and a fresh start; none if no frame was drawn.
-    fn finish(&mut self, quads: usize) -> Vec<String> {
+    /// `skipped` is the pacer's count of vsyncs skipped in the burst, `None`
+    /// without a pacer, which leaves it out of the line.
+    fn finish(&mut self, quads: usize, skipped: Option<u32>) -> Vec<String> {
         let (Some(first), Some(last)) = (self.first, self.last) else {
             return Vec::new();
         };
@@ -314,8 +395,9 @@ impl Burst {
         } else {
             format!("; first {} ms", times.join(", "))
         };
+        let skips = skipped.map_or(String::new(), |k| format!("; {k} vsyncs skipped"));
         lines.push(format!(
-            "drew {} frames in {:.0} ms (avg {:.2} ms, worst {:.2} ms, {quads} quads){firsts}; idle",
+            "drew {} frames in {:.0} ms (avg {:.2} ms, worst {:.2} ms, {quads} quads){firsts}{skips}; idle",
             self.frames,
             span.as_secs_f64() * 1000.0,
             avg.as_secs_f64() * 1000.0,
@@ -432,9 +514,10 @@ impl<L: Launcher> Shell<L> {
         self.pointer = Pointer::Hidden;
     }
 
-    /// Fires the key repeats due by `now`. Runs once after each pass's events.
-    fn tick(&mut self, now: Duration) {
-        self.repeats_due(now, now);
+    /// Fires the key repeats due by `due` (`Clock::input_time`), acting at the
+    /// pass's time `now`. Runs once after each pass's events.
+    fn tick(&mut self, due: Duration, now: Duration) {
+        self.repeats_due(due, now);
     }
 
     /// Fires the key repeats that fell due by `due`, a press's or a release's
@@ -783,6 +866,11 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
     let vsync = sdl.gl_set_swap_interval(1);
     // SAFETY: the surface's window is live for this whole function.
     let mut drawable = unsafe { sdl.drawable_size(surface.window) };
+    // Motion is paced only with vsync and the real clock, from the first idle
+    // on: the rate is asked for there, not before the first frame, since
+    // LG's call may ask luna. A fixed clock asks SDL nothing, so its log
+    // stays as it was.
+    let mut refresh_due = vsync && opts.fixed_dt.is_none();
     start.mark(Phase::Gl, Instant::now());
 
     info!(
@@ -813,13 +901,20 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
     let mut burst = Burst::default();
     // The main thread's page faults at the last swap, for the next frame's.
     let mut faults_seen = faults::thread_faults();
-    let mut clock = Clock::new(opts.fixed_dt);
+    let mut clock = Clock::new(opts.fixed_dt, None);
     let mut screenshot = opts.screenshot.clone();
     let mut settled_shot = opts.screenshot_when_settled.clone();
     let mut script = opts.keys.clone();
     if let Some(step) = opts.fixed_dt {
         info!("fixed clock: {:.3} ms a frame", step.as_secs_f64() * 1000.0);
     }
+    // Every title's glyphs are made once (`warm`), while visible, when the
+    // screen has stayed settled `WARM_AFTER` past a burst; a press before
+    // then puts it off to the next settle. Not under a fixed clock: warming
+    // changes where glyphs sit in the atlas, and so the frames.
+    let mut warmed = clock.is_fixed();
+    // When, in real time, it is due.
+    let mut warm_at: Option<Duration> = None;
     let mut shell = Shell::new(launcher(), clock.now());
     start.mark(Phase::Apps, Instant::now());
     shell.can_hide_pointer = sdl.can_hide_pointer();
@@ -841,13 +936,32 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
             && shell.visible
             && keys_done(script.as_ref(), &shell.input)
             && !assets.icons.any_loading();
-        let first = if shell.wants_frame() || shot_ready {
+        // A pass that starts with an idle wait: the GPU has most likely
+        // finished with the atlas, so icons may be placed in it.
+        let waited = !(shell.wants_frame() || shot_ready);
+        let first = if !waited {
             sdl.poll_event()
         } else {
             shell.nothing_to_draw(Instant::now());
-            let burst_lines = burst.finish(batch.quad_count());
+            let burst_lines = burst.finish(batch.quad_count(), clock.take_skipped());
             for line in &burst_lines {
                 info!("{line}");
+            }
+            clock.idle();
+            if std::mem::take(&mut refresh_due) {
+                // SAFETY: the surface's window is live for this whole
+                // function.
+                let refresh = unsafe { sdl.refresh(surface.window) };
+                info!("{}", refresh.line());
+                clock.pace(refresh.period().0);
+            }
+            if !warmed && !burst_lines.is_empty() {
+                warm_at = Some(clock.real() + WARM_AFTER);
+            }
+            if shell.visible && warm_at.is_some_and(|at| clock.real() >= at) {
+                warm(&shell.home, &mut assets, &renderer);
+                warmed = true;
+                warm_at = None;
             }
             // GL's error flag holds until read. Each `fps` line reads it too,
             // but a burst shorter than a second gives none, so read it here.
@@ -879,6 +993,8 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
                 // jump 30 s at a time through it: there it only comes if the
                 // keys or frames take the clock past it.
                 (!clock.is_fixed()).then(|| shell.idle.next_deadline()),
+                // Glyphs made ahead, once the burst's frames have gone out.
+                warm_at.filter(|_| shell.visible),
             ]
             .into_iter()
             .flatten()
@@ -890,13 +1006,16 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
                     sdl.poll_event()
                 }
                 Some(t) => {
-                    let wait = t.saturating_sub(clock.now());
+                    // By real time: a paced clock may run ahead of it, and
+                    // waiting by that would wake early and spin.
+                    let wait = t.saturating_sub(clock.real());
                     sdl.wait_event(Some(until_exit.map_or(wait, |e| e.min(wait))))
                 }
                 None => sdl.wait_event(until_exit),
             }
         };
-        let now = clock.now();
+        let pass = clock.pass();
+        let now = pass.now;
         if let Some(script) = script.as_mut() {
             for key in script.due(now) {
                 let event = if key.down {
@@ -921,7 +1040,7 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
         }
         // After the events: a press or a release fired the repeats due
         // before its own stamp, so a key let go just now fires none after.
-        shell.tick(now);
+        shell.tick(clock.input_time(pass), now);
         if shell.take_pointer_hide() && sdl.set_pointer_visible(false) {
             shell.pointer_hidden();
         }
@@ -943,10 +1062,10 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
         if screenshot.is_some() && now >= SCREENSHOT_AFTER {
             shell.home.mark_dirty();
         }
-        if assets.icons.receive() {
+        if icons_arrived(&mut assets.icons, waited) {
             shell.home.mark_dirty();
         }
-        shell.home.advance_to(now);
+        shell.home.advance_to(clock.shows(now));
         // The settled screenshot: the keys are all played and released,
         // nothing moves and every icon is in, so draw the settled frame once
         // more and keep it.
@@ -966,7 +1085,7 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
                 &mut stats,
                 batch.quad_count(),
                 now,
-                &clock,
+                &mut clock,
             );
             continue;
         }
@@ -1018,7 +1137,7 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
         }
         shell.frame_shown(shown);
         shell.home.frame_drawn();
-        clock.frame_drawn();
+        clock.frame_drawn(pass);
         if shell.quit {
             break;
         }
@@ -1043,47 +1162,71 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
                 info!("GL error {err:#x}");
             }
         }
-        // A frame drawn at `now` is on screen: once that is past the dip's
-        // deepest point, the launch may block the loop.
+        // The frame just drawn is on screen, showing `clock.shows(now)`: once
+        // that is past the dip's deepest point, the launch may block the loop.
         launch_pending(
             &mut shell,
             &mut burst,
             &mut stats,
             batch.quad_count(),
-            now,
-            &clock,
+            clock.shows(now),
+            &mut clock,
         );
     }
     shell.leaving(Instant::now());
     if let Some(start) = start_line.take() {
         info!("{}", start.line_without_frame("the shell is leaving"));
     }
-    for line in burst.finish(batch.quad_count()) {
+    for line in burst.finish(batch.quad_count(), clock.take_skipped()) {
         info!("{line}");
     }
     drop(surface);
     Ok(())
 }
 
-/// Launches what a press asked for, if it is due by `now`. The burst and the
-/// `fps` window end first, so the time luna takes to answer is not counted
-/// as a frame. Returns whether it launched.
+/// Launches what a press asked for, if it is due by `now`. The burst, the
+/// `fps` window and the pacer's burst end first, so the time luna takes to
+/// answer is not counted as a frame, nor as vsyncs skipped. Returns whether
+/// it launched.
 fn launch_pending<L: Launcher>(
     shell: &mut Shell<L>,
     burst: &mut Burst,
     stats: &mut FrameStats,
     quads: usize,
     now: Duration,
-    clock: &Clock,
+    clock: &mut Clock,
 ) -> bool {
     if !shell.launch_due_at().is_some_and(|due| due <= now) {
         return false;
     }
-    for line in burst.finish(quads) {
+    for line in burst.finish(quads, clock.take_skipped()) {
         info!("{line}");
     }
     stats.reset();
+    clock.idle();
     shell.launch_if_due(now, || clock.now())
+}
+
+/// Makes every title's glyphs (`draw::warm`) and uploads them once the screen
+/// has stayed settled for `WARM_AFTER`, so no burst waits on an upload and
+/// the GPU is most likely done with the atlas. Any wait left lands in the
+/// `warm` line's time, once, outside every burst.
+fn warm(home: &Home, assets: &mut draw::Assets, renderer: &Renderer) {
+    let from = Instant::now();
+    draw::warm::warm(home.apps(), assets);
+    let uploads = assets.atlas.take_uploads();
+    renderer.upload(&uploads);
+    let glyphs = assets.text.take_rasterised();
+    info!("{}", draw::warm::line(glyphs, &uploads, from.elapsed()));
+}
+
+/// Takes in the icons the loader has finished, but only on a pass that began
+/// with an idle wait: placed mid-burst, an icon would be uploaded into the
+/// atlas that the frames in flight still read. (`receive` only keeps the
+/// decoded image; it goes into the atlas when a frame draws it.) True if
+/// any came.
+fn icons_arrived(icons: &mut Icons, waited: bool) -> bool {
+    waited && icons.receive()
 }
 
 /// The TV's apps through luna; the simulator's mock list on a PC, or on the
@@ -1139,6 +1282,8 @@ fn save_screenshot(renderer: &Renderer, drawable: (i32, i32), path: &std::path::
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
     use lumen_core::apps::{App, LaunchError};
 
     fn args(list: &[&str]) -> Vec<String> {
@@ -1205,24 +1350,103 @@ mod tests {
 
     #[test]
     fn a_fixed_clock_moves_one_step_per_frame_and_jumps_forward_only() {
-        let mut clock = Clock::new(Some(ms(20)));
-        assert_eq!(clock.now(), Duration::ZERO);
-        clock.frame_drawn();
-        clock.frame_drawn();
+        let mut clock = Clock::new(Some(ms(20)), Some(ms(16)));
+        assert!(clock.pacer.is_none(), "a fixed step is never paced");
+        clock.pace(ms(16));
+        assert!(clock.pacer.is_none(), "not later either");
+        let pass = clock.pass();
+        assert_eq!(pass.now, Duration::ZERO);
+        assert_eq!(clock.shows(ms(0)), ms(0), "a frame shows its pass");
+        assert_eq!(clock.input_time(pass), pass.now);
+        clock.frame_drawn(pass);
+        clock.frame_drawn(clock.pass());
         assert_eq!(clock.now(), ms(40));
         clock.jump_to(ms(500));
         assert_eq!(clock.now(), ms(500));
         clock.jump_to(ms(100));
         assert_eq!(clock.now(), ms(500), "never backwards");
+        assert_eq!(clock.take_skipped(), None, "no skips in the burst line");
     }
 
     #[test]
     fn a_real_clock_ignores_frames_and_jumps() {
-        let mut clock = Clock::new(None);
-        assert!(!clock.is_fixed());
-        clock.frame_drawn();
+        let mut clock = Clock::new(None, None);
+        assert!(!clock.is_fixed() && clock.pacer.is_none());
+        let pass = clock.pass();
+        assert_eq!(clock.input_time(pass), pass.now);
+        clock.frame_drawn(pass);
         clock.jump_to(Duration::from_secs(60));
         assert!(clock.now() < Duration::from_secs(60));
+        assert_eq!(clock.shows(ms(5)), ms(5));
+        assert_eq!(clock.take_skipped(), None);
+    }
+
+    #[test]
+    fn a_paced_clock_shows_each_frame_one_period_after_its_pass() {
+        // Long enough that a slow test machine never misses a "vsync".
+        let period = Duration::from_secs(1);
+        let mut clock = Clock::new(None, None);
+        clock.pace(period);
+        let first = clock.pass();
+        assert_eq!(first.now, first.real, "a burst starts from real time");
+        assert_eq!(clock.shows(first.now), first.now + period);
+        clock.frame_drawn(first);
+        // The next pass is where the frame left the motion, however soon
+        // the loop comes round; key repeats still go by real time.
+        let next = clock.pass();
+        assert_eq!(next.now, first.now + period);
+        assert!(next.real < next.now);
+        assert_eq!(clock.input_time(next), next.real);
+        assert_eq!(clock.take_skipped(), Some(0));
+        clock.idle();
+        assert_eq!(clock.take_skipped(), Some(0));
+    }
+
+    #[test]
+    fn a_paced_burst_line_counts_the_vsyncs_skipped() {
+        let mut burst = Burst::default();
+        let t0 = Instant::now();
+        let _ = burst.frame(t0);
+        let _ = burst.frame(t0 + ms(17));
+        assert_eq!(
+            burst.finish(10, Some(2)),
+            [
+                "drew 2 frames in 17 ms (avg 17.00 ms, worst 17.00 ms, 10 quads); first 17.00 ms; 2 vsyncs skipped; idle"
+            ]
+        );
+        let _ = burst.frame(t0);
+        assert_eq!(
+            burst.finish(10, Some(0)),
+            [
+                "drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 10 quads); 0 vsyncs skipped; idle"
+            ],
+            "on every paced burst, 0 included"
+        );
+    }
+
+    #[test]
+    fn icons_that_arrive_mid_burst_wait_for_the_next_idle() {
+        // An icon is read only at a path that resolves to itself.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/mock-icons/play.png")
+            .canonicalize()
+            .expect("the simulator's icons are in the repo");
+        let (mut icons, mut atlas) = (Icons::threaded(), crate::atlas::Atlas::default());
+        assert!(icons.get(&path, &mut atlas).is_none(), "on its way");
+        // Mid-burst, however long the loader has had, nothing is taken in.
+        let started = Instant::now();
+        while started.elapsed() < ms(50) {
+            assert!(!icons_arrived(&mut icons, false));
+            std::thread::sleep(ms(1));
+        }
+        assert!(icons.is_loading(&path), "held back");
+        // After an idle wait it comes in.
+        while !icons_arrived(&mut icons, true) {
+            assert!(started.elapsed() < Duration::from_secs(10), "never came");
+            std::thread::sleep(ms(1));
+        }
+        assert!(!icons.is_loading(&path));
+        assert!(icons.get(&path, &mut atlas).is_some());
     }
 
     #[test]
@@ -1348,7 +1572,7 @@ mod tests {
         assert!(shell.keys.is_waiting());
         shell.frame_shown(at(17));
         assert!(!shell.keys.is_waiting());
-        shell.tick(ms(400));
+        shell.tick(ms(400), ms(400));
         assert_eq!(shell.home.focused(), Some(2), "the shell repeated");
         assert!(!shell.keys.is_waiting(), "its repeats are not timed");
         let sdl_repeat = Event::KeyDown {
@@ -1683,7 +1907,7 @@ mod tests {
         let _ = burst.frame(t0 + ms(16));
         let mut stats = FrameStats::new(Duration::from_secs(1));
         assert_eq!(stats.record(ms(900)), None);
-        let clock = Clock::new(None);
+        let mut clock = Clock::new(None, None);
         assert!(
             said(|| assert!(!launch_pending(
                 &mut shell,
@@ -1691,7 +1915,7 @@ mod tests {
                 &mut stats,
                 10,
                 ms(16),
-                &clock
+                &mut clock
             )))
             .is_empty(),
             "not due: the burst goes on"
@@ -1703,7 +1927,7 @@ mod tests {
                 &mut stats,
                 10,
                 ms(34),
-                &clock
+                &mut clock
             ));
         });
         assert_eq!(
@@ -1711,7 +1935,10 @@ mod tests {
             "drew 2 frames in 16 ms (avg 16.00 ms, worst 16.00 ms, 10 quads); first 16.00 ms; idle"
         );
         assert!(lines[1].starts_with("launch netflix: answered in "));
-        assert!(burst.finish(0).is_empty(), "the wait for luna is no frame");
+        assert!(
+            burst.finish(0, None).is_empty(),
+            "the wait for luna is no frame"
+        );
         assert_eq!(stats.record(ms(200)), None, "the fps window started again");
     }
 
@@ -1824,8 +2051,8 @@ mod tests {
     fn held_arrows_repeat_through_tick() {
         let mut shell = shell();
         send(&mut shell, down(scancode::RIGHT), 0);
-        shell.tick(ms(400));
-        shell.tick(ms(520));
+        shell.tick(ms(400), ms(400));
+        shell.tick(ms(520), ms(520));
         assert_eq!(shell.home.focused(), Some(3));
     }
 
@@ -1840,7 +2067,7 @@ mod tests {
         let mut shell = shell();
         shell.stamps_from = Some(at(0));
         send(&mut shell, down(scancode::RIGHT), 0);
-        shell.tick(ms(400));
+        shell.tick(ms(400), ms(400));
         assert_eq!(shell.home.focused(), Some(2));
         // Let go at 510; the pass that reads it runs at 525, after the
         // repeat due at 520. The loop's own order (events, then `tick`) is
@@ -1850,7 +2077,7 @@ mod tests {
             scancode: scancode::RIGHT,
         };
         shell.event(up, ms(525), at(510));
-        shell.tick(ms(525));
+        shell.tick(ms(525), ms(525));
         assert_eq!(shell.home.focused(), Some(2), "no repeat after the release");
     }
 
@@ -1863,7 +2090,7 @@ mod tests {
             scancode: scancode::RIGHT,
         };
         shell.event(up, ms(425), at(410));
-        shell.tick(ms(425));
+        shell.tick(ms(425), ms(425));
         assert_eq!(shell.home.focused(), Some(2), "the 400 ms repeat");
     }
 
@@ -1877,7 +2104,7 @@ mod tests {
         for t in (500..=2_950).step_by(50) {
             shell.event(HELD_RIGHT, ms(3_000), at(t));
         }
-        shell.tick(ms(3_000));
+        shell.tick(ms(3_000), ms(3_000));
         assert!(shell.input.is_holding(), "not dropped as stuck");
         assert_eq!(shell.home.focused(), Some(2), "one repeat, not a burst");
     }
@@ -1905,7 +2132,7 @@ mod tests {
     fn the_launch_waits_for_a_frame_that_shows_the_dip() {
         let mut shell = shell();
         let (mut burst, mut stats) = (Burst::default(), FrameStats::new(Duration::from_secs(1)));
-        let clock = Clock::new(None);
+        let mut clock = Clock::new(None, None);
         key(&mut shell, scancode::RETURN, 0);
         // Frames as the loop draws them at 60 Hz: springs stepped to the
         // pass's time, the frame shown, then the launch if it is due.
@@ -1917,7 +2144,7 @@ mod tests {
             let lift = focused_lift(&shell);
             shell.frame_shown(at(n * 17));
             shell.home.frame_drawn();
-            if launch_pending(&mut shell, &mut burst, &mut stats, 0, now, &clock) {
+            if launch_pending(&mut shell, &mut burst, &mut stats, 0, now, &mut clock) {
                 lift_before_launch = Some((n, lift));
                 break;
             }
@@ -1968,18 +2195,18 @@ mod tests {
     #[test]
     fn a_burst_reports_frames_and_times_then_resets() {
         let mut burst = Burst::default();
-        assert!(burst.finish(0).is_empty());
+        assert!(burst.finish(0, None).is_empty());
         let t0 = Instant::now();
         assert_eq!(burst.frame(t0), None, "the first frame has no duration");
         assert_eq!(burst.frame(t0 + ms(16)), Some(ms(16)));
         assert_eq!(burst.frame(t0 + ms(40)), Some(ms(24)));
         assert_eq!(
-            burst.finish(1234),
+            burst.finish(1234, None),
             [
                 "drew 3 frames in 40 ms (avg 20.00 ms, worst 24.00 ms, 1234 quads); first 16.00, 24.00 ms; idle"
             ]
         );
-        assert!(burst.finish(0).is_empty());
+        assert!(burst.finish(0, None).is_empty());
     }
 
     #[test]
@@ -1990,7 +2217,7 @@ mod tests {
             let _ = burst.frame(t0 + ms(n));
         }
         assert_eq!(
-            burst.finish(10),
+            burst.finish(10, None),
             [
                 "drew 5 frames in 73 ms (avg 18.25 ms, worst 24.00 ms, 10 quads); first 16.00, 24.00, 17.00 ms; idle"
             ]
@@ -2002,7 +2229,7 @@ mod tests {
         let mut burst = Burst::default();
         let _ = burst.frame(Instant::now());
         assert_eq!(
-            burst.finish(24),
+            burst.finish(24, None),
             ["drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 24 quads); idle"]
         );
     }
@@ -2044,7 +2271,7 @@ mod tests {
             logged += usize::from(burst.slow_line(took, &swap_only(30)).is_some());
         }
         assert_eq!(logged, 4);
-        let lines = burst.finish(10);
+        let lines = burst.finish(10, None);
         assert_eq!(lines[0], "slow frames: 2 more not logged");
         assert!(
             lines[1].starts_with("drew 7 frames in 180 ms "),

@@ -11,7 +11,10 @@
 //! after frame 1, and frame 3 waits; stage 1 run, 2026-10-22), so the screen
 //! may lag the line by up to two refreshes (33 ms at 60 Hz), more if the
 //! queue is deeper; the remote-to-screen time is measured with a slow-motion
-//! video instead (target 3).
+//! video instead (target 3). With motion paced by vsync, a frame shows its
+//! pass plus one period, so the first frame shown after a press has already
+//! moved; unpaced (`--fixed-dt`, no vsync) it is drawn at the press's own
+//! time and may still show the screen as it was.
 
 use std::time::{Duration, Instant};
 

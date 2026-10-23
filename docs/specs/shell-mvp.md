@@ -239,6 +239,53 @@ never as slow motion.
   slower than 2 px/s (lift: within 0.001, slower than 0.01/s). It then snaps
   exactly onto the target.
 
+### Paced by vsync
+
+With vsync the panel shows one frame a refresh, but the loop does not run at
+that pace. After an idle wait the driver takes a burst's first frames at once
+and makes a later one wait: on the B9, frames 2 and 3 take about 9 and 30 ms,
+two vsyncs together ("Measured on the B9", 14), so they are probably shown
+16.7 ms apart (the slow-motion video is not read yet). Stepped by real time,
+the springs moved 9 ms, then 30 ms: an uneven start to every tap. So with
+vsync and the real clock, motion is paced (`lumen_core::pace`):
+
+* Each frame of a burst shows exactly one period of motion more than the
+  one before.
+* A frame shows its pass's time plus one period, the earliest vsync it can
+  reach. Presses and deadlines go by the pass's time, so a press already
+  moves something in the next frame drawn. Key repeats fall due by real
+  time, never after the pass's time, so motion running ahead fires no
+  repeat before a release.
+* A burst's first frame starts from real time, or from where the last frame
+  left the motion if that is later, so motion never runs back and the first
+  frame always moves. That first frame alone may lead real time by up to
+  three periods, when a press comes just after the screen settled.
+* Real time more than half a period past where the burst's frames usually
+  sit is a missed vsync. "Usually" is the burst's least lag, sampled from
+  frame 4 on, once the queue has filled, and used from frame 5, held
+  between one period ahead and none; before that, none. The missed periods
+  are skipped, whole, and the burst line counts them (`; <K> vsyncs
+  skipped`). A launch ends the burst, so luna's wait is not counted.
+* Motion may lead real time by at most two periods; past that it follows
+  real time.
+* The period: the display mode's rate if it is 24–500 Hz, else 60 Hz.
+  `SDL_webOSGetRefreshRate` is read and logged, never used: the B9 reports
+  LG's frame-rate conversion on (`tv.hw.supportFrc` true, no
+  `tv.hw.SoCOutputFrameRate`; getConfigs, 2026-10-23), so an SDL that reads
+  those answers 120 Hz, the panel's rate, while GL swaps at 60 (hello-gles
+  held 60.0 fps). Both are read at the first idle, not before the first
+  frame, since LG's call may ask luna; pacing starts with the next burst.
+  Logged then, once: `motion paced: …`, with both answers and how long they
+  took.
+* Without vsync, and under `--fixed-dt`, motion follows the loop's clock as
+  before, and the burst line has no skip count.
+
+Pacing changes no timing line: `key … shown after`, `start`, `foreground`,
+`drew`, `slow frame` and `fps` measure from SDL's stamps and the swaps,
+never from the motion clock. The times of the last input that the idle
+heartbeat and the screensaver lines count from are pass times, so they may
+run up to two periods (33 ms at 60 Hz) ahead of real time.
+
 ## Repainting
 
 A settled screen stops repainting. plx-native measured such a screen at
@@ -596,6 +643,31 @@ path, and no upload into an atlas the frame reads (H3); a short warm tail
 after a burst (H1); or, for H4, a burst's first frame time left out, said so
 here, and judged by the video.
 
+Stage 3's first two parts (2026-10-23; not yet run on the TV), from the
+stage-3 spike:
+
+* **Springs stepped by whole vsyncs,** for H4's uneven start ("Motion",
+  "Paced by vsync"). It changes no frame time: the slow-motion video judges
+  it, 10 taps with and 10 without. The burst line counts the vsyncs skipped.
+* **Glyphs made ahead,** for H3. Once, when the screen has stayed settled
+  50 ms after a burst (so the burst's queued frames have gone out) and the
+  shell is visible, every app is painted into a batch that is thrown away.
+  So every title's glyphs (under the tile, on the Top Shelf, as a letter
+  tile, in the status lines) are rasterised and uploaded outside every
+  burst, logged as `warm: <glyphs> glyphs, <uploads> uploads, <KB> KB in
+  <ms> ms`. A press before then puts it off to the next settle. Icons that
+  arrive mid-burst wait for the next idle. Not under `--fixed-dt`, whose
+  frames stay as they were. On the PC, one run of a 12-key walk over the
+  mock grid at 60 Hz steps uploaded 53 times, in 8 of its 12 bursts, cold;
+  warmed, never (`warm_titles_leave_no_upload_for_a_burst`, which asserts
+  the 0).
+
+The TV run checks for no slow frame with an upload (stage 1: 5 of 17), the
+rates in the `motion paced` line, and the `warm` line's cost; a key pressed
+while warm runs waits for it. An atlas that fills mid-burst still clears and
+uploads again. That should be rare: 30 typical titles need 160 glyphs,
+10.1% of the atlas (the stage-3 spike's PC bench), though icons share it.
+
 Not in this plan: Phase 4 items, the held-key speed-up and the start-up
 time (its 923 ms in `draw::Assets` may share a fix with H3; it is a target of
 its own).
@@ -610,10 +682,10 @@ about 31 ms. H3 is confirmed: every slow frame with an upload spent 9–25 ms
 in it. H5 is out for the motion. H1 is against: one frame, not a run of
 them, and the next frame is back at 16.7 ms. H2 stays open for the few real
 mid-burst misses, with nothing uploaded. The slow-motion video of the taps
-has not been read yet. Stage 2 waits; stage 3's design (springs stepped by
-whole vsyncs, uploads kept out of the frame that reads the atlas, and
-whether that also cuts start-up's assets time) is being worked out on the PC
-first.
+has not been read yet. Stage 2 waits. Stage 3 went ahead from a spike on the
+PC: hardware float first ("Measured on the B9", 16), then springs stepped by
+whole vsyncs and glyphs made ahead (the stage-3 paragraph above), not yet
+run on the TV.
 
 ## Input diagnostics
 
@@ -770,6 +842,11 @@ and one worst frame per burst, so the counts are over bursts, not frames.
    20 ms of SDL's stamp on the event: 1–7 ms from a settled screen, 16–20 ms
    when the press came mid-burst. One more came as the window hid and was
    not shown. This assumes LG's SDL stamps an event when it arrives.
+   "Shown" there is the first swap after the press was read. That frame was
+   drawn at the press's own time, so apart from the Top Shelf's title it
+   showed the screen as it was before the press (audit, 2026-10-22). Paced,
+   a frame shows one period after its pass, so the first swap after a press
+   already moves ("Motion", "Paced by vsync"; not yet run on the TV).
 9. **Start-up** (09711d7): the first frame came 1,395 ms after `main()`:
    SDL 163 ms, the GL context 138, `Renderer::new` 59, `draw::Assets` 923
    (the font and the atlas), apps from luna 63, the frame 49. c500289 took
