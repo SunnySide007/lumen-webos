@@ -329,6 +329,14 @@ pub trait Launcher {
   stays std only and gains `clean_title` and a `Launcher` impl for `Box`.
   `luna.rs` loads libluna-service2 and glib through `libloading`, as
   `sdl.rs` loads SDL, so the cross-compile still links no TV library.
+* **The TV build uses the FPU.** The target's default is software float:
+  every float operation is a call into libgcc's integer code. The B9's
+  Cortex-A53 has VFPv4 and NEON, so `shell/.cargo/config.toml` builds the
+  TV target with `-Ctarget-feature=-soft-float,+vfp4,+neon`. Floats still
+  pass in core registers (softfp), so LG's libraries and the prebuilt `std`
+  link as they are. rustc warns that the three features are unstable; the
+  warnings are not lints, so `make check` passes. On the B9 this cut the
+  font set-up from about 930 ms to about 170 ms ("Measured on the B9", 16).
 
 ## Simulator automation
 
@@ -776,6 +784,47 @@ main):
     pointer click (0x401 at 1792645177.3) while the pointer showed, which
     the build ignored. The read in "Input diagnostics" follows from this.
 
+The key diagnostics (6e28bb9) ran on the same set from 2026-10-22 07:52 UTC,
+opened by hand, with the remote's evdev nodes recorded read-only, and stayed
+open until 2026-10-23 01:18 UTC (report:
+`tools/out/archive/tv-check-20261022T074700Z` on main). The hardware-float
+build ran on 2026-10-23 at 01:42 UTC (report:
+`tools/out/archive/tv-check-20261023T013938Z`).
+
+15. **No press is lost between the kernel and the shell.** The Magic
+    Remote's node (`event3`) recorded 95 presses of an arrow, OK or a click.
+    The 75 that came while the shell had the focus all reached it: from the
+    kernel's stamp to the shell's `key down` line, 7 ms on average from a
+    settled screen and 20 ms mid-burst (max 37 ms), where the press waits
+    for the loop's next pass. The other 20 came while LG's launcher, HDMI 1
+    or the screensaver was in front. The gaps with no key while the shell
+    had the focus have no press in the kernel either. Every focus loss with
+    no key (6 of 9) was LG's screensaver: `screensaver request` 109.7–115.6 s
+    after the last input, then `power Screen Saver` and the focus loss
+    within 0.8 s. The press that wakes the TV from it is LG's; the shell
+    never gets it, and has the focus back 0.15–0.23 s later. A click while
+    the pointer showed was taken as OK and launched HDMI 1 (answered in
+    18 ms); an arrow hid the pointer (LG's 485 29 ms later). LG's SDL exports
+    `SDL_webOSCursorVisibility`, `SDL_webOSGetRefreshRate`,
+    `SDL_webOSGetPanelResolution`, `SDL_webOSGetFlashInfo` and
+    `SDL_webOSGetRamInfo`. The luna watch answered from the jail for 17
+    hours. `event1` carries only POWER. On `event3` the pointer showing and
+    hiding are codes 1198 and 1199 (beyond Linux's KEY_MAX, so LG's own),
+    and 773, held 150–200 ms just before each trip through LG's launcher,
+    is probably the Home key; 139 (KEY_MENU) comes with the pointer
+    appearing and is held under 1 ms, so it isn't a press of a button.
+    Motion as in 14: 17 bursts, 16.72 ms on average, 10 with a
+    frame over 25 ms (worst 35.82 ms); 7 of the 14 slow frames were frame 3
+    of a burst from idle. The frame after a launch waits while LG switches
+    to the input (93 and 51 ms) and counts as a normal frame.
+16. **Hardware float** (9456516 with only the build flags above): start-up
+    688 and 524 ms, against 1,312–1,594 ms with software float; `assets`
+    (fontdue outlining Inter's 2,937 glyphs) 163 and 176 ms, against
+    922–983 ms; the heaviest `batch` 2.13 ms against 9.82 ms for the same
+    work (5 glyphs and a 128 KB icon). The missed vsyncs are as before: 10
+    of 16 bursts had a frame over 25 ms, and 9 of the 11 slow frames were
+    frame 3. The owner saw no difference on screen.
+
 Still open:
 
 1. ~~How fast the remote repeats.~~ Answered on 2026-10-22 (7).
@@ -790,18 +839,16 @@ Still open:
    developer-mode apps' icons resolve inside the jail. Reaching the others
    needs root, for example a copy made through Homebrew Channel's `exec`,
    so it needs the owner's OK first.
-5. Why keys stopped reaching the shell after `tools/tv.sh launch`
-   (2026-10-21): none arrived until the Magic Remote's pointer was woken,
-   and the shell sometimes lost focus to LG's UI. In the library build's run
-   it lost focus about two minutes after launch, with no key pressed. B1's
-   run, opened by hand from LG's app list, got keys from the start; the
-   2026-10-22 runs, opened the same way, still lost keys at times (13, 14).
-   The focus losses with no key fit LG's screensaver, and the lost OK was a
-   click; whether the other presses reached the TV at all, the next run's
-   lines and evdev recording decide ("Input diagnostics").
+5. ~~Why keys stopped reaching the shell.~~ Answered on 2026-10-23 (15) for
+   a shell opened by hand: no press is lost between the kernel and the
+   shell. The focus losses with no key are LG's screensaver, the lost OK was
+   a click, and the presses missed in the gaps never reached the kernel.
+   Opening with `tools/tv.sh launch` (2026-10-21: no key until the pointer
+   was woken) was not tried again.
 6. Why most bursts miss a vsync (6). Answered in part on 2026-10-22 (14):
    it is frame 3 of a burst from idle, waiting in the draw call, and uploads
-   into the atlas; the fix is stage 3 of the frame-time plan.
+   into the atlas; the fix is stage 3 of the frame-time plan. Hardware float
+   (16) made the CPU's part faster and left the misses as they were.
 
 ## Not in this spec
 
