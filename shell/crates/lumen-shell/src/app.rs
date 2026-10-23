@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lumen_core::apps::{AppId, Launcher, MockLauncher};
-use lumen_core::home::{BackAtTop, Effect, Home};
+use lumen_core::home::{BackAtTop, Effect, Home, LIFT};
 use lumen_core::input::{Action, Input, Press, action_for, scancode};
 use lumen_core::script::Script;
 
@@ -50,6 +50,9 @@ pub struct Options {
 const SCREENSHOT_AFTER: Duration = Duration::from_millis(1500);
 /// How often a settled screen looks for icons while the loader has some.
 const ICON_POLL: Duration = Duration::from_millis(16);
+/// How long after Select its launch waits: the press pulse's dip is at its
+/// deepest 1/ω of the lift spring after the kick, 33 ms.
+const LAUNCH_AFTER: Duration = Duration::from_nanos((1e9 / LIFT.omega as f64) as u64);
 
 impl Options {
     /// Reads `--exit-after <seconds>`, `--windowed`, `--gles`,
@@ -334,8 +337,12 @@ struct Shell<L: Launcher> {
     /// Why the shell was last hidden, for lines about what it never showed.
     hidden_why: &'static str,
     quit: bool,
-    /// An app to launch once the frame showing the press is on screen.
-    launch_due: Option<AppId>,
+    /// An app to launch, and when on the loop's clock: once the press
+    /// pulse's dip is at its deepest (`LAUNCH_AFTER`) and on screen.
+    launch_due: Option<(AppId, Duration)>,
+    /// The real clock's start, to put SDL's stamps on the loop's clock; none
+    /// under a fixed clock, where an event counts at its pass's time.
+    stamps_from: Option<Instant>,
     /// Presses on their way to the screen (`key …: shown after …` lines).
     keys: KeyTimes,
     /// Coming back to the front, on its way to a frame.
@@ -382,6 +389,7 @@ impl<L: Launcher> Shell<L> {
             hidden_why: "the window was hidden",
             quit: false,
             launch_due: None,
+            stamps_from: None,
             keys: KeyTimes::default(),
             foreground: Foreground::default(),
             since_key: SinceKey::default(),
@@ -424,21 +432,36 @@ impl<L: Launcher> Shell<L> {
         self.pointer = Pointer::Hidden;
     }
 
-    /// Fires the key repeats due by `now`. Runs before each batch of events.
+    /// Fires the key repeats due by `now`. Runs once after each pass's events.
     fn tick(&mut self, now: Duration) {
-        for press in self.input.poll(now) {
+        self.repeats_due(now, now);
+    }
+
+    /// Fires the key repeats that fell due by `due`, a press's or a release's
+    /// stamp, so a release stops the repeats due after it. They act at the
+    /// pass's time `now`, as presses do.
+    fn repeats_due(&mut self, due: Duration, now: Duration) {
+        for press in self.input.poll(due) {
             self.press(press, now);
         }
     }
 
+    /// When SDL stamped an event, on the loop's clock: never after `now`, and
+    /// `now` itself under a fixed clock.
+    fn stamp(&self, at: Instant, now: Duration) -> Duration {
+        self.stamps_from
+            .map_or(now, |start| at.saturating_duration_since(start).min(now))
+    }
+
     fn press(&mut self, press: Press, now: Duration) {
         match self.home.handle(press, now) {
-            // The press pulse goes on screen first: the launch waits for the
-            // frame that shows it (`launch_if_due`), since luna may take a
-            // third of a second to answer and the loop cannot draw meanwhile.
-            // A second Select before that frame launches nothing more.
+            // The press pulse goes on screen first: the launch waits until
+            // the dip is at its deepest and a frame shows it
+            // (`launch_if_due`), since luna may take a third of a second to
+            // answer and the loop cannot draw meanwhile. A second Select
+            // before then launches nothing more.
             Some(Effect::Launch(id)) => {
-                self.launch_due.get_or_insert(id);
+                self.launch_due.get_or_insert((id, now + LAUNCH_AFTER));
             }
             Some(Effect::Exit) => {
                 info!("back on the top row: leaving");
@@ -448,13 +471,18 @@ impl<L: Launcher> Shell<L> {
         }
     }
 
-    /// Launches the app a press asked for, if any; the loop calls this after
-    /// the frame showing the press, or at once when nothing will be drawn.
-    /// `now` reads the loop's clock once luna has answered, so the status
-    /// line's time starts after a launch that took seconds. Returns whether
-    /// it launched.
-    fn launch_if_due(&mut self, now: impl FnOnce() -> Duration) -> bool {
-        let Some(id) = self.launch_due.take() else {
+    /// When the launch a press asked for is due, on the loop's clock.
+    fn launch_due_at(&self) -> Option<Duration> {
+        self.launch_due.as_ref().map(|&(_, due)| due)
+    }
+
+    /// Launches the app a press asked for, if it is due by `now`, the time
+    /// of the frame just shown (or of the pass, when nothing is drawn).
+    /// `answered_at` reads the loop's clock once luna has answered, so the
+    /// status line's time starts after a launch that took seconds. Returns
+    /// whether it launched.
+    fn launch_if_due(&mut self, now: Duration, answered_at: impl FnOnce() -> Duration) -> bool {
+        let Some((id, _)) = self.launch_due.take_if(|(_, due)| *due <= now) else {
             return false;
         };
         let started = Instant::now();
@@ -465,8 +493,15 @@ impl<L: Launcher> Shell<L> {
             timing::launch_line(&id, answered.duration_since(started), &result)
         );
         self.keys.launched(started, answered);
-        self.home.launched(&id, &result, now());
+        self.home.launched(&id, &result, answered_at());
         true
+    }
+
+    /// A launch asked for will not run: the shell was hidden, or is leaving.
+    fn drop_launch(&mut self, why: &str) {
+        if let Some((id, _)) = self.launch_due.take() {
+            info!("{}", timing::launch_dropped_line(&id, why));
+        }
     }
 
     /// `at` is when SDL stamped the event, for the timing lines.
@@ -510,7 +545,14 @@ impl<L: Launcher> Shell<L> {
                 {
                     self.hide_pointer_due = true;
                 }
-                if let Some(press) = self.input.key_down(scancode, repeat, now) {
+                // Held keys and their repeats go by SDL's stamp: a press
+                // first fires the repeats due before it; an SDL repeat read
+                // late, after a stall, still keeps its key alive.
+                let stamp = self.stamp(at, now);
+                if !repeat {
+                    self.repeats_due(stamp, now);
+                }
+                if let Some(press) = self.input.key_down(scancode, repeat, stamp) {
                     // Only presses are timed, not SDL's repeats or the shell's.
                     if !press.repeat {
                         self.keys.pressed(scancode, at);
@@ -528,6 +570,8 @@ impl<L: Launcher> Shell<L> {
                 }
                 self.input(now);
                 self.heard_key(scancode, at);
+                // Only the repeats due before the release fire.
+                self.repeats_due(self.stamp(at, now), now);
                 self.input.key_up(scancode);
             }
             Event::MouseButton { button, down, x, y } => {
@@ -564,13 +608,16 @@ impl<L: Launcher> Shell<L> {
 
     /// A pointer button. Button 1 down is OK, through OK's own path: it is
     /// timed as key 40, counts as a key for the focus lines, and launches
-    /// after the frame that shows the press. Other buttons are only logged.
+    /// once a frame shows the press pulse's dip. Other buttons are only
+    /// logged.
     fn mouse_button(&mut self, button: u8, down: bool, x: i32, y: i32, now: Duration, at: Instant) {
         self.input(now);
+        let stamp = self.stamp(at, now);
         if !down {
             info!("mouse button {button} up at {x},{y}");
             self.since_key.other();
             if button == 1 {
+                self.repeats_due(stamp, now);
                 self.input.key_up(scancode::RETURN);
             }
             return;
@@ -583,7 +630,8 @@ impl<L: Launcher> Shell<L> {
         info!("mouse button 1 down at {x},{y}: taken as OK");
         self.since_key.key(at);
         self.show("a click", at);
-        if let Some(press) = self.input.key_down(scancode::RETURN, false, now) {
+        self.repeats_due(stamp, now);
+        if let Some(press) = self.input.key_down(scancode::RETURN, false, stamp) {
             self.keys.pressed(scancode::RETURN, at);
             self.press(press, now);
         }
@@ -635,6 +683,8 @@ impl<L: Launcher> Shell<L> {
         if let Some(line) = self.foreground.not_shown(at, why) {
             info!("{line}");
         }
+        // Launched now, the app would open over whatever hid the shell.
+        self.drop_launch(why);
     }
 
     fn show(&mut self, cause: &'static str, at: Instant) {
@@ -664,11 +714,13 @@ impl<L: Launcher> Shell<L> {
         }
     }
 
-    /// The loop is ending; no frame will show what still waits.
+    /// The loop is ending; no frame will show what still waits, and no
+    /// launch still waiting runs.
     fn leaving(&mut self, at: Instant) {
         for line in self.keys.not_shown(at, "the shell is leaving") {
             info!("{line}");
         }
+        self.drop_launch("the shell is leaving");
     }
 
     /// Whether the next pass of the loop draws a frame.
@@ -771,6 +823,7 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
     let mut shell = Shell::new(launcher(), clock.now());
     start.mark(Phase::Apps, Instant::now());
     shell.can_hide_pointer = sdl.can_hide_pointer();
+    shell.stamps_from = (!clock.is_fixed()).then_some(clock.start);
     // The luna watch (power state, the app in front, screensaver requests)
     // runs on its own thread for the life of the loop and stops when this
     // drops, after the loop. Nothing to watch off the TV, and nothing under
@@ -792,13 +845,28 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
             sdl.poll_event()
         } else {
             shell.nothing_to_draw(Instant::now());
-            for line in burst.finish(batch.quad_count()) {
+            let burst_lines = burst.finish(batch.quad_count());
+            for line in &burst_lines {
                 info!("{line}");
             }
+            // GL's error flag holds until read. Each `fps` line reads it too,
+            // but a burst shorter than a second gives none, so read it here.
+            if !burst_lines.is_empty() {
+                let err = renderer.gl().error();
+                if err != gl::NO_ERROR {
+                    info!("GL error {err:#x}");
+                }
+            }
+            // Drawing stopped: the next `fps` window starts with the next
+            // burst, so it never spans an idle wait or a hide.
+            stats.reset();
             // Deadlines on the loop's clock; --exit-after is in real time.
             let next = [
                 shell.input.next_deadline(),
                 shell.home.next_deadline(),
+                // A launch waiting for its press's dip, should the screen
+                // settle first.
+                shell.launch_due_at(),
                 script.as_ref().and_then(Script::next_deadline),
                 // Only while it can be drawn: a hidden shell must not spin.
                 screenshot
@@ -829,7 +897,6 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
             }
         };
         let now = clock.now();
-        shell.tick(now);
         if let Some(script) = script.as_mut() {
             for key in script.due(now) {
                 let event = if key.down {
@@ -852,6 +919,9 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
         while let Some((event, at)) = sdl.poll_event() {
             shell.event(event, now, at);
         }
+        // After the events: a press or a release fired the repeats due
+        // before its own stamp, so a key let go just now fires none after.
+        shell.tick(now);
         if shell.take_pointer_hide() && sdl.set_pointer_visible(false) {
             shell.pointer_hidden();
         }
@@ -888,8 +958,16 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
             shell.home.mark_dirty();
         }
         if !shell.wants_frame() {
-            // No frame to wait for, so a launch asked for goes now.
-            launch_pending(&mut shell, &mut burst, batch.quad_count(), &clock);
+            // No frame to draw: a launch goes once its time has come, and
+            // until then it is one of the idle deadlines.
+            launch_pending(
+                &mut shell,
+                &mut burst,
+                &mut stats,
+                batch.quad_count(),
+                now,
+                &clock,
+            );
             continue;
         }
 
@@ -965,8 +1043,16 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
                 info!("GL error {err:#x}");
             }
         }
-        // The press is on screen now, so its launch may block the loop.
-        launch_pending(&mut shell, &mut burst, batch.quad_count(), &clock);
+        // A frame drawn at `now` is on screen: once that is past the dip's
+        // deepest point, the launch may block the loop.
+        launch_pending(
+            &mut shell,
+            &mut burst,
+            &mut stats,
+            batch.quad_count(),
+            now,
+            &clock,
+        );
     }
     shell.leaving(Instant::now());
     if let Some(start) = start_line.take() {
@@ -979,20 +1065,25 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
     Ok(())
 }
 
-/// Launches what a press asked for, if anything. The burst ends first, so
-/// the time luna takes to answer is not counted as a frame.
+/// Launches what a press asked for, if it is due by `now`. The burst and the
+/// `fps` window end first, so the time luna takes to answer is not counted
+/// as a frame. Returns whether it launched.
 fn launch_pending<L: Launcher>(
     shell: &mut Shell<L>,
     burst: &mut Burst,
+    stats: &mut FrameStats,
     quads: usize,
+    now: Duration,
     clock: &Clock,
-) {
-    if shell.launch_due.is_some() {
-        for line in burst.finish(quads) {
-            info!("{line}");
-        }
-        shell.launch_if_due(|| clock.now());
+) -> bool {
+    if !shell.launch_due_at().is_some_and(|due| due <= now) {
+        return false;
     }
+    for line in burst.finish(quads) {
+        info!("{line}");
+    }
+    stats.reset();
+    shell.launch_if_due(now, || clock.now())
 }
 
 /// The TV's apps through luna; the simulator's mock list on a PC, or on the
@@ -1186,7 +1277,11 @@ mod tests {
         key(&mut shell, scancode::RIGHT, 0);
         assert_eq!(shell.home.focused(), Some(1));
         key(&mut shell, scancode::RETURN, 100);
-        assert!(shell.launch_if_due(|| ms(120)));
+        assert!(
+            !shell.launch_if_due(ms(120), || ms(120)),
+            "not before the dip"
+        );
+        assert!(shell.launch_if_due(ms(134), || ms(134)));
         assert_eq!(shell.launcher.launched(), &[AppId::new("amazon")]);
         assert_eq!(shell.home.view().status, Some("Opening Prime Video"));
         assert!(!shell.quit);
@@ -1200,17 +1295,25 @@ mod tests {
         assert!(shell.wants_frame(), "the press pulse is drawn first");
         shell.frame_shown(at(17));
         assert!(!shell.keys.is_waiting(), "the press is on screen");
-        assert!(shell.launch_if_due(|| ms(17)));
+        assert!(
+            !shell.launch_if_due(ms(17), || ms(17)),
+            "the dip is not deepest yet"
+        );
+        assert!(shell.launch_if_due(ms(34), || ms(34)));
         assert_eq!(shell.launcher.launched(), &[AppId::new("netflix")]);
-        assert!(!shell.launch_if_due(|| ms(34)), "one launch per press");
+        assert!(
+            !shell.launch_if_due(ms(50), || ms(50)),
+            "one launch per press"
+        );
     }
 
     #[test]
-    fn a_second_ok_before_the_frame_launches_once() {
+    fn a_second_ok_before_the_launch_launches_once_on_the_first_ones_time() {
         let mut shell = shell();
         key(&mut shell, scancode::RETURN, 0);
         key(&mut shell, scancode::RETURN, 5);
-        assert!(shell.launch_if_due(|| ms(17)));
+        assert!(shell.launch_if_due(ms(34), || ms(34)));
+        assert!(!shell.launch_if_due(ms(50), || ms(50)));
         assert_eq!(shell.launcher.launched(), &[AppId::new("netflix")]);
     }
 
@@ -1234,7 +1337,7 @@ mod tests {
     fn a_failed_launch_says_so() {
         let mut shell = Shell::new(MockLauncher::default().failing_on("netflix"), ms(0));
         key(&mut shell, scancode::RETURN, 0);
-        assert!(shell.launch_if_due(|| ms(17)));
+        assert!(shell.launch_if_due(ms(34), || ms(34)));
         assert_eq!(shell.home.view().status, Some("Could not open Netflix"));
     }
 
@@ -1293,7 +1396,8 @@ mod tests {
         assert!(shell.keys.is_waiting(), "timed like a press");
         let shown = said(|| shell.frame_shown(at(17)));
         assert_eq!(shown, ["key 40: shown after 17 ms"]);
-        assert!(shell.launch_if_due(|| ms(17)));
+        assert!(!shell.launch_if_due(ms(17), || ms(17)), "OK's own wait");
+        assert!(shell.launch_if_due(ms(34), || ms(34)));
         assert_eq!(shell.launcher.launched(), &[AppId::new("netflix")]);
         assert!(!shell.input.is_holding(), "the up released it");
     }
@@ -1465,8 +1569,8 @@ mod tests {
     fn a_launch_then_background_leaves_the_press_unshown() {
         let mut shell = shell();
         key(&mut shell, scancode::RETURN, 0);
-        // Nothing drawn: the launch goes at once, then the app is put away.
-        assert!(shell.launch_if_due(|| ms(1)));
+        // No frame shows the press before the launch; then the app is put away.
+        assert!(shell.launch_if_due(ms(34), || ms(34)));
         assert!(shell.keys.is_waiting());
         send(&mut shell, Event::Background, 320);
         assert!(!shell.keys.is_waiting(), "settled as not shown");
@@ -1522,7 +1626,7 @@ mod tests {
         let lines = said(|| {
             key(&mut shell, scancode::RETURN, 0);
             shell.frame_shown(at(17));
-            shell.launch_if_due(|| ms(17));
+            shell.launch_if_due(ms(34), || ms(34));
             send(&mut shell, Event::Background, 335);
         });
         assert_eq!(
@@ -1555,9 +1659,9 @@ mod tests {
         shell.home.frame_drawn();
         shell.event(down(scancode::RETURN), ms(0), Instant::now());
         let lines = said(|| {
-            // Nothing drawn, so the launch goes at once and blocks for 5 ms.
-            shell.launch_if_due(|| ms(5));
-            shell.event(Event::Background, ms(6), Instant::now());
+            // No frame shows the press before the launch, which blocks 5 ms.
+            shell.launch_if_due(ms(34), || ms(39));
+            shell.event(Event::Background, ms(40), Instant::now());
         });
         let line = lines
             .iter()
@@ -1577,13 +1681,38 @@ mod tests {
         let t0 = Instant::now();
         let _ = burst.frame(t0);
         let _ = burst.frame(t0 + ms(16));
-        let lines = said(|| launch_pending(&mut shell, &mut burst, 10, &Clock::new(None)));
+        let mut stats = FrameStats::new(Duration::from_secs(1));
+        assert_eq!(stats.record(ms(900)), None);
+        let clock = Clock::new(None);
+        assert!(
+            said(|| assert!(!launch_pending(
+                &mut shell,
+                &mut burst,
+                &mut stats,
+                10,
+                ms(16),
+                &clock
+            )))
+            .is_empty(),
+            "not due: the burst goes on"
+        );
+        let lines = said(|| {
+            assert!(launch_pending(
+                &mut shell,
+                &mut burst,
+                &mut stats,
+                10,
+                ms(34),
+                &clock
+            ));
+        });
         assert_eq!(
             lines[0],
             "drew 2 frames in 16 ms (avg 16.00 ms, worst 16.00 ms, 10 quads); first 16.00 ms; idle"
         );
         assert!(lines[1].starts_with("launch netflix: answered in "));
         assert!(burst.finish(0).is_empty(), "the wait for luna is no frame");
+        assert_eq!(stats.record(ms(200)), None, "the fps window started again");
     }
 
     #[test]
@@ -1698,6 +1827,142 @@ mod tests {
         shell.tick(ms(400));
         shell.tick(ms(520));
         assert_eq!(shell.home.focused(), Some(3));
+    }
+
+    const HELD_RIGHT: Event = Event::KeyDown {
+        scancode: scancode::RIGHT,
+        keycode: 0,
+        repeat: true,
+    };
+
+    #[test]
+    fn letting_go_just_before_a_repeat_fires_no_repeat() {
+        let mut shell = shell();
+        shell.stamps_from = Some(at(0));
+        send(&mut shell, down(scancode::RIGHT), 0);
+        shell.tick(ms(400));
+        assert_eq!(shell.home.focused(), Some(2));
+        // Let go at 510; the pass that reads it runs at 525, after the
+        // repeat due at 520. The loop's own order (events, then `tick`) is
+        // not reachable from here: this pins that the release itself fires
+        // nothing after its stamp.
+        let up = Event::KeyUp {
+            scancode: scancode::RIGHT,
+        };
+        shell.event(up, ms(525), at(510));
+        shell.tick(ms(525));
+        assert_eq!(shell.home.focused(), Some(2), "no repeat after the release");
+    }
+
+    #[test]
+    fn a_repeat_due_before_the_release_still_fires() {
+        let mut shell = shell();
+        shell.stamps_from = Some(at(0));
+        send(&mut shell, down(scancode::RIGHT), 0);
+        let up = Event::KeyUp {
+            scancode: scancode::RIGHT,
+        };
+        shell.event(up, ms(425), at(410));
+        shell.tick(ms(425));
+        assert_eq!(shell.home.focused(), Some(2), "the 400 ms repeat");
+    }
+
+    #[test]
+    fn a_held_key_outlives_a_stall_with_its_sdl_repeats_queued() {
+        let mut shell = shell();
+        shell.stamps_from = Some(at(0));
+        send(&mut shell, down(scancode::RIGHT), 0);
+        // The loop was blocked for 3 s (a launch, say) while SDL queued its
+        // repeats, every 50 ms from 500 ms on.
+        for t in (500..=2_950).step_by(50) {
+            shell.event(HELD_RIGHT, ms(3_000), at(t));
+        }
+        shell.tick(ms(3_000));
+        assert!(shell.input.is_holding(), "not dropped as stuck");
+        assert_eq!(shell.home.focused(), Some(2), "one repeat, not a burst");
+    }
+
+    #[test]
+    fn a_stamp_after_the_pass_counts_at_the_pass() {
+        let mut shell = shell();
+        assert_eq!(shell.stamp(at(40), ms(25)), ms(25), "no clock: the pass");
+        shell.stamps_from = Some(at(0));
+        assert_eq!(shell.stamp(at(10), ms(25)), ms(10));
+        assert_eq!(shell.stamp(at(40), ms(25)), ms(25), "clamped");
+    }
+
+    /// The focused tile's lift in a frame drawn now.
+    fn focused_lift<L: Launcher>(shell: &Shell<L>) -> f32 {
+        let view = shell.home.view();
+        view.tiles
+            .iter()
+            .find(|tile| tile.focused)
+            .expect("a focused tile")
+            .lift
+    }
+
+    #[test]
+    fn the_launch_waits_for_a_frame_that_shows_the_dip() {
+        let mut shell = shell();
+        let (mut burst, mut stats) = (Burst::default(), FrameStats::new(Duration::from_secs(1)));
+        let clock = Clock::new(None);
+        key(&mut shell, scancode::RETURN, 0);
+        // Frames as the loop draws them at 60 Hz: springs stepped to the
+        // pass's time, the frame shown, then the launch if it is due.
+        let mut lift_before_launch = None;
+        for n in 0..10_u64 {
+            let now = Duration::from_micros(n * 16_667);
+            shell.home.advance_to(now);
+            assert!(shell.wants_frame(), "frame {n}");
+            let lift = focused_lift(&shell);
+            shell.frame_shown(at(n * 17));
+            shell.home.frame_drawn();
+            if launch_pending(&mut shell, &mut burst, &mut stats, 0, now, &clock) {
+                lift_before_launch = Some((n, lift));
+                break;
+            }
+            assert!(shell.launcher.launched().is_empty(), "frame {n}");
+        }
+        let (n, lift) = lift_before_launch.expect("launched within 10 frames");
+        assert_eq!(n, 2, "the frame at 33.3 ms");
+        assert!(lift < 0.8, "the last frame before the launch dips: {lift}");
+        assert_eq!(shell.launcher.launched(), &[AppId::new("netflix")]);
+    }
+
+    #[test]
+    fn a_launch_asked_for_just_before_a_hide_is_dropped() {
+        let mut shell = shell();
+        let lines = said(|| {
+            key(&mut shell, scancode::RETURN, 0);
+            send(&mut shell, Event::Window(sdl::window::HIDDEN), 5);
+        });
+        assert!(
+            lines.contains(&"launch netflix: dropped: the window was hidden".to_owned()),
+            "{lines:?}"
+        );
+        assert!(!shell.launch_if_due(ms(100), || ms(100)));
+        assert!(
+            shell.launcher.launched().is_empty(),
+            "nothing over LG's Home"
+        );
+    }
+
+    #[test]
+    fn a_launch_asked_for_just_before_leaving_is_dropped_with_a_line() {
+        let mut shell = shell();
+        key(&mut shell, scancode::RETURN, 0);
+        key(&mut shell, scancode::WEBOS_BACK, 1);
+        assert!(shell.quit, "BACK on the top row");
+        let lines = said(|| shell.leaving(at(2)));
+        assert_eq!(
+            lines,
+            [
+                "key 40: not shown after 2 ms: the shell is leaving",
+                "key 482: not shown after 1 ms: the shell is leaving",
+                "launch netflix: dropped: the shell is leaving",
+            ]
+        );
+        assert!(shell.launcher.launched().is_empty());
     }
 
     #[test]

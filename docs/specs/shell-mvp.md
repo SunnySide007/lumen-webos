@@ -76,6 +76,13 @@ x=         80         440        800        1160       1520 (to 1840)
   settings. SDL's repeats only show that a key is still held.
 * A key-down for a key that is already down is ignored (remotes may resend).
   A key-up with no key-down is ignored.
+* Held keys go by SDL's stamp on each key event, not by when the loop read
+  it: a release fires the repeats due before it and none due after, and an
+  SDL repeat read late, after the loop was blocked, still keeps its key held.
+  Under `--fixed-dt` an event counts at its pass's time. This assumes LG's
+  SDL stamps an event when it arrives ("Measured on the B9", 8); if it
+  stamps when the loop reads it, the shell behaves as before. Not yet run on
+  the TV.
 * When the window loses focus or the app goes to the background, held keys
   are dropped without firing.
 * **A lost release cannot scroll forever:** a held key that has had neither
@@ -124,7 +131,7 @@ BACK did nothing on the TV: it read the state byte as the scancode.
 |---|---|
 | Left, Right | Move along the row. At either end the focused tile bumps; focus does not wrap. |
 | Up, Down | Move to the same column in the next row, or to that row's last tile if it is shorter. Up on row 0 and Down on the last row bump. |
-| Select | Launch the focused app. The tile dips (a press pulse) and the status line says what opened, or that it could not. |
+| Select | Launch the focused app. The tile dips (a press pulse) and the status line says what opened, or that it could not. The launch waits until the dip is at its deepest, 33 ms after the press (1/ω of the lift spring), and a frame shows it, since luna blocks the loop while it answers. If the shell is hidden or leaves first, the launch is dropped with `launch <id>: dropped: <why>` (`<why>` as in the `not shown` lines). |
 | Back | Below row 0: focus row 0, same column, and scroll to the top. On row 0: leave the shell (see below). |
 
 * Moves follow tvOS's geometry: there is no remembered column, so Down into a
@@ -227,11 +234,22 @@ about 0.2% of one core on the B9 ("Measured on the B9").
   still moving.
 * After the last frame of a burst the shell blocks in `SDL_WaitEventTimeout`
   until an event or the next deadline: a key repeat, the stuck-key timeout,
-  the status line's expiry, a scripted key, or `--exit-after`. With no
-  deadline it waits without a timeout.
+  the status line's expiry, a launch waiting for its press's dip, a scripted
+  key, `--screenshot`'s frame, every 16 ms while icons are on their way
+  ("Apps and launching"), the idle heartbeat ("Input diagnostics"), or
+  `--exit-after`. The screenshot and icon deadlines count only while the
+  shell is shown, and the heartbeat not under `--fixed-dt`. With no deadline
+  it waits without a timeout.
 * Each burst ends with one log line: frames drawn, how long the burst took,
   average and worst frame time, then "idle". Frame statistics never include
   the idle wait.
+* The once-a-second `fps` line adds up frame times within a burst. Its window
+  starts again whenever a burst ends: the screen settles, drawing stops (a
+  hide) or a launch begins. So it never spans an idle wait, a hide or a
+  launch, and the frames at a burst's end that do not fill a second give no
+  line (the burst's own line covers them). GL's error flag is read with
+  each `fps` line and when the screen settles after a burst, and logged as
+  `GL error <code>` if set.
 
 ### In the background, nothing is drawn
 
@@ -625,7 +643,7 @@ no input for <N> s; focused <yes|no>; pointer <shown|hidden>; power <state|unkno
   is an input-device id ("Still open", 3).
 * **A click is OK.** Pointer button 1 down goes through Select's own path:
   it is timed as `key 40: shown after N ms`, counts as a key for the focus
-  lines, shows the press pulse first and launches after that frame. Its
+  lines, and launches once a frame shows the pulse's dip (Navigation). Its
   release releases the key. Other buttons are logged and ignored. The
   position is logged, not used: nothing is pointed at.
 * **Arrows hide the pointer** when LG's SDL exports
@@ -713,7 +731,7 @@ The B2/B3 builds ran on the same set on 2026-10-22, opened by hand from LG's
 app list with the owner on the remote: commit c500289 (B3 through the
 library) with Phase 1's DNS capture running, then 09711d7 (branch
 `claude/shell-timing`: the timing lines in look-and-feel.md, and the launch
-called after the pulse frame) with nothing else of ours running. Each run's
+called after one frame) with nothing else of ours running. Each run's
 window runs from the log's own first to last arrow. The log keeps one average
 and one worst frame per burst, so the counts are over bursts, not frames.
 
@@ -725,8 +743,9 @@ and one worst frame per burst, so the counts are over bursts, not frames.
    28–34 ms) and while Down scrolls (33–35 ms); holding Up stayed at
    17.8–18.3 ms. Frames drew 24–104 quads, against B1's 856–1,631, so the
    cost is in the pixels, not the vertices. Which frame of a burst is the slow
-   one, the log doesn't say. (The once-a-second `fps` line keeps its worst
-   frame across a hide; the burst lines don't.)
+   one, the log doesn't say. (In these builds the once-a-second `fps` line
+   kept its worst frame across any stop, a hide, an idle wait or a launch;
+   the burst lines don't. It now starts again at each burst: "Repainting".)
 7. **The remote repeats** a held key first after about 505 ms (491–522),
    then every 50 ms (26–68), over 16 holds. The shell's own repeat, 400 ms
    then 120 ms, is what sets the pace.
@@ -740,11 +759,14 @@ and one worst frame per burst, so the counts are over bursts, not frames.
    1,197 ms.
 10. **Launching.** c500289 called `launch` inside the key handler: HDMI 1
     answered in 320 ms and no frame of the press pulse was drawn. 09711d7
-    draws the pulse frame first, 1 ms after OK, then calls: HDMI 1 answered
-    in 18 ms and Homebrew Channel in 573 ms. Launching HDMI 1 sent `window
-    minimized`, two app-background events and a focus loss, all within 1 ms
-    and 180 ms after OK; the swap before them took 154 ms. HOME, by
-    contrast, sends only a focus loss (2).
+    draws one frame first, 1 ms after OK, then calls: HDMI 1 answered in
+    18 ms and Homebrew Channel in 573 ms. That frame shows no dip, though: it
+    is drawn at the press's own time, when the kick has not moved the tile
+    yet (audit, 2026-10-22). Since then the launch waits for the frame at
+    the dip's deepest, 33 ms after the press (Navigation); not yet run on
+    the TV. Launching HDMI 1 sent `window minimized`, two app-background
+    events and a focus loss, all within 1 ms and 180 ms after OK; the swap
+    before them took 154 ms. HOME, by contrast, sends only a focus loss (2).
 11. **Coming back to the front:** picking the running shell from LG's app
     list sent `window restored`, then the did-enter-foreground event, then
     `focus gained` 350 ms later; the first frame came 170 ms after the

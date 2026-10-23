@@ -87,9 +87,10 @@ impl Input {
         Self::default()
     }
 
-    /// A key went down at `now`. Returns the action it fires, if any. Call
-    /// `poll(now)` before each batch of key events, so repeats that fell due
-    /// first are not lost to a release.
+    /// A key went down at `now`. Returns the action it fires, if any. Give
+    /// each key event its own time (when it happened, not when it was read),
+    /// and call `poll` at a press's or a release's time before it, so the
+    /// repeats that fell due first fire, and none due after a release does.
     #[must_use]
     pub fn key_down(&mut self, code: i32, sdl_repeat: bool, now: Duration) -> Option<Press> {
         // A key quiet for STUCK_AFTER was released, even if no poll said so yet.
@@ -229,6 +230,17 @@ mod tests {
         input.key_up(scancode::RIGHT);
         assert_eq!(input.poll(ms(760)), vec![]);
         assert_eq!(input.next_deadline(), None);
+    }
+
+    #[test]
+    fn polled_at_the_release_a_repeat_due_after_it_never_fires() {
+        let mut input = Input::new();
+        let _ = input.key_down(scancode::RIGHT, false, ms(0));
+        assert_eq!(input.poll(ms(400)).len(), 1);
+        // Released at 510, read at 525: the repeat due at 520 is not owed.
+        assert_eq!(input.poll(ms(510)), vec![]);
+        input.key_up(scancode::RIGHT);
+        assert_eq!(input.poll(ms(525)), vec![]);
     }
 
     #[test]

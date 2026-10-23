@@ -162,8 +162,9 @@ fn read_u32(bytes: &[u8], at: usize) -> u32 {
 }
 
 /// Decodes the parts of an `SDL_Event` the shell uses. Window events are read
-/// at upstream's offsets (the `event` byte at 12) until a TV log shows LG
-/// moved those too; app-lifecycle events carry nothing beyond their type.
+/// at upstream's offsets (the `event` byte at 12): the B9's do not move them
+/// (B1 run, 2026-10-20; shell-mvp.md, "Measured on the B9", 2). App-lifecycle
+/// events carry nothing beyond their type.
 /// Mouse events are at upstream's offsets in both layouts: the B9's own
 /// 0x400, 0x401 and 0x402 events (2026-10-22) have `which` at 12, the button
 /// at 16, its state at 17 and `x`,`y` at 20 and 24, as `SDL_MouseButtonEvent`
@@ -196,10 +197,10 @@ pub fn parse_event(raw: &RawEvent, layout: KeyLayout) -> Event {
     }
 }
 
-/// A window event's `SDL_WindowEventID`, at byte 12 upstream. Under LG's
-/// layout byte 12 might instead be the low byte of LG's extra field; 0 is
-/// never a real ID (`SDL_WINDOWEVENT_NONE`), so then byte 16, where a 4-byte
-/// shift would put it, is read instead.
+/// A window event's `SDL_WindowEventID`, at byte 12 in both layouts, as the
+/// B9 sends it. The byte-16 fallback for a 0 under LG's layout dates from
+/// before that was known; it never runs, since 0 (`SDL_WINDOWEVENT_NONE`) is
+/// never sent.
 fn window_id(bytes: &[u8], layout: KeyLayout) -> u8 {
     match (layout, bytes[12]) {
         (KeyLayout::Lg, 0) => bytes[16],

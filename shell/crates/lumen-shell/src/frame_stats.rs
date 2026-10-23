@@ -44,10 +44,16 @@ impl FrameStats {
             max_ms: self.worst.as_secs_f64() * 1000.0,
             frames: self.frames,
         };
+        self.reset();
+        Some(report)
+    }
+
+    /// Starts a new window, dropping what the current one holds without a
+    /// report: drawing stopped, so the next frame does not follow these.
+    pub fn reset(&mut self) {
         self.elapsed = Duration::ZERO;
         self.frames = 0;
         self.worst = Duration::ZERO;
-        Some(report)
     }
 }
 
@@ -91,5 +97,24 @@ mod tests {
             .expect("100 ms recorded");
         assert!((second.max_ms - 80.0).abs() < 1e-9);
         assert_eq!(second.frames, 2);
+    }
+
+    #[test]
+    fn a_reset_starts_a_fresh_window() {
+        let mut stats = FrameStats::new(Duration::from_millis(100));
+        stats.record(Duration::from_millis(60));
+        stats.record(Duration::from_millis(30));
+        stats.reset();
+        assert_eq!(
+            stats.record(Duration::from_millis(40)),
+            None,
+            "40 ms of 100"
+        );
+        let report = stats
+            .record(Duration::from_millis(60))
+            .expect("100 ms recorded");
+        assert_eq!(report.frames, 2);
+        assert!((report.max_ms - 60.0).abs() < 1e-9);
+        assert!((report.avg_ms - 50.0).abs() < 1e-9);
     }
 }

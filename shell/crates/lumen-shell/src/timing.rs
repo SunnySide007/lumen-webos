@@ -6,9 +6,12 @@
 //! logs them.
 //!
 //! "Shown" means `SDL_GL_SwapWindow` returned. With vsync the frame is then
-//! queued, not yet on the panel, so the screen may lag the line by up to one
-//! refresh (16.7 ms at 60 Hz); the remote-to-screen time is measured with a
-//! slow-motion video instead (target 3).
+//! queued, not yet on the panel. On the B9 the queue holds at least two
+//! frames (a burst's first two go in without a wait, frame 2 about 9 ms
+//! after frame 1, and frame 3 waits; stage 1 run, 2026-10-22), so the screen
+//! may lag the line by up to two refreshes (33 ms at 60 Hz), more if the
+//! queue is deeper; the remote-to-screen time is measured with a slow-motion
+//! video instead (target 3).
 
 use std::time::{Duration, Instant};
 
@@ -115,6 +118,12 @@ pub fn launch_line(id: &AppId, took: Duration, result: &Result<(), LaunchError>)
     }
 }
 
+/// `launch <id>: dropped: <why>`: a launch asked for but never called, since
+/// the shell was hidden or left first. `why` is one of the `not shown` lines'.
+pub fn launch_dropped_line(id: &AppId, why: &str) -> String {
+    format!("launch {id}: dropped: {why}")
+}
+
 /// A frame longer than this gets a `slow frame` line: a frame and a half at
 /// 60 Hz, the same limit as `tools/frame-stats.sh`'s `--miss-ms` default for a
 /// missed vsync (kept equal by hand).
@@ -143,15 +152,19 @@ impl Faults {
 /// `--screenshot` runs, saving one) is its `loop` part. A launch never is:
 /// it ends the burst first, so the frame after it is untimed.
 ///
-/// The swap can wait for work an earlier frame handed to the GPU, so a slow
-/// swap is not always its own frame's cost.
+/// The wait for a free buffer can land in `submit` or in the swap, and may be
+/// for work an earlier frame handed to the GPU, so a slow part is not always
+/// its own frame's cost.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct FrameSplit {
     /// Building the frame's batch (`draw::home`), glyphs rasterised included.
     pub batch: Duration,
     /// Copying new atlas pixels into the texture.
     pub upload: Duration,
-    /// Handing the batch to GL.
+    /// Handing the batch to GL. On the B9 (OLED55B9PUA, firmware 05.50.00,
+    /// webOS 4.10.2, Mali-T820) the wait for a free buffer, so for the next
+    /// vsync, lands here, not in the swap: slow frames spent p50 29.16 ms here
+    /// and at most 1.80 ms in the swap (stage 1 run, 2026-10-22).
     pub submit: Duration,
     /// Inside `SDL_GL_SwapWindow`.
     pub swap: Duration,
@@ -593,6 +606,15 @@ mod tests {
         assert_eq!(
             launch_line(&id, ms(5003), &err),
             "launch netflix: failed after 5003 ms: no reply in 5000 ms"
+        );
+    }
+
+    #[test]
+    fn a_dropped_launch_line_says_why() {
+        let id = AppId::new("netflix");
+        assert_eq!(
+            launch_dropped_line(&id, "the window was hidden"),
+            "launch netflix: dropped: the window was hidden"
         );
     }
 
