@@ -39,6 +39,7 @@ ipk: build-tv
 	rm -rf dist/stage
 	mkdir -p $(STAGE)
 	install -m 0755 $(BIN) $(STAGE)/lumen-shell
+	install -m 0755 packaging/shell/lumen-icons.sh $(STAGE)/
 	install -m 0644 packaging/shell/icon80.png packaging/shell/icon130.png $(STAGE)/
 	install -m 0644 shell/assets/fonts/Inter-LICENSE.txt $(STAGE)/
 	sed -e 's/@APP_ID@/$(APP_ID)/' -e 's/@VERSION@/$(VERSION)/' \
@@ -58,7 +59,8 @@ lint:
 	cd shell && cargo fmt --check
 	cd shell && cargo clippy --all-targets -- -D warnings
 	cd shell && cargo clippy --release --target $(TARGET) --all-targets -- -D warnings
-	shellcheck tools/*.sh tools/recon/*.sh tools/capture/*.sh profiles/glasshouse/*.sh .githooks/pre-push
+	shellcheck tools/*.sh tools/recon/*.sh tools/capture/*.sh profiles/glasshouse/*.sh \
+	    packaging/shell/*.sh .githooks/pre-push
 
 check: lint test
 

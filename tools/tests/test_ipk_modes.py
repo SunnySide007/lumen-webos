@@ -128,6 +128,21 @@ class FixModesTest(unittest.TestCase):
         self.assertEqual(new[1:], old[1:], name)
         self.assertEqual(new[6], T0 + 0.5)
 
+    def test_a_script_root_runs_is_written_only_by_its_owner(self):
+        # lumen-icons.sh runs as root through Homebrew Channel's exec, so
+        # nothing but root may change it, whatever mode it was staged with.
+        data = tar_gz([
+            (f'{APP}/lumen-icons.sh', 0o777, b'#!/bin/sh\n'),
+            (f'{APP}/plain.sh', 0o666, b'#!/bin/sh\n'),
+        ])
+        fixed, changed = fix_ipk(ipk([('debian-binary', b'2.0\n'),
+                                      ('control.tar.gz', tar_gz([])),
+                                      ('data.tar.gz', data)]))
+        modes = {name: e[0] for name, e in entries(fixed, 'data.tar.gz').items()}
+        self.assertEqual(modes[f'{APP}/lumen-icons.sh'], 0o755)
+        self.assertEqual(modes[f'{APP}/plain.sh'], 0o644)
+        self.assertEqual(changed, 2)
+
     def test_running_twice_changes_nothing_more(self):
         once, _ = fix_ipk(ares_like_ipk())
         twice, changed = fix_ipk(once)

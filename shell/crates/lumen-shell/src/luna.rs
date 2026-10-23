@@ -10,12 +10,18 @@
 //!
 //! IDs, titles, icon paths and colours come from other apps' appinfo, so they
 //! are checked, cleaned and confined here before the shell sees them.
+//!
+//! The jail cannot read most icons where luna says they are, so
+//! `lumen-icons.sh`, run as root through Homebrew Channel's `exec`, copies
+//! them into Lumen's own folder, each at its own path under `ICON_COPY`
+//! (docs/specs/icons.md). An icon is confined to its folder there too.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString, c_char, c_int, c_ulong, c_void};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::thread::ScopedJoinHandle;
+use std::sync::Arc;
+use std::thread::{JoinHandle, ScopedJoinHandle};
 use std::time::{Duration, Instant};
 
 use libloading::Library;
@@ -33,6 +39,10 @@ pub const PINNED: &[&str] = &["com.beb.plxnative"];
 const INPUT_ICONS: &str = "/usr/palm/plugins/inputapps";
 /// How long one call may take before it counts as failed.
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the icon copy's `exec` may take: its `luna-send` alone may wait
+/// 4 s, and a first copy reads every icon. Nothing waits for it, and the
+/// script runs on if the call gives up. Not yet measured on the TV.
+const EXEC_TIMEOUT: Duration = Duration::from_secs(30);
 /// The largest reply kept. `listApps` is 170 KB on the B9.
 const MAX_REPLY: usize = 4 << 20;
 /// The longest app ID kept: an app's folder is named after its ID, so it is
@@ -48,10 +58,28 @@ const LIST_LAUNCH_POINTS: &str = "luna://com.webos.applicationManager/listLaunch
 const LIST_APPS: &str = "luna://com.webos.applicationManager/listApps";
 const LIST_INPUTS: &str = "luna://com.webos.service.eim/getAllInputStatus";
 const LAUNCH: &str = "luna://com.webos.applicationManager/launch";
+/// Homebrew Channel's root shell: `/bin/sh -c` its `command`, as root.
+const EXEC: &str = "luna://org.webosbrew.hbchannel.service/exec";
+
+/// LG's icons, copied by `lumen-icons.sh` into Lumen's folder on the TV,
+/// which the jail mounts: each at its own absolute path under this folder.
+/// The shell asks for a refresh only if it exists, so the first copy is made
+/// by hand (docs/safety.md, rule 3).
+const ICON_COPY: &str =
+    "/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lg-icons";
+/// The one command the shell gives `exec`. It is fixed, and names the script
+/// the IPK ships: nothing in it comes from another app.
+const COPY_COMMAND: &str = "/bin/sh /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-icons.sh";
 
 /// One call on the bus: a request and its single reply.
 pub trait Bus: Sync {
     fn call(&self, uri: &str, payload: &Value) -> Result<Value, String>;
+
+    /// A call that may wait up to `timeout` for its reply, where the bus has
+    /// a timeout of its own.
+    fn call_within(&self, uri: &str, payload: &Value, _timeout: Duration) -> Result<Value, String> {
+        self.call(uri, payload)
+    }
 }
 
 // libluna-service2's types, as lunaservice.h declares them. `watch.rs` (the
@@ -325,6 +353,17 @@ impl Ls2 {
 
 impl Bus for Ls2 {
     fn call(&self, uri: &str, payload: &Value) -> Result<Value, String> {
+        self.call_for(uri, payload, self.timeout)
+    }
+
+    fn call_within(&self, uri: &str, payload: &Value, timeout: Duration) -> Result<Value, String> {
+        self.call_for(uri, payload, timeout)
+    }
+}
+
+impl Ls2 {
+    /// One call, waiting up to `timeout` for its reply.
+    fn call_for(&self, uri: &str, payload: &Value, timeout: Duration) -> Result<Value, String> {
         let api = self.api.as_ref().map_err(String::clone)?;
         let uri = CString::new(uri).map_err(|_| "a URI with a NUL byte".to_owned())?;
         // serde_json writes a NUL inside a string as \u0000, so this holds.
@@ -360,7 +399,7 @@ impl Bus for Ls2 {
         // SAFETY: the slot is valid until it is taken back below, and only
         // `on_reply` writes to it, on this thread, inside `context_iteration`.
         let answered = || unsafe { (*slot).reply.is_some() };
-        let deadline = Instant::now() + self.timeout;
+        let deadline = Instant::now() + timeout;
         while !answered() && Instant::now() < deadline {
             // SAFETY: the client's own context, dispatched from this thread
             // only; 0 asks it not to block.
@@ -368,7 +407,7 @@ impl Bus for Ls2 {
                 std::thread::sleep(POLL);
             }
         }
-        let no_reply = || format!("no reply in {} ms", self.timeout.as_millis());
+        let no_reply = || format!("no reply in {} ms", timeout.as_millis());
         if !answered() {
             let cancelled = api.checked("cancelling", |error| {
                 // SAFETY: the handle is live, and the token its open call's.
@@ -440,6 +479,29 @@ pub fn confine(path: &Path, folder: &Path) -> Option<PathBuf> {
     let real = std::fs::canonicalize(folder.join(path)).ok()?;
     let folder = std::fs::canonicalize(folder).ok()?;
     real.starts_with(&folder).then_some(real)
+}
+
+/// Where `path` sits in the copy: an absolute path under `copy`, a relative
+/// one as it is (it is then resolved against a folder in the copy).
+fn in_copy(path: &Path, copy: &Path) -> PathBuf {
+    match path.strip_prefix("/") {
+        Ok(rest) => copy.join(rest),
+        Err(_) => path.to_owned(),
+    }
+}
+
+/// `confine`, then, if `copy` is given, `confine` of the same icon and
+/// folder in the copy: the icon where it is, else LG's icon copied. The
+/// folder in the copy must itself stay inside the copy, so a `folderPath`
+/// with `..` in it cannot lead out.
+fn confine_or_copied(copy: Option<&Path>) -> impl Fn(&Path, &Path) -> Option<PathBuf> + '_ {
+    move |path, folder| {
+        confine(path, folder).or_else(|| {
+            let copy = copy?;
+            let folder = confine(&in_copy(folder, copy), copy)?;
+            confine(&in_copy(path, copy), &folder)
+        })
+    }
 }
 
 /// What `listApps` says about one app.
@@ -594,58 +656,108 @@ fn title_or_id(title: Option<&str>, id: &str) -> String {
     }
 }
 
+/// One call, checked and timed for the log.
+fn timed_call(bus: &dyn Bus, uri: &str, payload: &Value) -> Result<Value, String> {
+    timed(uri, || bus.call(uri, payload))
+}
+
+/// `call`'s reply to `uri`, checked and timed for the log.
+fn timed(uri: &str, call: impl FnOnce() -> Result<Value, String>) -> Result<Value, String> {
+    let started = Instant::now();
+    let reply = call().and_then(|reply| {
+        check(&reply)?;
+        Ok(reply)
+    });
+    let method = uri.rsplit('/').next().unwrap_or(uri);
+    let ms = started.elapsed().as_secs_f64() * 1000.0;
+    match &reply {
+        Ok(_) => info!("luna {method}: {ms:.0} ms"),
+        Err(e) => info!("luna {method} failed after {ms:.0} ms: {e}"),
+    }
+    reply
+}
+
 /// Lists and launches through luna.
 pub struct LunaLauncher<B: Bus = Ls2> {
-    bus: B,
+    /// Shared with the thread that refreshes the icon copy.
+    bus: Arc<B>,
     /// Each tile's launch parameters, from the last list.
     params: HashMap<AppId, Value>,
+    /// The icon copy's folder: `ICON_COPY`, but for tests.
+    icon_copy: PathBuf,
+    /// The refresh of the icon copy, once started.
+    refresh: Option<JoinHandle<()>>,
 }
 
 impl<B: Bus> LunaLauncher<B> {
     pub fn new(bus: B) -> Self {
         Self {
-            bus,
+            bus: Arc::new(bus),
             params: HashMap::new(),
+            icon_copy: PathBuf::from(ICON_COPY),
+            refresh: None,
         }
     }
 
     /// One call, checked and timed for the log.
     fn call(&self, uri: &str, payload: &Value) -> Result<Value, String> {
-        let started = Instant::now();
-        let reply = self.bus.call(uri, payload).and_then(|reply| {
-            check(&reply)?;
-            Ok(reply)
-        });
-        let method = uri.rsplit('/').next().unwrap_or(uri);
-        let ms = started.elapsed().as_secs_f64() * 1000.0;
-        match &reply {
-            Ok(_) => info!("luna {method}: {ms:.0} ms"),
-            Err(e) => info!("luna {method} failed after {ms:.0} ms: {e}"),
-        }
-        reply
+        timed_call(&*self.bus, uri, payload)
     }
 }
 
-impl<B: Bus> Launcher for LunaLauncher<B> {
+impl<B: Bus + Send + 'static> LunaLauncher<B> {
+    /// Asks Homebrew Channel, once, to run `lumen-icons.sh`, on a thread of
+    /// its own that nothing waits for: the tiles keep the copy there is, and
+    /// the next start gets a new one. The call logs its own outcome.
+    fn refresh_icon_copy(&mut self) {
+        if self.refresh.is_some() {
+            return;
+        }
+        let bus = Arc::clone(&self.bus);
+        let spawned = std::thread::Builder::new()
+            .name("icon-copy".to_owned())
+            .spawn(move || {
+                let payload = json!({ "command": COPY_COMMAND });
+                // Failures are logged by the call, and change nothing here.
+                let _ = timed(EXEC, || bus.call_within(EXEC, &payload, EXEC_TIMEOUT));
+            });
+        match spawned {
+            Ok(handle) => self.refresh = Some(handle),
+            Err(e) => info!("no thread for the icon copy: {e}"),
+        }
+    }
+}
+
+impl<B: Bus + Send + 'static> Launcher for LunaLauncher<B> {
     /// Asks for the three lists at once. Without launch points there is
     /// nothing to show; without `listApps` no icon can be confined, so the
-    /// tiles show letters; without the inputs there are only apps.
+    /// tiles show letters; without the inputs there are only apps. Icons the
+    /// jail cannot read come from the icon copy, if there is one, which is
+    /// then refreshed.
     fn list(&mut self) -> Result<Vec<App>, LaunchError> {
-        let this = &*self;
+        let bus = &*self.bus;
         let ask = &json!({});
         let (points, apps, inputs) = std::thread::scope(|s| {
             let spawn = move |uri: &'static str| {
-                std::thread::Builder::new().spawn_scoped(s, move || this.call(uri, ask))
+                std::thread::Builder::new().spawn_scoped(s, move || timed_call(bus, uri, ask))
             };
             let apps = spawn(LIST_APPS);
             let inputs = spawn(LIST_INPUTS);
-            let points = this.call(LIST_LAUNCH_POINTS, ask);
+            let points = timed_call(bus, LIST_LAUNCH_POINTS, ask);
             (points, joined(apps), joined(inputs))
         });
         let points = points.map_err(LaunchError)?;
         let apps = apps.unwrap_or_else(|_| json!({}));
         let inputs = inputs.unwrap_or_else(|_| json!({}));
-        let (entries, skipped) = entries(&points, &apps, &inputs, &confine);
+        let copy = self.icon_copy.is_dir().then_some(self.icon_copy.as_path());
+        let (entries, skipped) = entries(&points, &apps, &inputs, &confine_or_copied(copy));
+        // A run cut off mid-swap leaves only lg-icons.old, which the next
+        // run puts back.
+        let mut old = self.icon_copy.clone().into_os_string();
+        old.push(".old");
+        if copy.is_some() || Path::new(&old).is_dir() {
+            self.refresh_icon_copy();
+        }
         let icons = entries.iter().filter(|e| e.app.icon.is_some()).count();
         info!(
             "{} tiles, {icons} with icons; left out {} launch points and {} unconnected inputs",
@@ -687,6 +799,8 @@ mod tests {
     struct FakeBus {
         replies: HashMap<&'static str, Result<Value, String>>,
         sent: Mutex<Vec<(String, Value)>>,
+        /// The timeouts asked of `call_within`, by URI.
+        waited: Mutex<Vec<(String, Duration)>>,
     }
 
     impl FakeBus {
@@ -703,6 +817,7 @@ mod tests {
             Self {
                 replies: replies.into_iter().collect(),
                 sent: Mutex::new(Vec::new()),
+                waited: Mutex::new(Vec::new()),
             }
         }
 
@@ -722,6 +837,16 @@ mod tests {
                 .get(uri)
                 .cloned()
                 .unwrap_or_else(|| Err(format!("no fake reply for {uri}")))
+        }
+
+        fn call_within(
+            &self,
+            uri: &str,
+            payload: &Value,
+            timeout: Duration,
+        ) -> Result<Value, String> {
+            self.waited.lock().unwrap().push((uri.to_owned(), timeout));
+            self.call(uri, payload)
         }
     }
 
@@ -998,6 +1123,234 @@ mod tests {
         std::os::unix::fs::symlink(root.join("secret"), app.join("icon.png")).unwrap();
         assert_eq!(confine(Path::new("icon.png"), &app), None);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_copy_command_is_fixed_and_names_lumens_own_script() {
+        // Where the IPK installs Lumen.
+        const APP_DIR: &str =
+            "/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell";
+        assert!(APP_DIR.ends_with(&format!("/{SELF_ID}")));
+        assert_eq!(ICON_COPY, format!("{APP_DIR}/lg-icons"));
+        assert_eq!(COPY_COMMAND, format!("/bin/sh {APP_DIR}/lumen-icons.sh"));
+        // Nothing a shell would read as more than one plain word.
+        assert!(
+            APP_DIR
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"/._".contains(&b))
+        );
+    }
+
+    /// Writes an empty file at `path` under `root`, making its folders.
+    fn touch(root: &Path, path: &str) -> PathBuf {
+        let file = in_copy(Path::new(path), root);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, b"x").unwrap();
+        file.canonicalize().unwrap()
+    }
+
+    #[test]
+    fn icons_the_jail_cannot_read_come_from_the_copy() {
+        let copy = temp_dir("copy");
+        let netflix = touch(
+            &copy,
+            "/media/cryptofs/apps/usr/palm/applications/netflix/LARGE_APP_ICON.png",
+        );
+        // Only the 80 px icon was copied, so that one.
+        let photos = touch(
+            &copy,
+            "/usr/palm/applications/com.webos.app.photovideo/icon.png",
+        );
+        let hdmi2 = touch(
+            &copy,
+            "/usr/palm/plugins/inputapps/assets/small/hometheater.png",
+        );
+        let (entries, _) = entries_with(&confine_or_copied(Some(&copy)));
+        let icon = |id: &str| {
+            entries
+                .iter()
+                .find(|e| e.app.id.as_str() == id)
+                .and_then(|e| e.app.icon.clone())
+        };
+        assert_eq!(icon("netflix"), Some(netflix));
+        assert_eq!(icon("com.webos.app.photovideo"), Some(photos));
+        assert_eq!(icon("com.webos.app.hdmi2"), Some(hdmi2));
+        assert_eq!(icon("cdp-30"), None, "not copied");
+        // Without the copy, none of them: the build container has none of
+        // the TV's folders.
+        let (entries, _) = entries_with(&confine_or_copied(None));
+        assert!(entries.iter().all(|e| e.app.icon.is_none()), "{entries:?}");
+        let _ = std::fs::remove_dir_all(&copy);
+    }
+
+    #[test]
+    fn the_copy_is_confined_like_the_original() {
+        let copy = temp_dir("copy-confined");
+        let netflix = "/media/cryptofs/apps/usr/palm/applications/netflix";
+        let inside = touch(&copy, &format!("{netflix}/assets/i.png"));
+        touch(
+            &copy,
+            "/media/cryptofs/apps/usr/palm/applications/cdp-30/Plex.png",
+        );
+        touch(&copy, "/etc/secret.png");
+        let confined = confine_or_copied(Some(&copy));
+        let folder = Path::new(netflix);
+        for path in [
+            "/media/cryptofs/apps/usr/palm/applications/cdp-30/Plex.png",
+            "/media/cryptofs/apps/usr/palm/applications/netflix/../cdp-30/Plex.png",
+            "../cdp-30/Plex.png",
+            "/etc/secret.png",
+        ] {
+            assert_eq!(confined(Path::new(path), folder), None, "{path}");
+        }
+        assert_eq!(confined(Path::new("assets/i.png"), folder), Some(inside));
+        // A folderPath that climbs out of the copy finds nothing beside it.
+        let beside = copy.with_file_name(format!(
+            "{}-beside.png",
+            copy.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::write(&beside, b"x").unwrap();
+        let name = beside.file_name().unwrap().to_string_lossy().into_owned();
+        // Without the check, `copy/..` would be the folder and this inside it.
+        assert_eq!(confined(Path::new(&name), Path::new("/..")), None);
+        let _ = std::fs::remove_file(&beside);
+        let _ = std::fs::remove_dir_all(&copy);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_the_copy_leads_nowhere() {
+        let copy = temp_dir("copy-links");
+        let folder = "/usr/palm/applications/a";
+        let secret = touch(&copy, "/etc/secret.png");
+        let outside = temp_dir("copy-links-outside");
+        std::fs::write(outside.join("secret.png"), b"x").unwrap();
+        let mirrored = in_copy(Path::new(folder), &copy);
+        std::fs::create_dir_all(&mirrored).unwrap();
+        // Out of the folder, out of the copy, and a folder that is a link out.
+        std::os::unix::fs::symlink(&secret, mirrored.join("i.png")).unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.png"), mirrored.join("j.png")).unwrap();
+        std::os::unix::fs::symlink(
+            &outside,
+            in_copy(Path::new("/usr/palm/applications/b"), &copy),
+        )
+        .unwrap();
+        let confined = confine_or_copied(Some(&copy));
+        for (path, folder) in [
+            ("/usr/palm/applications/a/i.png", folder),
+            ("/usr/palm/applications/a/j.png", folder),
+            (
+                "/usr/palm/applications/b/secret.png",
+                "/usr/palm/applications/b",
+            ),
+        ] {
+            assert_eq!(confined(Path::new(path), Path::new(folder)), None, "{path}");
+        }
+        let _ = std::fs::remove_dir_all(&copy);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    /// Waits for the launcher's refresh of the icon copy to end.
+    fn wait_for_refresh(launcher: &LunaLauncher<FakeBus>) {
+        let started = Instant::now();
+        let refresh = launcher.refresh.as_ref().expect("a refresh started");
+        while !refresh.is_finished() {
+            assert!(started.elapsed() < Duration::from_secs(10), "no end");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn execs(launcher: &LunaLauncher<FakeBus>) -> Vec<Value> {
+        let sent = launcher.bus.sent.lock().unwrap();
+        sent.iter()
+            .filter(|(uri, _)| uri == EXEC)
+            .map(|(_, payload)| payload.clone())
+            .collect()
+    }
+
+    #[test]
+    fn the_copy_is_refreshed_once_and_only_if_there_is_one() {
+        let unchanged = json!({ "returnValue": true, "stdoutString": "lumen-icons: unchanged\n" });
+        let parent = temp_dir("no-copy");
+        let mut launcher = LunaLauncher {
+            icon_copy: parent.join("lg-icons"),
+            ..LunaLauncher::new(FakeBus::b9().answering(EXEC, Ok(unchanged.clone())))
+        };
+        launcher.list().unwrap();
+        assert!(launcher.refresh.is_none());
+        assert!(execs(&launcher).is_empty(), "no copy, no exec");
+        let _ = std::fs::remove_dir_all(&parent);
+
+        let copy = temp_dir("refresh");
+        let mut launcher = LunaLauncher {
+            icon_copy: copy.clone(),
+            ..LunaLauncher::new(FakeBus::b9().answering(EXEC, Ok(unchanged)))
+        };
+        launcher.list().unwrap();
+        wait_for_refresh(&launcher);
+        let first = launcher.refresh.as_ref().map(|h| h.thread().id());
+        launcher.list().unwrap();
+        assert_eq!(
+            launcher.refresh.as_ref().map(|h| h.thread().id()),
+            first,
+            "no second refresh"
+        );
+        assert_eq!(
+            execs(&launcher),
+            [json!({ "command": COPY_COMMAND })],
+            "the fixed command, once"
+        );
+        assert_eq!(
+            *launcher.bus.waited.lock().unwrap(),
+            [(EXEC.to_owned(), EXEC_TIMEOUT)],
+            "with its own timeout"
+        );
+        let _ = std::fs::remove_dir_all(&copy);
+    }
+
+    #[test]
+    fn a_copy_cut_off_mid_swap_is_still_refreshed() {
+        // The script restores lg-icons.old when lg-icons is missing.
+        let parent = temp_dir("refresh-old");
+        std::fs::create_dir_all(parent.join("lg-icons.old")).unwrap();
+        let mut launcher = LunaLauncher {
+            icon_copy: parent.join("lg-icons"),
+            ..LunaLauncher::new(FakeBus::b9().answering(EXEC, Ok(json!({ "returnValue": true }))))
+        };
+        launcher.list().unwrap();
+        wait_for_refresh(&launcher);
+        assert_eq!(execs(&launcher).len(), 1);
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[test]
+    fn ls2_waits_as_long_as_a_call_asks() {
+        let bus = fake_bus(5000);
+        let started = Instant::now();
+        let err = bus
+            .call_within(EXEC, &json!({}), Duration::from_millis(30))
+            .unwrap_err();
+        assert_eq!(err, "no reply in 30 ms");
+        assert!(started.elapsed() < Duration::from_secs(4));
+    }
+
+    #[test]
+    fn a_failed_refresh_leaves_the_list_alone() {
+        let copy = temp_dir("refresh-fails");
+        for reply in [
+            Err("Service does not exist: org.webosbrew.hbchannel.service.".to_owned()),
+            Ok(json!({ "returnValue": false, "errorText": "Command failed" })),
+        ] {
+            let mut launcher = LunaLauncher {
+                icon_copy: copy.clone(),
+                ..LunaLauncher::new(FakeBus::b9().answering(EXEC, reply))
+            };
+            let apps = launcher.list().unwrap();
+            assert_eq!(apps.len(), 10);
+            wait_for_refresh(&launcher);
+            assert_eq!(execs(&launcher).len(), 1);
+        }
+        let _ = std::fs::remove_dir_all(&copy);
     }
 
     /// What the fake libluna-service2 below does and saw, one per test
