@@ -173,19 +173,63 @@ usr/palm/plugins/inputapps/assets/small/HDMI_4.png" ]
     [ "$(ls -A "$APP")" = "lg-icons" ]
 }
 
-@test "it checks every folder above Lumen's too" {
+@test "LG's two 0777 developer folders are accepted" {
+    png "$ROOT/usr/palm/applications/a/i.png"
+    points /usr/palm/applications/a/i.png
+    chmod 0777 "$ROOT/media/developer" "$ROOT/media/developer/apps"
+    run sh "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "lumen-icons: changed, 1 copied, 0 refused" ]
+}
+
+@test "each folder our installs set is refused if others can write it" {
     points
-    chmod 0777 "$ROOT/media/developer"
+    D="$ROOT/media/developer/apps"
+    for dir in "$D/usr" "$D/usr/palm" "$D/usr/palm/applications" "$APP"; do
+        chmod 0777 "$dir"
+        run sh "$SCRIPT"
+        chmod 0755 "$dir"
+        [ "$status" -eq 1 ]
+        [[ "$output" == "lumen-icons: $dir is writable by others (drwxrwxrwx"* ]]
+        [ "$(ls -A "$APP")" = "" ]
+    done
+    run sh "$SCRIPT"
+    [ "$status" -eq 0 ]
+}
+
+@test "a link in the path, or a folder that is not where it should be, is refused" {
+    points
+    D="$ROOT/media/developer"
+    # LG's folders are not checked, but a link there moves Lumen's folder.
+    mv "$D/apps" "$D/real"
+    ln -s real "$D/apps"
     run sh "$SCRIPT"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"/media/developer is writable by others"* ]]
-    chmod 0755 "$ROOT/media/developer"
-    mv "$ROOT/media/developer/apps" "$ROOT/media/developer/real"
-    ln -s real "$ROOT/media/developer/apps"
+    [[ "$output" == *"is not where it should be"* ]]
+    [ ! -e "$D/real/usr/palm/applications/io.github.sunnyside007.lumen.shell/lg-icons" ]
+    rm "$D/apps"
+    mv "$D/real" "$D/apps"
+    # One of the checked folders a link.
+    mv "$D/apps/usr/palm" "$D/apps/usr/real"
+    ln -s real "$D/apps/usr/palm"
     run sh "$SCRIPT"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"/media/developer/apps is not a folder"* ]]
-    [ ! -e "$ROOT/media/developer/real/usr/palm/applications/io.github.sunnyside007.lumen.shell/lg-icons" ]
+    [[ "$output" == *"palm is not a folder"* ]]
+    [ ! -e "$D/apps/usr/real/applications/io.github.sunnyside007.lumen.shell/lg-icons" ]
+}
+
+@test "the sum is sha256sum's, and a run without sha256sum says so" {
+    png "$ROOT/usr/palm/applications/a/i.png"
+    points /usr/palm/applications/a/i.png
+    run sh "$SCRIPT"
+    [ "$status" -eq 0 ]
+    grep -qxE '[0-9a-f]{64}  -' "$OUT/.sum"
+    # A PATH with only what the script needs before it looks.
+    mkdir -p "$BATS_TEST_TMPDIR/bin"
+    ln -s "$(command -v id)" "$BATS_TEST_TMPDIR/bin/id"
+    PATH="$BATS_TEST_TMPDIR/bin" run /bin/sh "$SCRIPT"
+    [ "$status" -eq 1 ]
+    [ "$output" = "lumen-icons: no sha256sum" ]
 }
 
 @test "a second run with nothing changed leaves the copy alone" {

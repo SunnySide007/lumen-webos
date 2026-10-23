@@ -53,21 +53,24 @@ case $0 in
 esac
 uid=$(id -u)
 [ "$uid" = 0 ] || [ -n "$PREFIX" ] || fail "not root"
+# The B9's busybox (1.24.1) has no cksum.
+command -v sha256sum >/dev/null 2>&1 || fail "no sha256sum"
 if [ ! -d "$APP" ] || [ -L "$APP" ]; then
     fail "no app folder at $APP"
 fi
 
-# safe_dir DIR: a real folder that only this script's user may change. Root
-# writes in Lumen's folder, so no one else may be able to swap it, or any
-# folder above it, and steer those writes elsewhere.
+# safe_dir DIR [NAME]: a real folder that only this script's user may
+# change, named NAME in a refusal. Root writes in Lumen's folder, so no one
+# else may be able to swap it, or the folders our installs set above it, and
+# steer those writes elsewhere.
 safe_dir() {
     if [ ! -d "$1" ] || [ -L "$1" ]; then
-        fail "$1 is not a folder"
+        fail "${2:-$1} is not a folder"
     fi
     # ls -ln is POSIX, and stat is not: its mode and owner, split into words.
     set -f
     # shellcheck disable=SC2046,SC2012
-    set -- "$1" $(ls -ldn "$1")
+    set -- "${2:-$1}" $(ls -ldn "$1")
     set +f
     case $2 in
         d????[!w]??[!w]*) ;;
@@ -75,12 +78,31 @@ safe_dir() {
     esac
     [ "$4" = "$uid" ] || fail "$1 is owned by $4, not $uid"
 }
-dir=$APP
-while [ -n "$dir" ] && [ "$dir" != "$PREFIX" ]; do
-    safe_dir "$dir"
-    dir=${dir%/*}
-done
+# The three shared folders our installs set (the IPK's data.tar folder
+# modes). /media/developer and /media/developer/apps above them are LG's
+# developer mode's, 0777 on the B9, so they are not checked
+# (docs/specs/icons.md, "Known limits").
+SHARED=$PREFIX/media/developer/apps/usr
+safe_dir "$SHARED"
+safe_dir "$SHARED/palm"
+safe_dir "$SHARED/palm/applications"
+# Pinned before anything is written: from here on the script works in the
+# folder it checked, by relative names, wherever its path leads later.
 cd "$APP" || fail "cannot enter $APP"
+safe_dir . "$APP"
+if [ -n "$PREFIX" ]; then
+    expected=$(CDPATH='' cd "$PREFIX" && pwd -P)${APP#"$PREFIX"}
+else
+    expected=$APP
+fi
+here=$(pwd -P)
+if [ "$here" != "$expected" ]; then
+    # Folder names there may be anyone's: shown only in plain characters.
+    fail "$APP is not where it should be ($(printf '%s' "$here" | tr -c 'A-Za-z0-9._/-' '?'))"
+fi
+# The sum covers the script itself, so a script it cannot read is a failure,
+# not a sum that never changes.
+self_sum=$(sha256sum <"$SELF") || fail "cannot read $SELF"
 
 # The lock is a link to the PID that holds it, which ln makes atomically. It
 # is stale unless that PID is a run of this script: a power cut leaves a PID
@@ -240,12 +262,12 @@ done
 # The copy is redone only if the script, the plan or any planned file
 # changed: an app added or removed, or an icon replaced where it was.
 sum=$({
-    cksum <"$SELF"
+    echo "$self_sum"
     cat "$WORK/plan"
     while read -r _ real; do
         ls -lnL "$real" 2>/dev/null || true
     done <"$WORK/plan"
-} | cksum)
+} | sha256sum)
 if [ -f "$OUT/.sum" ] && [ "$(cat "$OUT/.sum")" = "$sum" ]; then
     echo "lumen-icons: unchanged"
     exit 0

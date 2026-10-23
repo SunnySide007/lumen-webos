@@ -90,11 +90,20 @@ app's data reaches the command line.
 
 POSIX sh for the TV's busybox, shellcheck-clean, `set -eu`, umask 022.
 
-1. **Refuses** unless it runs as root (`id -u` is 0), Lumen's app folder
-   exists, and that folder and every folder above it is a real folder (not
-   a link), owned by the script's user and writable by no one else.
-   Otherwise a non-root writer could swap a folder and steer root's writes.
-   It then works from inside Lumen's folder, with relative names.
+1. **Refuses** unless it runs as root (`id -u` is 0), `sha256sum` is there
+   (the B9's BusyBox 1.24.1 has no `cksum`), and Lumen's app folder exists.
+   It checks the folders our installs set: the three shared ones,
+   `/media/developer/apps/usr`, `usr/palm` and `usr/palm/applications`, and
+   Lumen's own. Each must be a real folder (not a link), owned by the
+   script's user and writable by no one else, or a non-root writer could
+   swap one and steer root's writes. Their modes come from the folder modes
+   in the data.tar of the last IPK installed, which `tools/ipk/fix_modes.py`
+   makes 0755. `/media/developer` and `/media/developer/apps` are not
+   checked: LG's developer mode makes them 0777 (B9, 2026-10-23) and no IPK
+   sets them ("Known limits").
+   It then pins Lumen's folder before writing anything: it enters it, checks
+   `.` again, and refuses unless `pwd -P` is the expected path, so no link
+   anywhere on the way moved it. From then on it uses relative names only.
 2. **Locks** with `ln -s <its PID> lg-icons.lock`, which is atomic. A
    second run while the first is going prints `lumen-icons: busy` and exits
    0. A lock is stale unless `/proc/<PID>/cmdline` names `lumen-icons.sh`:
@@ -131,7 +140,7 @@ POSIX sh for the TV's busybox, shellcheck-clean, `set -eu`, umask 022.
    `/usr/palm/plugins/inputapps/assets/small`, LG's own folder on the
    read-only system image (where `getAllInputStatus` points every input on
    the B9), with the same link and file checks, at most 64.
-7. **Skips** the work if nothing changed: the `cksum` of the script itself,
+7. **Skips** the work if nothing changed: the `sha256sum` of the script itself,
    the plan, and each planned file's `ls -lnL` line (size and time) is kept
    in `lg-icons/.sum`. The same sum prints `lumen-icons: unchanged` and
    exits 0. So an app added or removed, an icon replaced where it was, or a
@@ -235,12 +244,25 @@ environment of a root command through `exec` can already run any command.
 Each is a step in the check list.
 
 1. Whether the hub lets the jailed shell's anonymous client call `exec`.
-2. That busybox on the B9 has `readlink -f`, `head -c`, `grep -oE`, `cmp`,
-   `cksum`, `ln -s` and `sync` (b9.md lists busybox, not its applets). The
-   tests ran under dash with GNU tools, and once under busybox 1.36.1.
-3. Who owns Lumen's app folder and every folder above it once installed, and
-   that none is a link: the script needs all of them root's and no one
-   else's to write.
+2. That busybox on the B9 has what the script uses. Answered in part on
+   2026-10-23 (BusyBox v1.24.1): `readlink -f`, `head -c`, `grep -oE`,
+   `cmp`, `tr` and the rest are there, `cksum` is not, so the script uses
+   `sha256sum`, which the B9 has (Lumen's TV tools run it there). Still to
+   see: `sha256sum` reading stdin, `ls -lnL`, `ln -sn` and `pwd -P`. The tests ran under dash with GNU tools, and under
+   busybox 1.36.1.
+3. That the four checked folders are real, root's and 0755 once a
+   `fix_modes.py`'d IPK is installed. On 2026-10-23 all six folders down to
+   Lumen's were owner 0 and real, and all 0777: LG's two by developer mode,
+   the other four from an IPK packaged without `fix_modes.py`. An earlier
+   install that night of an IPK with fixed modes had set them 0755, so an
+   install does reset an existing folder's mode.
+
+   And that `pwd -P` in Lumen's folder prints
+   `/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell`.
+   If `/media/developer` were a link or reached through another path, every
+   run would refuse with "is not where it should be (<the real path>)". The
+   first run of this version on the TV is by hand, so this is seen there
+   first (docs/safety.md, rule 3).
 4. That a path the jail does not mount fails with "no such file", not
    "permission denied": the shell tries the copy only when the original
    cannot be resolved.
@@ -250,6 +272,24 @@ Each is a step in the check list.
 6. How long a run takes, changed and unchanged.
 
 ## Known limits
+
+* `/media/developer` and `/media/developer/apps` are 0777, LG's developer
+  mode's choice, and the script does not check them: no IPK sets them, and
+  refusing them would refuse every developer-mode TV. So a non-root process
+  that can write `/media/developer` could, at the moment of a run, move
+  another root-owned folder into Lumen's place, or root-owned folders into
+  the places of `usr`, `palm` or `applications` above it (a swap the folder
+  checks and `pwd -P` would not see, since every folder it then finds is
+  real, root's and at the right path). The script would put its
+  `lg-icons*` entries there, and remove or replace any `lg-icons*` entries
+  that folder already had: PNG copies of at most 1 MB, 8 MB in all, a
+  status line and a lock link; nothing executable, and nothing outside
+  `/media/developer`.
+* The three shared folders are every developer-mode app's. Installing
+  another IPK packaged without `fix_modes.py` (`ares-package` writes 0777
+  folders) can make them 0777 again. The script then refuses, naming the
+  folder, and the copy stops being refreshed until an IPK with sane modes
+  is installed. It fails closed; the icons already copied stay.
 
 * An icon path may name a PNG in another app's folder under the four
   roots; that PNG is then copied for it. These are app resources, not
