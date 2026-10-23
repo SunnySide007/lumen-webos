@@ -19,6 +19,15 @@ hashes seen then:
 | `Inter-SemiBold.ttf` | `78a843fade9d4612a5567302fb595b56976eb5fcebf4fea5a5912d638bafcde3` |
 | `Inter-LICENSE.txt` (the zip's `LICENSE.txt`) | `262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a` |
 
+`Inter-SemiBold.kern` is Inter's kerning, read out of that font's GPOS table
+by `tools/font/kern_table.py` (the table's layout is in its docstring), so it
+is derived from Inter and under the same licence. `text.rs` builds it in
+beside the font. Regenerate it after changing the font:
+
+```sh
+sh tools/dev.sh make kern-table
+```
+
 ## mock-icons/
 
 Placeholder pictograms for the simulator's mock apps (play, note, tv, input,

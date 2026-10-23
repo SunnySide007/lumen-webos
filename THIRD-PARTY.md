@@ -17,7 +17,7 @@ any of them is marked at the point of use with its origin and license.
 | [png](https://github.com/image-rs/image-png) | Decoding app icons (`shell/.../icons.rs`) | MIT or Apache-2.0 |
 | [fontdue](https://github.com/mooman219/fontdue) | Rasterising text (`shell/.../text.rs`) | MIT, Apache-2.0 or Zlib |
 | [serde_json](https://github.com/serde-rs/json) | Reading the TV's app and input lists from luna (`shell/.../luna.rs`) | MIT or Apache-2.0 |
-| [Inter](https://github.com/rsms/inter) 4.1 | The shell's typeface: `shell/assets/fonts/Inter-SemiBold.ttf`, unmodified, built into the binary, with its licence beside it (`Inter-LICENSE.txt`) | SIL Open Font License 1.1 |
+| [Inter](https://github.com/rsms/inter) 4.1 | The shell's typeface: `shell/assets/fonts/Inter-SemiBold.ttf`, unmodified, built into the binary, with its licence beside it (`Inter-LICENSE.txt`); its kerning, read out of the font's GPOS table into `Inter-SemiBold.kern` by `tools/font/kern_table.py` and built in too | SIL Open Font License 1.1 |
 
 Trademarks (LG, webOS, Apple, tvOS, Netflix, Prime Video, Plex) belong to their
 owners. "Inspired by tvOS" describes a design direction only: Lumen ships no

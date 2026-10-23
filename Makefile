@@ -3,6 +3,7 @@
 #   tools/dev.sh make ipk      # cross-compile for the TV and package an .ipk
 #   tools/dev.sh make check    # formatting, lints and tests
 #   tools/dev.sh make capture-tools   # tcpdump for the TV (dist/capture/)
+#   tools/dev.sh make kern-table      # Inter's kerning table (shell/assets/fonts/)
 #
 # Talking to the TV (install, launch, logs, recon) is tools/tv.sh, which runs on
 # the host so it can use your SSH key.
@@ -14,13 +15,18 @@ TARGET  := armv7-unknown-linux-gnueabi
 BIN     := shell/target/$(TARGET)/release/lumen-shell
 STAGE   := dist/stage/$(APP_ID)
 
-.PHONY: all build-tv ipk capture-tools test lint check clean
+.PHONY: all build-tv ipk capture-tools kern-table test lint check clean
 
 all: ipk
 
 # tcpdump for the TV's DNS capture (tools/capture.sh); not part of check.
 capture-tools:
 	sh tools/capture/build.sh
+
+# Inter's kerning, pulled out of its GPOS table into the small table text.rs
+# builds in (committed; `make test` checks it matches the font).
+kern-table:
+	python3 -I tools/font/kern_table.py
 
 build-tv:
 	cd shell && cargo build --release --target $(TARGET)

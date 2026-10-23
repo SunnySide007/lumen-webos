@@ -42,9 +42,19 @@ x=         80         440        800        1160       1520 (to 1840)
 * **Status line:** a short message ("Opening Netflix") in a dark pill at the
   top right, over the Top Shelf while focus is on row 0, shown for 2 s.
 * **No apps:** "No apps" centred where row 0 would be; arrows do nothing.
-* **Text:** Inter SemiBold (4.1, OFL), built into the binary. It is not
-  kerned yet: fontdue reads kerning only from a `kern` table, and Inter keeps
-  its kerning in GPOS.
+* **Text:** Inter SemiBold (4.1, OFL), built into the binary, and kerned.
+  fontdue reads kerning only from a `kern` table, and Inter keeps its kerning
+  in GPOS, so `tools/font/kern_table.py` (stdlib Python, in the build
+  container) pulls the pairs out of GPOS ahead of time into
+  `shell/assets/fonts/Inter-SemiBold.kern`, which is committed and remade by
+  `make kern-table`; `make test` fails if it no longer matches the font.
+  The table covers Basic Latin, Latin-1, Latin Extended-A and the
+  punctuation app names use (dashes, quotes, `…`, `€`, `™`): 15,259 pairs in
+  19,308 bytes, characters that kern alike sharing one of 95 left and 95
+  right classes. `text.rs` reads it once at start-up and kerns widths,
+  cuts with an ellipsis (measured against the `…`) and drawing alike. A
+  pair's kerning is its value in font units times the size over 2,048 (Inter's
+  units per em): "AV" closes by 5.4 px at 72 px, "Yo" by 7.1 px.
 
 ## Keys
 
