@@ -11,6 +11,7 @@ mod draw;
 mod faults;
 mod frame_stats;
 mod gl;
+mod home_loop;
 mod icons;
 mod log;
 mod luna;
