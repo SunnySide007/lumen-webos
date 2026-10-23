@@ -514,21 +514,6 @@ impl<L: Launcher> Shell<L> {
         self.pointer = Pointer::Hidden;
     }
 
-    /// Fires the key repeats due by `due` (`Clock::input_time`), acting at the
-    /// pass's time `now`. Runs once after each pass's events.
-    fn tick(&mut self, due: Duration, now: Duration) {
-        self.repeats_due(due, now);
-    }
-
-    /// Fires the key repeats that fell due by `due`, a press's or a release's
-    /// stamp, so a release stops the repeats due after it. They act at the
-    /// pass's time `now`, as presses do.
-    fn repeats_due(&mut self, due: Duration, now: Duration) {
-        for press in self.input.poll(due) {
-            self.press(press, now);
-        }
-    }
-
     /// When SDL stamped an event, on the loop's clock: never after `now`, and
     /// `now` itself under a fixed clock.
     fn stamp(&self, at: Instant, now: Duration) -> Duration {
@@ -630,12 +615,9 @@ impl<L: Launcher> Shell<L> {
                 }
                 // Held keys and their repeats go by SDL's stamp: a press
                 // first fires the repeats due before it; an SDL repeat read
-                // late, after a stall, still keeps its key alive.
-                let stamp = self.stamp(at, now);
-                if !repeat {
-                    self.repeats_due(stamp, now);
-                }
-                if let Some(press) = self.input.key_down(scancode, repeat, stamp) {
+                // late, after a stall, still keeps its key alive. Every press
+                // acts at the pass's time, `now`.
+                for press in self.input.key_down(scancode, repeat, self.stamp(at, now)) {
                     // Only presses are timed, not SDL's repeats or the shell's.
                     if !press.repeat {
                         self.keys.pressed(scancode, at);
@@ -654,8 +636,9 @@ impl<L: Launcher> Shell<L> {
                 self.input(now);
                 self.heard_key(scancode, at);
                 // Only the repeats due before the release fire.
-                self.repeats_due(self.stamp(at, now), now);
-                self.input.key_up(scancode);
+                for press in self.input.key_up(scancode, self.stamp(at, now)) {
+                    self.press(press, now);
+                }
             }
             Event::MouseButton { button, down, x, y } => {
                 self.mouse_button(button, down, x, y, now, at)
@@ -700,8 +683,9 @@ impl<L: Launcher> Shell<L> {
             info!("mouse button {button} up at {x},{y}");
             self.since_key.other();
             if button == 1 {
-                self.repeats_due(stamp, now);
-                self.input.key_up(scancode::RETURN);
+                for press in self.input.key_up(scancode::RETURN, stamp) {
+                    self.press(press, now);
+                }
             }
             return;
         }
@@ -713,9 +697,10 @@ impl<L: Launcher> Shell<L> {
         info!("mouse button 1 down at {x},{y}: taken as OK");
         self.since_key.key(at);
         self.show("a click", at);
-        self.repeats_due(stamp, now);
-        if let Some(press) = self.input.key_down(scancode::RETURN, false, stamp) {
-            self.keys.pressed(scancode::RETURN, at);
+        for press in self.input.key_down(scancode::RETURN, false, stamp) {
+            if !press.repeat {
+                self.keys.pressed(scancode::RETURN, at);
+            }
             self.press(press, now);
         }
     }
@@ -1038,9 +1023,12 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
         while let Some((event, at)) = sdl.poll_event() {
             shell.event(event, now, at);
         }
-        // After the events: a press or a release fired the repeats due
-        // before its own stamp, so a key let go just now fires none after.
-        shell.tick(clock.input_time(pass), now);
+        // After the events, which fired the repeats due by their own stamps
+        // (so a key let go just now fires none after), the repeats due by the
+        // pass's input time. They act at `now`, as presses do.
+        for press in shell.input.poll(clock.input_time(pass)) {
+            shell.press(press, now);
+        }
         if shell.take_pointer_hide() && sdl.set_pointer_visible(false) {
             shell.pointer_hidden();
         }
@@ -1495,6 +1483,13 @@ mod tests {
         send(shell, Event::KeyUp { scancode: code }, n);
     }
 
+    /// The repeats the loop fires after a pass's events, `n` ms in.
+    fn poll<L: Launcher>(shell: &mut Shell<L>, n: u64) {
+        for press in shell.input.poll(ms(n)) {
+            shell.press(press, ms(n));
+        }
+    }
+
     #[test]
     fn keys_move_focus_and_ok_launches_through_the_launcher() {
         let mut shell = shell();
@@ -1572,7 +1567,7 @@ mod tests {
         assert!(shell.keys.is_waiting());
         shell.frame_shown(at(17));
         assert!(!shell.keys.is_waiting());
-        shell.tick(ms(400), ms(400));
+        poll(&mut shell, 400);
         assert_eq!(shell.home.focused(), Some(2), "the shell repeated");
         assert!(!shell.keys.is_waiting(), "its repeats are not timed");
         let sdl_repeat = Event::KeyDown {
@@ -2048,65 +2043,61 @@ mod tests {
     }
 
     #[test]
-    fn held_arrows_repeat_through_tick() {
+    fn held_arrows_repeat_through_poll() {
         let mut shell = shell();
         send(&mut shell, down(scancode::RIGHT), 0);
-        shell.tick(ms(400), ms(400));
-        shell.tick(ms(520), ms(520));
+        poll(&mut shell, 400);
+        poll(&mut shell, 520);
         assert_eq!(shell.home.focused(), Some(3));
     }
 
-    const HELD_RIGHT: Event = Event::KeyDown {
-        scancode: scancode::RIGHT,
-        keycode: 0,
-        repeat: true,
-    };
-
     #[test]
-    fn letting_go_just_before_a_repeat_fires_no_repeat() {
-        let mut shell = shell();
-        shell.stamps_from = Some(at(0));
-        send(&mut shell, down(scancode::RIGHT), 0);
-        shell.tick(ms(400), ms(400));
-        assert_eq!(shell.home.focused(), Some(2));
-        // Let go at 510; the pass that reads it runs at 525, after the
-        // repeat due at 520. The loop's own order (events, then `tick`) is
-        // not reachable from here: this pins that the release itself fires
-        // nothing after its stamp.
-        let up = Event::KeyUp {
-            scancode: scancode::RIGHT,
-        };
-        shell.event(up, ms(525), at(510));
-        shell.tick(ms(525), ms(525));
-        assert_eq!(shell.home.focused(), Some(2), "no repeat after the release");
-    }
-
-    #[test]
-    fn a_repeat_due_before_the_release_still_fires() {
-        let mut shell = shell();
-        shell.stamps_from = Some(at(0));
-        send(&mut shell, down(scancode::RIGHT), 0);
-        let up = Event::KeyUp {
-            scancode: scancode::RIGHT,
-        };
-        shell.event(up, ms(425), at(410));
-        shell.tick(ms(425), ms(425));
-        assert_eq!(shell.home.focused(), Some(2), "the 400 ms repeat");
-    }
-
-    #[test]
-    fn a_held_key_outlives_a_stall_with_its_sdl_repeats_queued() {
-        let mut shell = shell();
-        shell.stamps_from = Some(at(0));
-        send(&mut shell, down(scancode::RIGHT), 0);
-        // The loop was blocked for 3 s (a launch, say) while SDL queued its
-        // repeats, every 50 ms from 500 ms on.
-        for t in (500..=2_950).step_by(50) {
-            shell.event(HELD_RIGHT, ms(3_000), at(t));
+    fn key_events_and_clicks_reach_input_by_their_stamps() {
+        // Let go at 510, read in the pass at 525: the repeat due at 520 is
+        // not owed, by a key-up or a click's release alike.
+        for release in [
+            Event::KeyUp {
+                scancode: scancode::RIGHT,
+            },
+            click(1, false),
+        ] {
+            let mut shell = shell();
+            shell.stamps_from = Some(at(0));
+            send(&mut shell, down(scancode::RIGHT), 0);
+            poll(&mut shell, 400);
+            shell.event(release, ms(525), at(510));
+            assert_eq!(shell.home.focused(), Some(2), "{release:?}");
         }
-        shell.tick(ms(3_000), ms(3_000));
+        // SDL's repeats, queued through a 3 s stall and read at its end,
+        // keep the key alive by their own stamps.
+        let mut shell = shell();
+        shell.stamps_from = Some(at(0));
+        send(&mut shell, down(scancode::RIGHT), 0);
+        let held_right = Event::KeyDown {
+            scancode: scancode::RIGHT,
+            keycode: 0,
+            repeat: true,
+        };
+        for t in (500..=2_950).step_by(50) {
+            shell.event(held_right, ms(3_000), at(t));
+        }
         assert!(shell.input.is_holding(), "not dropped as stuck");
-        assert_eq!(shell.home.focused(), Some(2), "one repeat, not a burst");
+    }
+
+    #[test]
+    fn a_press_that_comes_with_a_repeat_is_the_one_timed() {
+        for ok in [down(scancode::RETURN), click(1, true)] {
+            let mut shell = shell();
+            send(&mut shell, down(scancode::DOWN), 0);
+            shell.frame_shown(at(17));
+            // Down's first repeat is due at 400: OK at 450 fires it first.
+            send(&mut shell, ok, 450);
+            assert_eq!(
+                said(|| shell.frame_shown(at(467))),
+                ["key 40: shown after 17 ms"],
+                "{ok:?}"
+            );
+        }
     }
 
     #[test]

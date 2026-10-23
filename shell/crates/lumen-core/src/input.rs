@@ -87,12 +87,27 @@ impl Input {
         Self::default()
     }
 
-    /// A key went down at `now`. Returns the action it fires, if any. Give
-    /// each key event its own time (when it happened, not when it was read),
-    /// and call `poll` at a press's or a release's time before it, so the
-    /// repeats that fell due first fire, and none due after a release does.
+    /// A key went down at `now`. Give each key event its own time (when it
+    /// happened, not when it was read). Returns the presses it fires: the
+    /// repeats that fell due before it, then its own press, if it makes one.
+    /// An SDL repeat (`sdl_repeat`) fires neither: it only shows the key is
+    /// still held, so the repeats owed by then fire at the next `poll`, and a
+    /// stall's queued SDL repeats, read late, fire one repeat, not a burst.
     #[must_use]
-    pub fn key_down(&mut self, code: i32, sdl_repeat: bool, now: Duration) -> Option<Press> {
+    pub fn key_down(&mut self, code: i32, sdl_repeat: bool, now: Duration) -> Vec<Press> {
+        let mut presses = if sdl_repeat {
+            Vec::new()
+        } else {
+            self.poll(now)
+        };
+        presses.extend(self.hold(code, sdl_repeat, now));
+        presses
+    }
+
+    /// The key-down itself, once the repeats it owed have fired: drops the
+    /// keys gone quiet, notes a held key's sign of life, and gives the press
+    /// of a key with an action that was not down.
+    fn hold(&mut self, code: i32, sdl_repeat: bool, now: Duration) -> Option<Press> {
         // A key quiet for STUCK_AFTER was released, even if no poll said so yet.
         self.held.retain(|h| now < h.seen + STUCK_AFTER);
         if let Some(held) = self.held.iter_mut().find(|h| h.code == code) {
@@ -118,9 +133,14 @@ impl Input {
         })
     }
 
-    /// A key came up. Releases nothing that was not down.
-    pub fn key_up(&mut self, code: i32) {
+    /// A key came up at `now`, its own time as for `key_down`. Returns the
+    /// repeats every held key owed before it, so the released key fires no
+    /// repeat due after its release. Releases nothing that was not down.
+    #[must_use]
+    pub fn key_up(&mut self, code: i32, now: Duration) -> Vec<Press> {
+        let presses = self.poll(now);
         self.held.retain(|h| h.code != code);
+        presses
     }
 
     /// Drops every held key without firing: the window lost focus or went to
@@ -135,7 +155,8 @@ impl Input {
 
     /// Repeats due by `now`, at most one per key: after a long frame the
     /// missed ones are dropped rather than fired in a burst. Also releases
-    /// keys that have gone quiet for `STUCK_AFTER`.
+    /// keys that have gone quiet for `STUCK_AFTER`. Use it for a pass with no
+    /// key event; `key_down` and `key_up` poll at their own times.
     #[must_use]
     pub fn poll(&mut self, now: Duration) -> Vec<Press> {
         let mut out = Vec::new();
@@ -179,14 +200,18 @@ mod tests {
         Duration::from_millis(n)
     }
 
-    fn press(action: Action) -> Option<Press> {
-        Some(Press {
+    fn press(action: Action) -> Vec<Press> {
+        vec![Press {
             action,
             repeat: false,
-        })
+        }]
     }
 
     const RIGHT: Action = Action::Move(Dir::Right);
+    const RIGHT_REPEAT: Press = Press {
+        action: RIGHT,
+        repeat: true,
+    };
 
     #[test]
     fn maps_the_b9_remote_and_the_pc_keyboard() {
@@ -206,7 +231,7 @@ mod tests {
         for code in [484, 485, scancode::WEBOS_HOME, 0, 1, 4, 257] {
             assert_eq!(action_for(code), None, "scancode {code}");
             let mut input = Input::new();
-            assert_eq!(input.key_down(code, false, ms(0)), None);
+            assert_eq!(input.key_down(code, false, ms(0)), vec![]);
             assert!(!input.is_holding());
         }
     }
@@ -217,30 +242,77 @@ mod tests {
         assert_eq!(input.key_down(scancode::RIGHT, false, ms(0)), press(RIGHT));
         assert_eq!(input.poll(ms(399)), vec![]);
         assert_eq!(input.next_deadline(), Some(ms(400)));
-        let repeat = Press {
-            action: RIGHT,
-            repeat: true,
-        };
-        assert_eq!(input.poll(ms(400)), vec![repeat]);
+        assert_eq!(input.poll(ms(400)), vec![RIGHT_REPEAT]);
         assert_eq!(input.next_deadline(), Some(ms(520)));
         // SDL's own repeats keep the key alive but fire nothing.
-        assert_eq!(input.key_down(scancode::RIGHT, true, ms(500)), None);
-        assert_eq!(input.poll(ms(520)), vec![repeat]);
-        assert_eq!(input.poll(ms(640)), vec![repeat]);
-        input.key_up(scancode::RIGHT);
+        assert_eq!(input.key_down(scancode::RIGHT, true, ms(500)), vec![]);
+        assert_eq!(input.poll(ms(520)), vec![RIGHT_REPEAT]);
+        assert_eq!(input.poll(ms(640)), vec![RIGHT_REPEAT]);
+        assert_eq!(input.key_up(scancode::RIGHT, ms(700)), vec![]);
         assert_eq!(input.poll(ms(760)), vec![]);
         assert_eq!(input.next_deadline(), None);
     }
 
     #[test]
-    fn polled_at_the_release_a_repeat_due_after_it_never_fires() {
+    fn letting_go_just_before_a_repeat_fires_no_repeat() {
         let mut input = Input::new();
         let _ = input.key_down(scancode::RIGHT, false, ms(0));
-        assert_eq!(input.poll(ms(400)).len(), 1);
-        // Released at 510, read at 525: the repeat due at 520 is not owed.
-        assert_eq!(input.poll(ms(510)), vec![]);
-        input.key_up(scancode::RIGHT);
+        assert_eq!(input.poll(ms(400)), vec![RIGHT_REPEAT]);
+        // Let go at 510; the pass that reads it runs at 525, after the
+        // repeat due at 520, which the release does not owe.
+        assert_eq!(input.key_up(scancode::RIGHT, ms(510)), vec![]);
         assert_eq!(input.poll(ms(525)), vec![]);
+    }
+
+    #[test]
+    fn a_repeat_due_before_the_release_still_fires() {
+        let mut input = Input::new();
+        let _ = input.key_down(scancode::RIGHT, false, ms(0));
+        // Let go at 410, read at 425: the release fires the 400 ms repeat.
+        assert_eq!(input.key_up(scancode::RIGHT, ms(410)), vec![RIGHT_REPEAT]);
+        assert_eq!(input.poll(ms(425)), vec![]);
+    }
+
+    #[test]
+    fn a_release_fires_the_repeats_other_held_keys_owe() {
+        let mut input = Input::new();
+        let _ = input.key_down(scancode::LEFT, false, ms(0));
+        let _ = input.key_down(scancode::UP, false, ms(100));
+        // Up goes at 450: Left's repeat due at 400 comes with it, Up's at 500
+        // never does.
+        let left = Press {
+            action: Action::Move(Dir::Left),
+            repeat: true,
+        };
+        assert_eq!(input.key_up(scancode::UP, ms(450)), vec![left]);
+        assert_eq!(input.poll(ms(500)), vec![]);
+    }
+
+    #[test]
+    fn a_press_fires_the_repeats_due_before_it_first() {
+        let mut input = Input::new();
+        let _ = input.key_down(scancode::RIGHT, false, ms(0));
+        let mut fired = vec![RIGHT_REPEAT];
+        fired.extend(press(Action::Select));
+        assert_eq!(input.key_down(scancode::RETURN, false, ms(450)), fired);
+    }
+
+    #[test]
+    fn a_held_key_outlives_a_stall_with_its_sdl_repeats_queued() {
+        let mut input = Input::new();
+        let _ = input.key_down(scancode::RIGHT, false, ms(0));
+        // The loop was blocked for 3 s (a launch, say) while SDL queued its
+        // repeats, every 50 ms from 500 ms on. Read late, each still keeps
+        // the key alive, and none fires the repeats owed by its stamp.
+        for t in (500..=2_950).step_by(50) {
+            assert_eq!(input.key_down(scancode::RIGHT, true, ms(t)), vec![]);
+        }
+        assert_eq!(
+            input.poll(ms(3_000)),
+            vec![RIGHT_REPEAT],
+            "one repeat, not a burst"
+        );
+        assert!(input.is_holding(), "not dropped as stuck");
     }
 
     #[test]
@@ -260,22 +332,22 @@ mod tests {
     #[test]
     fn a_second_press_of_a_held_key_is_ignored() {
         let mut input = Input::new();
-        assert!(input.key_down(scancode::DOWN, false, ms(0)).is_some());
-        assert_eq!(input.key_down(scancode::DOWN, false, ms(50)), None);
+        assert_eq!(input.key_down(scancode::DOWN, false, ms(0)).len(), 1);
+        assert_eq!(input.key_down(scancode::DOWN, false, ms(50)), vec![]);
     }
 
     #[test]
     fn a_release_without_a_press_is_ignored() {
         let mut input = Input::new();
-        input.key_up(scancode::LEFT);
+        assert_eq!(input.key_up(scancode::LEFT, ms(0)), vec![]);
         assert!(!input.is_holding());
-        assert!(input.key_down(scancode::LEFT, false, ms(0)).is_some());
+        assert_eq!(input.key_down(scancode::LEFT, false, ms(0)).len(), 1);
     }
 
     #[test]
     fn a_repeat_for_a_key_never_pressed_starts_nothing() {
         let mut input = Input::new();
-        assert_eq!(input.key_down(scancode::LEFT, true, ms(0)), None);
+        assert_eq!(input.key_down(scancode::LEFT, true, ms(0)), vec![]);
         assert!(!input.is_holding());
         assert_eq!(input.poll(ms(1000)), vec![]);
     }
@@ -307,23 +379,32 @@ mod tests {
     }
 
     #[test]
-    fn a_press_after_a_stuck_key_expired_fires_even_without_a_poll() {
+    fn a_press_after_a_stuck_key_expired_fires() {
         let mut input = Input::new();
-        assert!(input.key_down(scancode::RIGHT, false, ms(0)).is_some());
-        assert_eq!(
-            input.key_down(scancode::RIGHT, false, ms(1600)),
-            press(RIGHT)
-        );
+        assert_eq!(input.key_down(scancode::RIGHT, false, ms(0)).len(), 1);
+        // Never polled, the key still owes the repeat due at 400 ms (one, not
+        // ten), then counts as released, so the new press is a press.
+        let mut fired = vec![RIGHT_REPEAT];
+        fired.extend(press(RIGHT));
+        assert_eq!(input.key_down(scancode::RIGHT, false, ms(1600)), fired);
+    }
+
+    #[test]
+    fn an_sdl_repeat_after_a_stuck_key_expired_starts_nothing() {
+        let mut input = Input::new();
+        assert_eq!(input.key_down(scancode::RIGHT, false, ms(0)).len(), 1);
+        assert_eq!(input.key_down(scancode::RIGHT, true, ms(1600)), vec![]);
+        assert!(!input.is_holding(), "released, even without a poll");
     }
 
     #[test]
     fn two_held_arrows_repeat_independently() {
         let mut input = Input::new();
-        assert!(input.key_down(scancode::LEFT, false, ms(0)).is_some());
-        assert!(input.key_down(scancode::UP, false, ms(100)).is_some());
+        assert_eq!(input.key_down(scancode::LEFT, false, ms(0)).len(), 1);
+        assert_eq!(input.key_down(scancode::UP, false, ms(100)).len(), 1);
         assert_eq!(input.poll(ms(400)).len(), 1);
         assert_eq!(input.poll(ms(500)).len(), 1);
-        input.key_up(scancode::LEFT);
+        assert_eq!(input.key_up(scancode::LEFT, ms(500)), vec![]);
         assert_eq!(input.poll(ms(620)).len(), 1, "only Up is left");
     }
 
