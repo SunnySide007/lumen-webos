@@ -395,10 +395,19 @@ pub trait Launcher {
   | `script` | the `--keys` parser and timeline |
 
 * **`lumen-shell`:** `sdl.rs` decodes key-down and key-up in both layouts,
-  window and app-lifecycle events, logs the first raw events, and binds
-  `SDL_WaitEventTimeout`; `app.rs` runs the loop above and turns effects into
-  launcher calls; `draw.rs` turns `home`'s view into a `render::Batch`. The
-  hello-gles scene goes; the GL details it showed stay in the log.
+  window and app-lifecycle events, logs the first raw events, binds
+  `SDL_WaitEventTimeout`, and is the home loop's events on the TV. `app.rs`
+  is start-up: the options, SDL, the window and GL, the renderer and the
+  assets, listing the apps and the luna watch. `home_loop.rs` runs the home
+  loop (GLOSSARY.md) behind three adapters, events, screen and wall clock
+  (decision 8), and holds their traits; under it, `home_loop/shell.rs`
+  turns events into presses and effects and launches, `home_loop/clock.rs`
+  keeps the loop's time (real, paced or fixed), and `home_loop/fake.rs`
+  holds the tests' adapters. `screen.rs` is the TV's screen: the window, its
+  GL context, the renderer, the assets and the batch. `frame_stats.rs` owns
+  the `drew`, `slow frame` and `fps` lines. `draw.rs` turns `home`'s view
+  into a `render::Batch`. The hello-gles scene goes; the GL details it
+  showed stay in the log.
 * B2 adds `atlas.rs` (the shelf packer and pending uploads), `text.rs`
   (Inter through fontdue, a glyph cache, fitting with an ellipsis) and
   `icons.rs` (PNG decoding with limits, premultiplied); `render.rs` gains the

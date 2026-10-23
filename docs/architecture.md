@@ -37,7 +37,7 @@ glibc and runs on every webOS release from the oldest supported up.
   `com.webos.settingsservice` and `com.webos.service.tvpower`, so LG's
   settings stay the source of truth. "All Settings" opens LG's Settings app.
 * **Simulator:** the same code runs in a window on a PC (`tools/sim.ps1`), using
-  desktop GL so colours match the TV (see the comment in `app.rs`).
+  desktop GL so colours match the TV (see the comment in `screen.rs`).
 
 ### `takeover/`: making Home open the shell (Phase 3)
 

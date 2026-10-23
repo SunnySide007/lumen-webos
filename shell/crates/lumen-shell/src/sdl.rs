@@ -837,6 +837,25 @@ impl Sdl {
     }
 }
 
+/// The TV's events for the home loop: SDL's queue.
+impl crate::home_loop::Events for &Sdl {
+    fn poll(&mut self) -> Option<(Event, Instant)> {
+        self.poll_event()
+    }
+
+    fn wait(&mut self, timeout: Option<Duration>) -> Option<(Event, Instant)> {
+        self.wait_event(timeout)
+    }
+
+    fn can_hide_pointer(&self) -> bool {
+        Sdl::can_hide_pointer(self)
+    }
+
+    fn hide_pointer(&mut self) -> bool {
+        self.set_pointer_visible(false)
+    }
+}
+
 /// `pointer: SDL_webOSCursorVisibility found in LG's SDL; arrows hide the
 /// pointer`, or `... not in LG's SDL; the pointer stays as LG leaves it`.
 pub fn pointer_line(can_hide: bool) -> String {

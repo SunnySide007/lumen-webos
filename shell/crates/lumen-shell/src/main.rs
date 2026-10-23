@@ -16,6 +16,7 @@ mod icons;
 mod log;
 mod luna;
 mod render;
+mod screen;
 mod sdl;
 mod text;
 mod timing;

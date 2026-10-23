@@ -1,19 +1,25 @@
 //! The shell's start-up: its options, SDL and its hints, the window and its
-//! GL context, and the apps' launcher. The home loop (`home_loop`) runs the
-//! rest.
+//! GL context, the renderer and the assets, the apps and the luna watch. The
+//! home loop (`home_loop`) runs the rest, on the TV's screen (`screen.rs`)
+//! and SDL's events.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lumen_core::apps::{Launcher, MockLauncher};
 use lumen_core::script::Script;
 
-use crate::home_loop;
+use crate::draw;
+use crate::gl::{self, Gl};
+use crate::home_loop::{self, Start, SystemClock, WallClock};
 use crate::info;
-use crate::luna::{Ls2, LunaLauncher};
-use crate::render::{SCREEN_H, SCREEN_W};
-use crate::sdl::{self, GlContext, Sdl, Window};
+use crate::luna::{self, Ls2, LunaLauncher};
+use crate::render::Renderer;
+use crate::screen::{self, TvScreen};
+use crate::sdl::{self, Sdl};
 use crate::timing::{Phase, StartTimes};
+use crate::watch;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Options {
@@ -86,82 +92,6 @@ pub(crate) const fn on_tv() -> bool {
     cfg!(all(target_os = "linux", target_arch = "arm"))
 }
 
-/// A window and its GL context, released in the right order on drop.
-pub(crate) struct Surface<'a> {
-    sdl: &'a Sdl,
-    pub(crate) window: Window,
-    ctx: GlContext,
-}
-
-impl Drop for Surface<'_> {
-    fn drop(&mut self) {
-        // SAFETY: both handles were created together in `open_surface` and are
-        // released exactly once, context first.
-        unsafe {
-            self.sdl.gl_delete_context(self.ctx);
-            self.sdl.destroy_window(self.window);
-        }
-    }
-}
-
-fn try_surface<'a>(sdl: &'a Sdl, opts: &Options, gles: bool) -> Result<Surface<'a>, String> {
-    if gles {
-        sdl.set_gl_attribute(sdl::GL_CONTEXT_PROFILE_MASK, sdl::GL_CONTEXT_PROFILE_ES);
-        sdl.set_gl_attribute(sdl::GL_CONTEXT_MAJOR_VERSION, 2);
-        sdl.set_gl_attribute(sdl::GL_CONTEXT_MINOR_VERSION, 0);
-    } else {
-        sdl.set_gl_attribute(sdl::GL_CONTEXT_PROFILE_MASK, 0);
-        sdl.set_gl_attribute(sdl::GL_CONTEXT_MAJOR_VERSION, 2);
-        sdl.set_gl_attribute(sdl::GL_CONTEXT_MINOR_VERSION, 1);
-    }
-    for attr in [sdl::GL_RED_SIZE, sdl::GL_GREEN_SIZE, sdl::GL_BLUE_SIZE] {
-        sdl.set_gl_attribute(attr, 8);
-    }
-    sdl.set_gl_attribute(sdl::GL_DOUBLEBUFFER, 1);
-
-    let (w, h, flags) = if opts.windowed {
-        (
-            1280,
-            720,
-            sdl::WINDOW_OPENGL | sdl::WINDOW_SHOWN | sdl::WINDOW_RESIZABLE,
-        )
-    } else {
-        (
-            SCREEN_W as i32,
-            SCREEN_H as i32,
-            sdl::WINDOW_OPENGL | sdl::WINDOW_SHOWN | sdl::WINDOW_FULLSCREEN,
-        )
-    };
-    let window = sdl.create_window("Lumen", w, h, flags)?;
-    // SAFETY: the window was just created with WINDOW_OPENGL.
-    match unsafe { sdl.gl_create_context(window) } {
-        Ok(ctx) => Ok(Surface { sdl, window, ctx }),
-        Err(e) => {
-            // SAFETY: the window is live and has no context.
-            unsafe { sdl.destroy_window(window) };
-            Err(e)
-        }
-    }
-}
-
-/// The TV offers GLES 2.0 only. A PC prefers desktop GL 2.1, which runs the
-/// same shaders: some PC drivers give ES contexts an sRGB framebuffer that
-/// brightens every dark tone (measured: navy 14,18,34 read back as 66,75,102),
-/// which would make the simulator lie about how the OLED will look. Desktop GL
-/// leaves that conversion off. `--gles` forces the ES path for driver checks.
-pub(crate) fn open_surface<'a>(sdl: &'a Sdl, opts: &Options) -> Result<Surface<'a>, String> {
-    if on_tv() || opts.gles {
-        return try_surface(sdl, opts, true);
-    }
-    match try_surface(sdl, opts, false) {
-        Ok(surface) => Ok(surface),
-        Err(desktop_err) => {
-            info!("no desktop GL 2.1 context ({desktop_err}); trying GLES2");
-            try_surface(sdl, opts, true)
-        }
-    }
-}
-
 /// Runs the shell. `started` is `main()`'s first moment, where the start-up
 /// line counts from.
 pub fn run(opts: Options, started: Instant) -> Result<(), String> {
@@ -181,14 +111,91 @@ pub fn run(opts: Options, started: Instant) -> Result<(), String> {
     sdl.init(sdl::INIT_VIDEO | sdl::INIT_EVENTS)?;
     start.mark(Phase::Sdl, Instant::now());
 
-    let result = home_loop::run_surface(&sdl, &opts, start);
+    let result = run_surface(&sdl, &opts, start);
     sdl.quit();
     result
 }
 
+/// Start-up from the window on, then the home loop, which gets the window,
+/// GL and what fills the frames as its screen, and SDL's queue as its events.
+fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), String> {
+    let surface = screen::open_surface(sdl, opts)?;
+    let gl = Gl::load(|name| sdl.gl_proc_address(name))?;
+    let vsync = sdl.gl_set_swap_interval(1);
+    let drawable = surface.drawable_size();
+    start.mark(Phase::Gl, Instant::now());
+
+    info!(
+        "GL vendor {:?} renderer {:?} version {:?} glsl {:?}",
+        gl.string(gl::VENDOR),
+        gl.string(gl::RENDERER),
+        gl.string(gl::VERSION),
+        gl.string(gl::SHADING_LANGUAGE_VERSION)
+    );
+    info!(
+        "drawable {}x{}, vsync {}",
+        drawable.0,
+        drawable.1,
+        if vsync { "on" } else { "refused" }
+    );
+
+    let renderer = Renderer::new(gl)?;
+    start.mark(Phase::Renderer, Instant::now());
+    // A fixed clock wants the same frames every run, so its icons load at once.
+    let assets = if opts.fixed_dt.is_some() {
+        draw::Assets::new()?
+    } else {
+        draw::Assets::threaded()?
+    };
+    start.mark(Phase::Assets, Instant::now());
+    // Where the loop's clock starts.
+    let zero = SystemClock.now();
+    if let Some(step) = opts.fixed_dt {
+        info!("fixed clock: {:.3} ms a frame", step.as_secs_f64() * 1000.0);
+    }
+    let mut launcher = launcher();
+    let listing = SystemClock.now();
+    let apps = launcher.list();
+    info!("{} apps", apps.as_ref().map_or(0, Vec::len));
+    if let Err(e) = &apps {
+        info!("listing apps failed: {e}");
+    }
+    start.mark(Phase::Apps, Instant::now());
+    let shared = watch::Shared::new();
+    // The luna watch (power state, the app in front, screensaver requests)
+    // runs on its own thread for the life of the loop and stops when this
+    // drops, after the loop. Nothing to watch off the TV, and nothing under
+    // a fixed clock, whose "last input" times are not real time. It counts
+    // "last input" from the moment the heartbeat does: set here, before it
+    // starts, and to the same again by the home loop's `Shell::new`.
+    let _watch = (on_tv() && opts.fixed_dt.is_none()).then(|| {
+        shared.set_last_input(listing.saturating_duration_since(zero));
+        watch::start(Arc::clone(&shared), luna::SELF_ID, zero)
+    });
+    // After the watch, so the window and its context go before it stops.
+    let mut screen = TvScreen::new(surface, renderer, assets);
+    let mut events = sdl;
+    home_loop::run(
+        &mut events,
+        &mut screen,
+        &SystemClock,
+        opts,
+        Start {
+            times: start,
+            zero,
+            listing,
+            launcher,
+            apps,
+            shared,
+            vsync,
+        },
+    );
+    Ok(())
+}
+
 /// The TV's apps through luna; the simulator's mock list on a PC, or on the
 /// TV with `LUMEN_LAUNCHER=mock` (a smoke test that touches no other app).
-pub(crate) fn launcher() -> Box<dyn Launcher> {
+fn launcher() -> Box<dyn Launcher> {
     let mock = std::env::var("LUMEN_LAUNCHER").is_ok_and(|v| v == "mock");
     if on_tv() && !mock {
         info!("apps from luna");

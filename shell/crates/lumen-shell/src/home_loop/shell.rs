@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use lumen_core::apps::{AppId, Launcher};
+use lumen_core::apps::{App, AppId, LaunchError, Launcher};
 use lumen_core::home::{BackAtTop, Effect, Home, LIFT};
 use lumen_core::input::{Action, Input, Press, action_for, scancode};
 
@@ -15,6 +15,8 @@ use crate::sdl::{self, Event};
 use crate::timing::{self, Foreground, Idle, KeyTimes, Pointer, SinceKey};
 use crate::watch;
 
+use super::WallClock;
+
 /// How long after Select its launch waits: the press pulse's dip is at its
 /// deepest 1/ω of the lift spring after the kick, 33 ms.
 const LAUNCH_AFTER: Duration = Duration::from_nanos((1e9 / LIFT.omega as f64) as u64);
@@ -23,7 +25,7 @@ const LAUNCH_AFTER: Duration = Duration::from_nanos((1e9 / LIFT.omega as f64) as
 pub(super) struct Shell<L: Launcher> {
     pub(super) home: Home,
     pub(super) input: Input,
-    pub(super) launcher: L,
+    launcher: L,
     /// False while the window is hidden or the app is in the background:
     /// nothing is drawn then, not even an animation in flight.
     pub(super) visible: bool,
@@ -55,24 +57,28 @@ pub(super) struct Shell<L: Launcher> {
     /// "Input diagnostics").
     pub(super) idle: Idle,
     /// What the luna watch thread reads and writes.
-    pub(super) shared: Arc<watch::Shared>,
+    shared: Arc<watch::Shared>,
 }
 
 impl<L: Launcher> Shell<L> {
-    pub(super) fn new(mut launcher: L, now: Duration) -> Self {
-        let (apps, failed) = match launcher.list() {
+    /// The shell at `now`, with what listing `launcher`'s apps gave (logged
+    /// by start-up) and the state it shares with the luna watch.
+    pub(super) fn new(
+        launcher: L,
+        listed: Result<Vec<App>, LaunchError>,
+        shared: Arc<watch::Shared>,
+        now: Duration,
+    ) -> Self {
+        let (apps, failed) = match listed {
             Ok(apps) => (apps, None),
             Err(e) => (Vec::new(), Some(e)),
         };
-        info!("{} apps", apps.len());
         let mut home = Home::new(apps, BackAtTop::Exit);
         if let Some(e) = failed {
-            info!("listing apps failed: {e}");
             home.show_status(format!("Could not list apps: {e}"), now);
         }
         // The watch counts "last input" from the same moment the heartbeat
         // does: the start, as if input had just come.
-        let shared = watch::Shared::new();
         shared.set_last_input(now);
         Self {
             home,
@@ -157,20 +163,21 @@ impl<L: Launcher> Shell<L> {
 
     /// Launches the app a press asked for, if it is due by `now`, the time
     /// of the frame just shown (or of the pass, when nothing is drawn).
-    /// `answered_at` reads the loop's clock once luna has answered, so the
-    /// status line's time starts after a launch that took seconds. Returns
-    /// whether it launched.
+    /// The wait for luna's answer is timed on `wall`. `answered_at` reads the
+    /// loop's clock once luna has answered, so the status line's time starts
+    /// after a launch that took seconds. Returns whether it launched.
     pub(super) fn launch_if_due(
         &mut self,
         now: Duration,
+        wall: &impl WallClock,
         answered_at: impl FnOnce() -> Duration,
     ) -> bool {
         let Some((id, _)) = self.launch_due.take_if(|(_, due)| *due <= now) else {
             return false;
         };
-        let started = Instant::now();
+        let started = wall.now();
         let result = self.launcher.launch(&id);
-        let answered = Instant::now();
+        let answered = wall.now();
         info!(
             "{}",
             timing::launch_line(&id, answered.duration_since(started), &result)
@@ -437,23 +444,32 @@ fn window_name(id: u8) -> Option<&'static str> {
 }
 
 #[cfg(test)]
-pub(super) mod tests {
+mod tests {
     use super::*;
 
-    use lumen_core::apps::{App, LaunchError, MockLauncher};
+    use lumen_core::apps::MockLauncher;
 
-    pub(in crate::home_loop) fn ms(n: u64) -> Duration {
+    use crate::home_loop::SystemClock;
+
+    fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
     }
 
-    pub(in crate::home_loop) fn shell() -> Shell<MockLauncher> {
-        let mut shell = Shell::new(MockLauncher::default(), Duration::ZERO);
+    /// The shell at `now` with `launcher`'s apps, listed as start-up lists
+    /// them.
+    fn listed<L: Launcher>(mut launcher: L, now: Duration) -> Shell<L> {
+        let apps = launcher.list();
+        Shell::new(launcher, apps, watch::Shared::new(), now)
+    }
+
+    fn shell() -> Shell<MockLauncher> {
+        let mut shell = listed(MockLauncher::default(), Duration::ZERO);
         shell.home.frame_drawn();
         shell
     }
 
     /// `n` ms after one moment shared by every test, as SDL would stamp it.
-    pub(in crate::home_loop) fn at(n: u64) -> Instant {
+    fn at(n: u64) -> Instant {
         static ZERO: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
         *ZERO.get_or_init(Instant::now) + ms(n)
     }
@@ -471,7 +487,7 @@ pub(super) mod tests {
         }
     }
 
-    pub(in crate::home_loop) fn key<L: Launcher>(shell: &mut Shell<L>, code: i32, n: u64) {
+    fn key<L: Launcher>(shell: &mut Shell<L>, code: i32, n: u64) {
         send(shell, down(code), n);
         send(shell, Event::KeyUp { scancode: code }, n);
     }
@@ -490,10 +506,10 @@ pub(super) mod tests {
         assert_eq!(shell.home.focused(), Some(1));
         key(&mut shell, scancode::RETURN, 100);
         assert!(
-            !shell.launch_if_due(ms(120), || ms(120)),
+            !shell.launch_if_due(ms(120), &SystemClock, || ms(120)),
             "not before the dip"
         );
-        assert!(shell.launch_if_due(ms(134), || ms(134)));
+        assert!(shell.launch_if_due(ms(134), &SystemClock, || ms(134)));
         assert_eq!(shell.launcher.launched(), &[AppId::new("amazon")]);
         assert_eq!(shell.home.view().status, Some("Opening Prime Video"));
         assert!(!shell.quit);
@@ -508,13 +524,13 @@ pub(super) mod tests {
         shell.frame_shown(at(17));
         assert!(!shell.keys.is_waiting(), "the press is on screen");
         assert!(
-            !shell.launch_if_due(ms(17), || ms(17)),
+            !shell.launch_if_due(ms(17), &SystemClock, || ms(17)),
             "the dip is not deepest yet"
         );
-        assert!(shell.launch_if_due(ms(34), || ms(34)));
+        assert!(shell.launch_if_due(ms(34), &SystemClock, || ms(34)));
         assert_eq!(shell.launcher.launched(), &[AppId::new("netflix")]);
         assert!(
-            !shell.launch_if_due(ms(50), || ms(50)),
+            !shell.launch_if_due(ms(50), &SystemClock, || ms(50)),
             "one launch per press"
         );
     }
@@ -524,8 +540,8 @@ pub(super) mod tests {
         let mut shell = shell();
         key(&mut shell, scancode::RETURN, 0);
         key(&mut shell, scancode::RETURN, 5);
-        assert!(shell.launch_if_due(ms(34), || ms(34)));
-        assert!(!shell.launch_if_due(ms(50), || ms(50)));
+        assert!(shell.launch_if_due(ms(34), &SystemClock, || ms(34)));
+        assert!(!shell.launch_if_due(ms(50), &SystemClock, || ms(50)));
         assert_eq!(shell.launcher.launched(), &[AppId::new("netflix")]);
     }
 
@@ -547,9 +563,9 @@ pub(super) mod tests {
 
     #[test]
     fn a_failed_launch_says_so() {
-        let mut shell = Shell::new(MockLauncher::default().failing_on("netflix"), ms(0));
+        let mut shell = listed(MockLauncher::default().failing_on("netflix"), ms(0));
         key(&mut shell, scancode::RETURN, 0);
-        assert!(shell.launch_if_due(ms(34), || ms(34)));
+        assert!(shell.launch_if_due(ms(34), &SystemClock, || ms(34)));
         assert_eq!(shell.home.view().status, Some("Could not open Netflix"));
     }
 
@@ -608,8 +624,11 @@ pub(super) mod tests {
         assert!(shell.keys.is_waiting(), "timed like a press");
         let shown = said(|| shell.frame_shown(at(17)));
         assert_eq!(shown, ["key 40: shown after 17 ms"]);
-        assert!(!shell.launch_if_due(ms(17), || ms(17)), "OK's own wait");
-        assert!(shell.launch_if_due(ms(34), || ms(34)));
+        assert!(
+            !shell.launch_if_due(ms(17), &SystemClock, || ms(17)),
+            "OK's own wait"
+        );
+        assert!(shell.launch_if_due(ms(34), &SystemClock, || ms(34)));
         assert_eq!(shell.launcher.launched(), &[AppId::new("netflix")]);
         assert!(!shell.input.is_holding(), "the up released it");
     }
@@ -765,9 +784,7 @@ pub(super) mod tests {
         assert_eq!(shell.idle.last_input(), ms(82_000));
         // The watch counts from the start too, as if input had just come.
         assert_eq!(
-            Shell::new(MockLauncher::default(), ms(5))
-                .shared
-                .last_input(),
+            listed(MockLauncher::default(), ms(5)).shared.last_input(),
             ms(5)
         );
         assert_eq!(
@@ -782,7 +799,7 @@ pub(super) mod tests {
         let mut shell = shell();
         key(&mut shell, scancode::RETURN, 0);
         // No frame shows the press before the launch; then the app is put away.
-        assert!(shell.launch_if_due(ms(34), || ms(34)));
+        assert!(shell.launch_if_due(ms(34), &SystemClock, || ms(34)));
         assert!(shell.keys.is_waiting());
         send(&mut shell, Event::Background, 320);
         assert!(!shell.keys.is_waiting(), "settled as not shown");
@@ -790,7 +807,7 @@ pub(super) mod tests {
 
     #[test]
     fn a_press_with_nothing_to_draw_settles_at_idle() {
-        let mut shell = Shell::new(Broken, ms(0));
+        let mut shell = listed(Broken, ms(0));
         shell.home.frame_drawn();
         key(&mut shell, scancode::RIGHT, 0);
         assert!(!shell.wants_frame(), "an empty grid does not move");
@@ -825,7 +842,7 @@ pub(super) mod tests {
     }
 
     /// The lines `f` logs, leaving out the raw `key down` lines.
-    pub(in crate::home_loop) fn said(f: impl FnOnce()) -> Vec<String> {
+    fn said(f: impl FnOnce()) -> Vec<String> {
         crate::log::capture(f)
             .into_iter()
             .filter(|line| !line.starts_with("key down"))
@@ -838,7 +855,7 @@ pub(super) mod tests {
         let lines = said(|| {
             key(&mut shell, scancode::RETURN, 0);
             shell.frame_shown(at(17));
-            shell.launch_if_due(ms(34), || ms(34));
+            shell.launch_if_due(ms(34), &SystemClock, || ms(34));
             send(&mut shell, Event::Background, 335);
         });
         assert_eq!(
@@ -867,12 +884,12 @@ pub(super) mod tests {
 
     #[test]
     fn a_press_waiting_through_a_slow_launch_names_it() {
-        let mut shell = Shell::new(Slow(MockLauncher::default(), 5), ms(0));
+        let mut shell = listed(Slow(MockLauncher::default(), 5), ms(0));
         shell.home.frame_drawn();
         shell.event(down(scancode::RETURN), ms(0), Instant::now());
         let lines = said(|| {
             // No frame shows the press before the launch, which blocks 5 ms.
-            shell.launch_if_due(ms(34), || ms(39));
+            shell.launch_if_due(ms(34), &SystemClock, || ms(39));
             shell.event(Event::Background, ms(40), Instant::now());
         });
         let line = lines
@@ -943,7 +960,7 @@ pub(super) mod tests {
 
     #[test]
     fn a_failed_listing_shows_the_empty_state_and_the_error() {
-        let shell = Shell::new(Broken, ms(0));
+        let shell = listed(Broken, ms(0));
         let view = shell.home.view();
         assert!(view.empty);
         assert_eq!(view.status, Some("Could not list apps: no luna"));
@@ -1057,16 +1074,6 @@ pub(super) mod tests {
         assert_eq!(shell.stamp(at(40), ms(25)), ms(25), "clamped");
     }
 
-    /// The focused tile's lift in a frame drawn now.
-    pub(in crate::home_loop) fn focused_lift<L: Launcher>(shell: &Shell<L>) -> f32 {
-        let view = shell.home.view();
-        view.tiles
-            .iter()
-            .find(|tile| tile.focused)
-            .expect("a focused tile")
-            .lift
-    }
-
     #[test]
     fn a_launch_asked_for_just_before_a_hide_is_dropped() {
         let mut shell = shell();
@@ -1078,7 +1085,7 @@ pub(super) mod tests {
             lines.contains(&"launch netflix: dropped: the window was hidden".to_owned()),
             "{lines:?}"
         );
-        assert!(!shell.launch_if_due(ms(100), || ms(100)));
+        assert!(!shell.launch_if_due(ms(100), &SystemClock, || ms(100)));
         assert!(
             shell.launcher.launched().is_empty(),
             "nothing over LG's Home"
