@@ -223,8 +223,8 @@ What the log holds, for reading the output:
   each launch (target 6, 100 ms).
 * `window focus lost: …`: how long since the last key. The output counts the
   focus losses with no key pressed.
-* The key-diagnostics lines (written on `claude/shell-timing`, K1–K5, not yet
-  run on the TV; formats in [look-and-feel.md, "Key
+* The key-diagnostics lines (written on `claude/shell-timing`, K1–K5, first
+  run on the B9 on 2026-10-22; formats in [look-and-feel.md, "Key
   diagnostics"](../../../docs/specs/look-and-feel.md#key-diagnostics)).
   "Input" is any key, 484 and 485 included, and any mouse event.
   * `pointer shown` and `pointer hidden`: scancodes 484 and 485, the Magic
@@ -247,8 +247,7 @@ What the log holds, for reading the output:
   * `no input for <N> s; focused …; pointer …; power …`: every 30 s with no
     input, up to 10 min, then every 10 min. These lines bound a gap without
     a `T0` read: the owner can say "I was pressing at that line".
-  * `frame-stats.sh` will summarise them in an "input" section (another
-    session is writing it).
+  * `frame-stats.sh` summarises them in its "input" section.
 * `key down scancode …` and `luna <method>: N ms` are not timing lines; the
   script leaves them out.
 * The log times only a burst's first and slow frames, not every frame. The
@@ -305,6 +304,8 @@ For comparison, the B9 (OLED55B9PUA, firmware 05.50.00) has measured:
 | hello-gles, about 3,000 quads, this skill's first run (2026-10-21; 30 s after 5 s of warm-up; Phase 1's DNS capture running) | 60.0 fps, 16.68 ms average; window worst frame p50 17.55 ms, p95 24.57 ms, longest 24.89 ms (5 of 30 windows above 19 ms); no frame over 25 ms |
 | the home grid, B2 (3543c41, mock tiles), moving for about 4.4 s only (2026-10-21; DNS capture running) | about 270 frames in 6 bursts, 16.68 ms average (60.0 fps); 3 frames of 25.41, 26.17 and 31.84 ms; 26–51 quads. Too short to judge B2's shader cost |
 | the home grid, c500289, 09711d7 and df2a4d0, moving (2026-10-22; reports in `tools/out/archive/tv-check-20261022T*`) | averages 16.80–16.84 ms, but a frame over 25 ms in most bursts (37 of 50, 16 of 20, 11 of 14); [look-and-feel.md, target 1](../../../docs/specs/look-and-feel.md#snappy) |
+| the home grid, 6e28bb9 (key diagnostics), moving (2026-10-22; `tools/out/archive/tv-check-20261022T074700Z`) | 16.72 ms average, a frame over 25 ms in 10 of 17 bursts, worst 35.82 ms; start-up 1,312–1,422 ms |
+| the home grid, 9456516 with hardware float, moving (2026-10-23; `tools/out/archive/tv-check-20261023T013938Z`) | 16.81 ms average, a frame over 25 ms in 10 of 16 bursts, worst 37.21 ms; start-up 524 and 688 ms |
 
 A reading of "holds 60 fps" means an average near 16.67 ms (up to about
 16.8 ms) with the missed vsyncs counted and named, not hidden. A frame of
