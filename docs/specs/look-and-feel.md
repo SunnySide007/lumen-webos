@@ -39,7 +39,7 @@ it sets the bar they are judged against.
 | 3 | Remote to screen, end to end | Not measured | *Proposed:* no slower than LG's Home bar on the same remote, within 1 frame | Slow-motion video on the owner's phone (240 fps, about 4 ms a frame), 10 presses on Lumen and 10 on LG's Home | Phase 3 |
 | 4 | Cold start to first frame | B1 (3572bf3): 444 ms (352 ms of it is SDL's window and GL context). B3: 1,504 ms: GL ready at 380 ms, then 1,023 ms in `Renderer::new` and `draw::Assets` (shader compile and font/atlas set-up), then 50 ms of luna. c500289, 2026-10-22: 1,197 ms. Split by the `start:` line, 2026-10-22: 09711d7, 1,395 ms: SDL 163, GL 138, renderer 59, assets 923, apps 63, first frame 49; df2a4d0, 1,594 ms: SDL 165, GL 167, renderer 112, assets 983, apps 104, first frame 63. 6e28bb9: 1,422 and 1,312 ms (assets 932 and 922). Hardware float (2026-10-23): 688 and 524 ms: SDL 199 and 139, GL 145 and 63, renderer 86 and 48, assets 163 and 176, apps 59 and 62, first frame 36 and 36 | *Proposed:* ≤ 600 ms to a first frame; icons and titles may fill in after | New start-up log line (below) | Phase 3 |
 | 5 | Home key to the shell, warm | Not possible yet (no takeover). The shell's half, 09711d7: its first frame 170 ms after `window restored` when picked from LG's app list; 13 ms after a focus gain and 2 ms after a restore on two other returns. df2a4d0, 2026-10-22: 10 and 2 ms after a focus gain. 6e28bb9: 7 returns, p50 11 ms, max 19 ms | < 150 ms ([roadmap](../roadmap.md)) | Slow-motion video, and the foreground log line (below) | Phase 3 |
-| 6 | Launch | c500289 called luna inside the key handler: HDMI 1 answered in 320 ms and no pulse frame was drawn. 09711d7 draws the pulse frame first (1 ms after OK), then calls: HDMI 1 answered in 18 ms, Homebrew Channel in 573 ms. df2a4d0: none; the OK on HDMI 1 came as a click, which that build ignored. 6e28bb9: HDMI 1 answered in 17, 16 and 18 ms, the third from a click. The pulse frame is drawn with no time step, so it shows no dip yet (the branch's audit; being fixed) | *Proposed:* pulse on the next frame; the launch call answered in ≤ 100 ms. The app's own start is reported next to LG's Home launching the same app, not targeted | Log line, slow-motion video | Phase 3 |
+| 6 | Launch | c500289 called luna inside the key handler: HDMI 1 answered in 320 ms and no pulse frame was drawn. 09711d7 draws the pulse frame first (1 ms after OK), then calls: HDMI 1 answered in 18 ms, Homebrew Channel in 573 ms. df2a4d0: none; the OK on HDMI 1 came as a click, which that build ignored. 6e28bb9: HDMI 1 answered in 17, 16 and 18 ms, the third from a click. That build's pulse frame was drawn with no time step, so it showed no dip; 5726aa3 holds the launch until the dip is deepest (33 ms), not yet run on the TV | *Proposed:* pulse on the next frame; the launch call answered in ≤ 100 ms. The app's own start is reported next to LG's Home launching the same app, not targeted | Log line, slow-motion video | Phase 3 |
 | 7 | Held key | The shell repeats after 400 ms, then every 120 ms. The remote (LG's SDL repeats, 16 holds in the c500289 and 09711d7 runs, 2026-10-22): first after about 505 ms (491–522), then every 50 ms. df2a4d0's 5 holds agree (p50 508 ms, 497–519) | Owner's call, 2026-10-22: keep it. Speeding up after 1.5 s held (every 80 ms), as tvOS does, was tried in the simulator and not kept | `SDL repeat` log lines; the owner's feel | Phase 3 |
 | 8 | Settled CPU | 0.2% of a core (B1, 3572bf3, 2026-10-20: 20 ms of CPU in 10 s) | *Proposed:* ≤ 1% | Clock ticks in `/proc/<pid>/stat` over 10 s | Phase 3; again in Phase 4, since glass must not add idle drawing |
 | 9 | Memory | 18 MB resident (B1, 3572bf3); 39.7 MB (c500289, 2026-10-22, about 10 minutes after its start); 35.6 MB resident and 5.8 MB swapped out (df2a4d0, 2026-10-22, about 10 minutes after its start). The B9 had about 335 MB available and 188 MB of swap in use at the 2026-10-20 survey ([b9.md](../device/b9.md#memory)) | *Proposed:* ≤ 64 MB resident; GPU textures ≤ 24 MB | `VmRSS` in `/proc/<pid>/status`; texture sizes from the code | Phase 3 and 4 |
@@ -67,16 +67,24 @@ foreground: first frame after <N> ms
 foreground: not shown after <N> ms: <why>
 launch <id>: answered in <N> ms
 launch <id>: failed after <N> ms: <error text>
+launch <id>: dropped: <why>
 window <event>: last key <S.s> s ago, <M> other events since
 window <event>: no key yet, <M> other events since
 app <background|foreground>: last key <S.s> s ago, <M> other events since
 app <background|foreground>: no key yet, <M> other events since
 in front again (<cause>): drawing resumes
 drew <N> frames in <ms> ms (avg <ms> ms, worst <ms> ms, <Q> quads); first <a>, <b>, <c> ms; idle
+drew <N> frames in <ms> ms (avg <ms> ms, worst <ms> ms, <Q> quads); first <a>, <b>, <c> ms; <K> vsyncs skipped; idle
 slow frame <n>: <T> ms = loop <L> + batch <B> + upload <U> + submit <S> + swap <W> ms; <K> uploads, <X> KB, <G> glyphs; faults <minor> minor, <major> major
 slow frame <n>: … ; faults -
 slow frames: <K> more not logged
+motion paced: <P> ms a frame, from <source>; SDL_webOSGetRefreshRate <rate>, display mode <rate>; read in <ms> ms
+warm: <G> glyphs, <U> uploads, <KB> KB in <ms> ms
 ```
+
+The owner approved four more on 2026-10-23: the `dropped` launch (written by
+`5726aa3`), and the skip count, `motion paced` and `warm` for stage 3 of the
+frame-time plan (being written).
 
 * `key` (target 2): from the SDL event's timestamp to the end of the swap of the
   first frame that drew its effect. `(<B> ms in launch)` says how much of that
@@ -85,7 +93,10 @@ slow frames: <K> more not logged
   `frame-stats.sh` turns them into the time each phase took.
 * `foreground` (target 5): from focus gained, or did-enter-foreground, to the
   first frame shown.
-* `launch` (target 6): luna's reply to `applicationManager/launch`.
+* `launch` (target 6): luna's reply to `applicationManager/launch`. A launch
+  waits until the press pulse's dip is deepest (33 ms) and a frame shows it.
+  `dropped` is a launch asked for but never called, because the shell was
+  hidden or left first; `<why>` is one of the reasons above.
 * `window` and `app`: `<event>` is `focus lost`, `focus gained`, `hidden`,
   `shown`, `minimized` or `restored`. They say how long ago the last key came
   and how many other events came since, to tell a lost focus from no keys.
@@ -114,6 +125,20 @@ slow frames: <K> more not logged
   Windows).
 * A burst logs at most 4 slow frames. `slow frames:` counts the rest, just
   before that burst's `drew` line.
+* `vsyncs skipped` (target 1): with stage 3's pacer (vsync on, the real
+  clock), how many vsyncs of the burst showed the frame before again: the
+  missed vsyncs that show on screen. Frame 3's 30 ms after an idle wait is the
+  buffer queue filling, not a skip. Every paced burst has the field, 0
+  included; without a pacer (`--fixed-dt`, or no vsync) no burst has it.
+* `motion paced`: once at start-up, with the pacer: the period motion steps
+  by and where it came from (`the display mode` or `the 60 Hz default`), what
+  each of SDL's two calls answered (`<n> Hz`, `absent` or `failed`), and how
+  long reading them took. LG's own answer is logged, not used: on the B9 it
+  is likely the panel's 120 Hz (`tv.hw.supportFrc` is true), while GL draws
+  at 60.
+* `warm`: once, at the first idle after the first frame (real clock only):
+  the glyphs made ahead for every app's titles and status lines, the atlas
+  uploads that took, and their cost, so no burst rasterises or uploads.
 * Unlike the lines above, the frame lines give times to hundredths of a ms;
   only `drew`'s total is whole.
 * The frame lines are stage 1 of "Frame time: finding the missed vsyncs"
@@ -233,7 +258,9 @@ shows its title; resting tiles are dimmed to 80%. Everything moves on springs.
 ### Tokens
 
 Every look value moves into one `style` module, so Phase 4 tunes the look in
-one place and reference screenshots change with it.
+one place and reference screenshots change with it. Done on 2026-10-23
+(04d8de1, `lumen-core`'s `style`; the simulator's screenshots were
+byte-identical before and after).
 
 | Token | Today | Note |
 |---|---|---|
@@ -256,16 +283,22 @@ These cost little or nothing per frame and do the most for the look:
    icons resolve: 4 of 30 tiles on the B9. LG's own apps, store apps and the
    inputs show a letter. Reaching their icons needs root, for example a copy
    made through Homebrew Channel's `exec`, so it waits for the owner's OK
-   (shell-mvp.md, "Still open" 4).
+   (shell-mvp.md, "Still open" 4). Built on 2026-10-23 (4f3dfc5,
+   docs/specs/icons.md), not yet run on the TV. The B9's developer folders
+   are writable by anyone (`/media/developer` and its `apps` by LG's
+   developer mode, the rest by unfixed IPKs), so the copy checks only the
+   folders our installs set and pins its own before writing (the owner's
+   call, 2026-10-23).
 2. **Banding.** The UI plane is 8-bit. The background falls from `#0E1222` to
    black over 1,080 px, so blue steps about every 32 px and red about every
    77 px. On an OLED in a dark room that can show as bands; it hasn't been
    looked at on the TV yet. Fix: an ordered dither of half a step in the
    fragment shader, a few instructions per pixel, measured with target 1.
-3. **Kerning.** Inter isn't kerned: fontdue reads kerning only from a `kern`
-   table, and Inter keeps it in GPOS. The 72 px shelf title shows it most. Fix:
-   pull the pairs out of GPOS when the shell is built, so nothing is added at
-   run time.
+3. **Kerning.** Inter wasn't kerned: fontdue reads kerning only from a `kern`
+   table, and Inter keeps it in GPOS. The 72 px shelf title shows it most.
+   Done on 2026-10-23 (e823515): the pairs are pulled out of GPOS ahead of
+   time into a 19 KB table the shell builds in, so nothing is parsed at run
+   time. "Yo" closes by 7.1 px at 72 px. Not yet seen on the TV.
 
 ### Phase 4 features
 
@@ -344,7 +377,9 @@ The roadmap's Phase 4 is done when all three pass.
    2026-10-22 (targets 2, 4, 6 and the shell's half of 5); 3 and 5 still
    need the slow-motion video.
 3. The cheap fixes: the `style` module, dither, kerning; icons through the
-   root copy.
+   root copy. The style module and kerning were done on 2026-10-23 and the
+   icon copy built; dither waits for the frame-time work, since it costs
+   pixels.
 4. Phase 4, in this order: focus light and tilt, Top Shelf, glass (B, frosted
    still), Control Center, editing.
 

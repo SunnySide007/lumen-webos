@@ -108,9 +108,19 @@ sh tools/tv.sh run 'ls -d /media/developer/apps/usr/palm/applications/'$APP' 2>/
   that can't be put back. The owner may name an IPK to restore instead.
 
   `ares-package` makes every folder 0777, and an install applies the IPK's
-  folder modes to the shared `applications` folder too. That is how the TV
-  was before, so the restore keeps it. Once `tools/ipk/fix_modes.py` (shell
-  branch) is on `main`, run it on the restore IPK as `make ipk` does there.
+  folder modes to the shared folders too: `/media/developer/apps/usr`,
+  `usr/palm` and `usr/palm/applications`, and the app's own. Restoring an
+  unfixed IPK leaves them all writable by anyone (the B9 on 2026-10-23,
+  after B1's restore), and the icon copy refuses to run under them
+  (docs/specs/icons.md). So fix the restore IPK's modes as `make ipk` does,
+  with `tools/ipk/fix_modes.py` from the shell branch (main after the merge):
+
+  ```sh
+  sh tools/dev.sh python3 -I tools/ipk/fix_modes.py "$OUT"/restore/*.ipk
+  ```
+
+  It changes only modes (folders 0755, files 0644, executables 0755), never
+  the files, so the restore still matches the backup's binary.
 * **If it is not installed,** the restore is removing it.
 
 ## 3. Step B: install (ask first)
