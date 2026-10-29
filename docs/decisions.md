@@ -149,3 +149,47 @@ through Homebrew Channel's `exec` service, and P3 finds out. If neither of
 the first two routes works, the pad needs a small root helper, and that
 helper needs a security review. Speed claims wait for measurements, because
 the B9 doesn't expose its clock speeds.
+
+## 9. Remote: Lumen's own control path, LG's second-screen gateway closed (proposed)
+
+**Status.** Proposed on 2026-10-28, before any of it was built. It becomes
+accepted, with any changes, once the owner approves
+[specs/remote.md](specs/remote.md) and its R2 passes on the B9. Number 8 is
+taken by the home-loop record on `refactor/loop-pass`.
+
+**Context.** The owner wants to control the B9 from their Windows PC, from
+their Pixel's browser and with Google Home, and from away through a VPN. The
+PC app is a tray popup with bold web animations. LG's usual routes are:
+
+* **Its second-screen API** on ports 3000 and 3001 (SSAP). Its PIN check
+  could be skipped on the B9's generation (CVE-2023-6317, confirmed on
+  webOS 4.9.7), and a pre-auth chain through 3001 was published in October
+  2026 for webOS 7.5. The B9's updates stay blocked (safety rule 8), so the
+  gateway won't be fixed, and nobody at home uses it.
+* **The ThinQ cloud,** which decision 5 blocks.
+
+**Decision.**
+
+- **Close SSAP to the LAN** (privacy P10) and build Lumen's own path:
+  `lumen-ctl` on the TV, the only part with root, with a fixed list of verbs.
+- **The PC app** (Tauri 2) reaches it through the SSH door that's already
+  there, with a key that can run only `lumen-ctl`. The PC adds no port.
+- **The phone** reaches it through `lumen-remote`, an unprivileged HTTPS
+  server on one new port. It's off by default and paired with a code shown
+  on the TV.
+- **Power on** is Wake-on-LAN from the PC, and HDMI-CEC through the Google TV
+  Streamer from Google Home.
+- **Google Home** goes through the Streamer's CEC first. Home Assistant runs
+  on a separate always-on box only if CEC isn't enough, and never through
+  SSAP.
+- **No telemetry and no updater** in the PC app.
+
+**Cost.**
+
+* **Code exposed on the TV:** a new LAN listener (R4) and a root process that
+  reads requests (R2), each needing a security review. With 3000 and 3001
+  closed, the LAN still sees fewer of the TV's doors than today.
+* **Remote keys** may have no clean route on webOS 4.
+* **Data:** Google hears every voice command, and the PC app's WebView2 sends
+  Windows' required diagnostic data whatever Lumen does.
+* **LG's phone apps** (ThinQ, and remote apps that use SSAP) stop working.
