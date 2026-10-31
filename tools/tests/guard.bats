@@ -49,15 +49,23 @@ case "$*" in
         echo "${*#-t nat -A OUTPUT }" >>"$T/nat" ;;
     "-t nat -D OUTPUT "*)
         spec=${*#-t nat -D OUTPUT }
-        grep -qxF -- "$spec" "$T/nat" || exit 1
-        awk -v s="$spec" '!done && $0 == s { done = 1; next } { print }' "$T/nat" >"$T/nat.new"
+        case $spec in
+            *[!0-9]*)
+                [ -z "${FAKE_DELETE_BY_SPEC_FAILS:-}" ] || exit 1
+                grep -qxF -- "$spec" "$T/nat" || exit 1
+                awk -v s="$spec" '!done && $0 == s { done = 1; next } { print }' "$T/nat" >"$T/nat.new" ;;
+            *)
+                [ "$spec" -ge 1 ] && [ "$spec" -le "$(wc -l <"$T/nat")" ] || exit 1
+                awk -v n="$spec" 'NR != n' "$T/nat" >"$T/nat.new" ;;
+        esac
         mv "$T/nat.new" "$T/nat" ;;
     "-t nat -S OUTPUT")
         echo "-P OUTPUT ACCEPT"
         sed 's/^/-A OUTPUT /' "$T/nat" ;;
     "-t nat -L"*)
         echo "Chain OUTPUT (policy ACCEPT)"
-        sed 's/^-p \([a-z]*\).*--to-destination \(.*\)$/DNAT \1 -- 0.0.0.0\/0 0.0.0.0\/0 \1 dpt:53 DSCP match !0x07 to:\2/' "$T/nat" ;;
+        sed 's/^-p \([a-z]*\).*--to-destination \(.*\)$/DNAT \1 -- 0.0.0.0\/0 0.0.0.0\/0 \1 dpt:53 DSCP match !0x07 to:\2/' "$T/nat" |
+            if [ "${*%--line-numbers}" != "$*" ]; then awk '{ print NR, $0 }'; else cat; fi ;;
 esac
 EOF
     # lumen-guard: runs until SIGTERM. --probe answers unless told not to;
@@ -90,6 +98,13 @@ if [ $# -eq 0 ]; then
     exit 0
 fi
 echo "mount $*" >>"$CALLS"
+if [ "$1" = -o ] && [ "$2" = remount,bind,ro ]; then
+    [ -z "${FAKE_REMOUNT_FAILS:-}" ] || exit 1
+    grep -q " $4 " "$T/mounts" || exit 1
+    sed "s| $4 ext4 rw | $4 ext4 ro |" "$T/mounts" >"$T/mounts.new"
+    mv "$T/mounts.new" "$T/mounts"
+    exit 0
+fi
 [ "$1" = --bind ] && [ -z "${FAKE_MOUNT_FAILS:-}" ] || exit 1
 n=$(ls "$T/mstack" | wc -l)
 ln -f "$3" "$T/mstack/$n"
@@ -224,13 +239,15 @@ $TCP_RULE" ]
     printf 'ok\nmiss\nmiss\nok\nmiss\nmiss\nok\n' >"$T/named"
     run_hook
     wait_for 'goes through Guard'
-    # The start's check and seven heartbeats.
+    # The start's check of the real name, then seven heartbeats of the
+    # probe's own name, which tools/guard.sh log leaves out.
     for _ in $(seq 200); do
-        [ "$(grep -c -- '--name us.lgtvsdp.com' "$CALLS")" -ge 8 ] && break
+        [ "$(grep -c -- '--name heartbeat.lumen.invalid' "$CALLS")" -ge 7 ] && break
         sleep 0.05
     done
-    [ "$(grep -c -- '--name us.lgtvsdp.com' "$CALLS")" -ge 8 ]
-    [ "$(grep -c 'heartbeat: no answer for us.lgtvsdp.com' "$T/tmp/lumen-guard.log")" -eq 4 ]
+    [ "$(grep -c -- '--name us.lgtvsdp.com' "$CALLS")" -eq 1 ]
+    [ "$(grep -c -- '--name heartbeat.lumen.invalid' "$CALLS")" -ge 7 ]
+    [ "$(grep -c 'heartbeat: no answer for heartbeat.lumen.invalid' "$T/tmp/lumen-guard.log")" -eq 4 ]
     grep -q '(2 of 3)' "$T/tmp/lumen-guard.log"
     not grep -q '(3 of 3)\|fail open' "$T/tmp/lumen-guard.log"
     not grep -q '^umount\|-t nat -D' "$CALLS"
@@ -367,10 +384,67 @@ $TCP_RULE" ]
     PATH="$T/bin:$PATH" mount --bind "$T/guard/resolv.conf" "$T/misc/resolv.conf"
     run_hook
     wait_for 'goes through Guard'
-    [ "$(grep -c '^mount ' "$CALLS")" -eq 2 ]
-    [ "$(first '^umount ')" -lt "$(last '^mount ')" ]
+    [ "$(grep -c '^mount --bind ' "$CALLS")" -eq 2 ]
+    [ "$(first '^umount ')" -lt "$(last '^mount --bind ')" ]
     [ "$(wc -l <"$T/mounts")" -eq 1 ]
     [ "$(ls "$T/mstack")" = 0 ]
+}
+
+@test "after the mount the hook makes it read-only, before the real name's check and the rules" {
+    connman
+    run_hook
+    wait_for 'goes through Guard'
+    grep -q "the mount over $T/misc/resolv.conf is read-only" "$T/tmp/lumen-guard.log"
+    grep -q "/dev/fake $T/misc/resolv.conf ext4 ro " "$T/mounts"
+    [ "$(first '^mount --bind ')" -lt "$(first '^mount -o remount,bind,ro ')" ]
+    [ "$(first '^mount -o remount,bind,ro ')" -lt "$(first '^guard --probe 127.0.0.2:53 --name us.lgtvsdp.com$')" ]
+    [ "$(first '^mount -o remount,bind,ro ')" -lt "$(first '-t nat -A')" ]
+}
+
+@test "a remount that fails is noted and Guard still goes through" {
+    connman
+    FAKE_REMOUNT_FAILS=1 run_hook
+    wait_for 'goes through Guard'
+    grep -q 'note: could not make the mount' "$T/tmp/lumen-guard.log"
+    [ "$(cat "$T/etc/resolv.conf")" = "$OURS" ]
+    [ -s "$T/nat" ]
+}
+
+@test "when connman writes its file over Guard's through the mount, the watchdog restores it" {
+    connman
+    run_hook
+    wait_for 'goes through Guard'
+    # Through the fake mount the two paths are one file, as on the TV.
+    echo "$CONNMAN" >"$T/misc/resolv.conf"
+    wait_for "Guard's file restored"
+    [ "$(cat "$T/etc/resolv.conf")" = "$OURS" ]
+    [ "$(cat "$T/guard/resolv.conf")" = "$OURS" ]
+    not grep -q 'fail open' "$T/tmp/lumen-guard.log"
+    not grep -q '^umount\|-t nat -D' "$CALLS"
+}
+
+@test "when the mount is gone the hook fails open: rules out, Guard stopped" {
+    connman
+    run_hook
+    wait_for 'goes through Guard'
+    PATH="$T/bin:$PATH" umount "$T/misc/resolv.conf"
+    wait_for "the mount over $T/misc/resolv.conf is gone"
+    wait_for '(fail open)'
+    connmans
+    [ ! -s "$T/nat" ]
+    grep -qx 'guard stopped' "$CALLS"
+    [ ! -e "$T/guard/lumen-guard.pid" ]
+}
+
+@test "a rule iptables won't delete by its own spec is deleted by its number" {
+    connman
+    FAKE_DELETE_BY_SPEC_FAILS=1 run_hook
+    wait_for 'goes through Guard'
+    stop_guard
+    wait_for "resolv.conf is connman's, no nat rules, Guard stopped (fail open)"
+    [ ! -s "$T/nat" ]
+    grep -q -- '-t nat -L OUTPUT -n --line-numbers' "$CALLS"
+    [ "$(grep -c -- '-t nat -D OUTPUT [0-9]' "$CALLS")" -eq 2 ]
 }
 
 @test "with Guard already running the hook does nothing" {
@@ -446,11 +520,13 @@ commands() {
             return 1
         }
     done
-    # ... and the only mount is Guard's file over connman's, and its undoing.
+    # ... and the only mounts are Guard's file over connman's, that mount
+    # made read-only, and its undoing.
     run grep -Eo '\bu?mount\b[^;|&]*[^;|&[:space:]]' <<<"$code"
-    [ "${#lines[@]}" -eq 2 ]
+    [ "${#lines[@]}" -eq 3 ]
     [ "${lines[0]}" = 'umount "$RESOLV"' ]
     [ "${lines[1]}" = 'mount --bind "$OURS" "$RESOLV"' ]
+    [ "${lines[2]}" = 'mount -o remount,bind,ro "$OURS" "$RESOLV" 2>/dev/null' ]
     grep -qF -- '--log "$DIR" --status "$DIR/status"' "$hook"
 }
 
@@ -508,7 +584,7 @@ commands() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"already runs"* ]]
     [ "$(grep -c '^guard --listen' "$CALLS")" -eq 1 ]
-    [ "$(grep -c '^mount ' "$CALLS")" -eq 1 ]
+    [ "$(grep -c '^mount --bind ' "$CALLS")" -eq 1 ]
 }
 
 @test "guard-apply.sh reports a start that failed open" {

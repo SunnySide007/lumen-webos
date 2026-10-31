@@ -12,10 +12,12 @@
 # docs/safety.md: it does nothing while the kill switch exists and returns at
 # once. Its start-up ends within about five minutes, with Guard in place or
 # nothing changed. Then it stays as Guard's watchdog: every 5 s it checks
-# that Guard lives and the kill switch is absent, and every 60 s it asks
-# Guard for a real name. Guard gone, the kill switch, or three names in a row
-# without an answer, and it fails open: connman's resolv.conf back, the rules
-# out, Guard stopped, in that order.
+# that Guard lives, the kill switch is absent, the mount is still there and
+# resolv.conf still names Guard (rewriting its file if connman wrote over
+# it), and every 60 s it asks Guard for a name. Guard gone, the kill switch,
+# the mount gone, or three names in a row without an answer, and it fails
+# open: connman's resolv.conf back, the rules out, Guard stopped, in that
+# order.
 # Log: /tmp/lumen-guard.log. tools/guard.sh installs, checks and removes it;
 # profiles/privacy/guard-apply.sh runs it by hand from the copy tools/guard.sh
 # push leaves in /var/lib/lumen/guard; guard-undo.sh stops Guard now.
@@ -35,6 +37,11 @@ DSCP=7
 # On the allowlist, and asked of the router: Guard sends nothing back when
 # the router doesn't answer, so an answer proves both.
 CHECK=us.lgtvsdp.com
+# The watchdog's name, once a minute: under .invalid, so the router answers
+# NXDOMAIN (an answer all the same, as the start-up probe's own .invalid
+# name shows) and tools/guard.sh log can leave these lines out of the week's
+# summary instead of counting them with the store's.
+HEARTBEAT=heartbeat.lumen.invalid
 
 [ -e "$KILL" ] && exit 0
 
@@ -65,6 +72,14 @@ rule() {
         -m dscp ! --dscp "$DSCP" -j DNAT --to-destination "$LISTEN"
 }
 
+# The last rule to Guard by its number, for an iptables whose -S output
+# doesn't feed back into -D.
+remove_rule_by_number() {
+    num=$(iptables -t nat -L OUTPUT -n --line-numbers |
+        awk -v to="to:$LISTEN" 'index($0, to) { last = $1 } END { print last }')
+    [ -n "$num" ] && iptables -t nat -D OUTPUT "$num"
+}
+
 # Every rule that sends lookups to Guard, deleted by the spec iptables prints
 # for it, so it needs no upstream.
 remove_rules() {
@@ -75,7 +90,7 @@ remove_rules() {
         [ -n "$spec" ] || return 0
         [ "$n" -lt 10 ] || return 1
         # shellcheck disable=SC2086 # the spec's words; none has a space
-        iptables -t nat -D $spec || return 1
+        iptables -t nat -D $spec 2>/dev/null || remove_rule_by_number || return 1
         n=$((n + 1))
     done
 }
@@ -179,6 +194,14 @@ running() {
     mount --bind "$OURS" "$RESOLV" || fail_open "FAILED to mount $OURS over $RESOLV"
     grep -qx 'nameserver 127.0.0.2' /etc/resolv.conf ||
         fail_open "/etc/resolv.conf does not name 127.0.0.2 after the mount"
+    # Read-only, so connman's in-place rewrite of its file (open, truncate,
+    # write) fails instead of landing in Guard's file. Best effort: the
+    # watchdog below also puts the file right if it changes.
+    if mount -o remount,bind,ro "$OURS" "$RESOLV" 2>/dev/null; then
+        say "the mount over $RESOLV is read-only"
+    else
+        say "note: could not make the mount over $RESOLV read-only"
+    fi
     "$BIN" --probe "$LISTEN" --name "$CHECK" 2>/dev/null ||
         fail_open "no answer for $CHECK through Guard"
     remove_rules
@@ -192,15 +215,21 @@ running() {
     while alive; do
         [ ! -e "$KILL" ] || fail_open "the kill switch appeared"
         sleep 5
+        mounted || fail_open "the mount over $RESOLV is gone"
+        if ! grep -qx 'nameserver 127.0.0.2' /etc/resolv.conf 2>/dev/null; then
+            printf '# Lumen Guard\nnameserver 127.0.0.2\n' >"$OURS" ||
+                fail_open "FAILED to restore $OURS"
+            say "resolv.conf no longer named Guard (connman wrote it?); Guard's file restored"
+        fi
         tick=$((tick + 1))
         [ "$tick" -ge 12 ] || continue
         tick=0
         alive || break
-        if "$BIN" --probe "$LISTEN" --name "$CHECK" 2>/dev/null; then
+        if "$BIN" --probe "$LISTEN" --name "$HEARTBEAT" 2>/dev/null; then
             misses=0
         else
             misses=$((misses + 1))
-            say "heartbeat: no answer for $CHECK ($misses of 3)"
+            say "heartbeat: no answer for $HEARTBEAT ($misses of 3)"
             [ "$misses" -lt 3 ] || fail_open "three heartbeats in a row got no answer"
         fi
     done

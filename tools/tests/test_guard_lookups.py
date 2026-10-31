@@ -66,6 +66,17 @@ class GuardLogTest(unittest.TestCase):
         self.assertIn('1 lookups of 1 names', report)
         self.assertIn('3 of 4 lines skipped', report)
 
+    def test_the_hooks_heartbeat_probes_are_left_out(self):
+        log = self.write('lookups.log', f'{T0} A www.netflix.com allow\n'
+                                        f'{T0 + 60} A heartbeat.lumen.invalid allow\n'
+                                        f'{T0 + 120} A heartbeat.lumen.invalid allow\n'
+                                        f'{T0 + 121} A lumen-probe.invalid allow\n')
+        report = self.run_main(log)
+        self.assertIn('2 lookups of 2 names', report)
+        self.assertIn('0 of 4 lines skipped, 2 heartbeat probes (*.lumen.invalid) left out', report)
+        self.assertNotIn('heartbeat.lumen.invalid', report.split('left out', 1)[1])
+        self.assertIn('| lumen-probe.invalid | 1 | A |', report)
+
     def test_names_stay_in_one_cell(self):
         log = self.write('lookups.log', f'{T0} TXT evil|name allow\n')
         self.assertIn('| evil\\|name | 1 | TXT |', self.run_main(log))

@@ -28,9 +28,14 @@ class Name:
         self.seen, self.types, self.verdicts = Seen(), set(), set()
 
 
+# The boot hook's own probes (profiles/privacy/lumen-guard: the watchdog's
+# heartbeat once a minute) end in this; they are Guard's, not the TV's.
+PROBE_SUFFIX = '.lumen.invalid'
+
+
 def read_log(paths):
-    """Returns ({name: Name}, lines read, lines skipped)."""
-    names, read, skipped = {}, 0, 0
+    """Returns ({name: Name}, lines read, lines skipped, probe lines left out)."""
+    names, read, skipped, probes = {}, 0, 0, 0
     for path in paths:
         with open(path, encoding='ascii', errors='replace') as f:
             for line in f:
@@ -40,21 +45,25 @@ def read_log(paths):
                     skipped += 1
                     continue
                 ts, qtype, name, verdict = int(fields[0]), fields[1], fields[2], fields[3]
+                if name.endswith(PROBE_SUFFIX):
+                    probes += 1
+                    continue
                 entry = names.setdefault(name, Name())
                 entry.seen.add(ts)
                 entry.types.add(qtype)
                 entry.verdicts.add(verdict)
-    return names, read, skipped
+    return names, read, skipped, probes
 
 
-def render(names, read, skipped, files, lists):
+def render(names, read, skipped, probes, files, lists):
     lookups = sum(n.seen.count for n in names.values())
     blocked = {k: n for k, n in names.items() if 'would-block' in n.verdicts or 'block' in n.verdicts}
     first = min((n.seen.first for n in names.values()), default=None)
     last = max((n.seen.last for n in names.values()), default=None)
     out = ['# Guard lookups', '']
     out.append(f'{files} file(s), {lookups} lookups of {len(names)} names, '
-               f'{when(first)} to {when(last)}; {skipped} of {read} lines skipped. '
+               f'{when(first)} to {when(last)}; {skipped} of {read} lines skipped, '
+               f'{probes} heartbeat probes (*{PROBE_SUFFIX}) left out. '
                f'Would-block: {sum(n.seen.count for n in blocked.values())} lookups of '
                f'{len(blocked)} names.')
     out.append('Counts are connman\'s questions to the router (its cache answers the rest). '
@@ -80,12 +89,12 @@ def main(argv=None):
     parser.add_argument('--hosts', default=os.path.join(PROFILE, 'b9-aggressive.hosts'))
     args = parser.parse_args(argv)
     try:
-        names, read, skipped = read_log(args.logs)
+        names, read, skipped, probes = read_log(args.logs)
     except OSError as e:
         print(f'lookups.py: {e}', file=sys.stderr)
         return 1
     lists = Lists.load(args.allowlist, args.required, args.hosts)
-    sys.stdout.write(render(names, read, skipped, len(args.logs), lists))
+    sys.stdout.write(render(names, read, skipped, probes, len(args.logs), lists))
     return 0
 
 

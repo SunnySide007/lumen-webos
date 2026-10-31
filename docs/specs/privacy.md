@@ -226,7 +226,8 @@ lumen-guard --probe ADDR:PORT [--name NAME]
   a line can't be forged; a query whose question can't be read is logged
   as `- -`. Names only, no addresses or answers: every asker is on
   loopback, so Guard can't tell which program asked. The hook's heartbeat
-  adds one `us.lgtvsdp.com` lookup a minute. A line that can't be written
+  adds one `heartbeat.lumen.invalid` lookup a minute, which `tools/guard.sh
+  log` leaves out of its summary. A line that can't be written
   (a full disk) is dropped and counted. It never leaves the TV unless
   fetched over SSH (`tools/guard.sh log`, which also summarises it). Started
   at every boot, it outlives a power-off, which is what the capture lacked.
@@ -249,17 +250,23 @@ lumen-guard --probe ADDR:PORT [--name NAME]
   Guard and the router behind it. Then the hook:
   1. writes `/var/lib/lumen/guard/resolv.conf` (`nameserver 127.0.0.2`);
   2. bind-mounts that file over `/var/lib/misc/resolv.conf`;
-  3. checks that `/etc/resolv.conf` now names 127.0.0.2 and that
+  3. checks that `/etc/resolv.conf` now names 127.0.0.2, makes the mount
+     read-only if the kernel lets it (so connman's in-place rewrite of its
+     file fails instead of landing in Guard's), and checks that
      `lumen-guard --probe 127.0.0.2:53 --name us.lgtvsdp.com` answers;
   4. adds the two rules.
 - **Fails open:** if any of those steps fails, the hook unmounts every copy
   of the mount, removes the rules and stops Guard, in that order, so
   lookups go through connman to the router as before. Once the steps pass,
   the shell stays as Guard's watchdog:
-  - every 5 s it checks that Guard is alive and the kill switch is absent;
-  - every 60 s it asks Guard for `us.lgtvsdp.com` (2 s at most).
+  - every 5 s it checks that Guard is alive, the kill switch is absent, the
+    mount is still there and `/etc/resolv.conf` still names 127.0.0.2,
+    rewriting Guard's file if connman wrote its own over it;
+  - every 60 s it asks Guard for `heartbeat.lumen.invalid` (2 s at most):
+    the router answers NXDOMAIN, an answer all the same.
   It fails open the same way, and logs why, when Guard exits, when the kill
-  switch appears, or when three heartbeats in a row get no answer. Guard
+  switch appears, when the mount is gone, or when three heartbeats in a row
+  get no answer. Guard
   isn't restarted. A reboot clears the mount and the rules anyway (P3).
   That is how the hook keeps safety rules 4 and 5: the start-up is
   time-boxed, and the watchdog afterwards only sleeps, reads `/proc` and

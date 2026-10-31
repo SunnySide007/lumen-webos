@@ -17,6 +17,14 @@ OURS=$DIR/resolv.conf
 RESOLV=/var/lib/misc/resolv.conf
 LISTEN=127.0.0.2:53
 
+# The last rule to Guard by its number, for an iptables whose -S output
+# doesn't feed back into -D.
+remove_rule_by_number() {
+    num=$(iptables -t nat -L OUTPUT -n --line-numbers |
+        awk -v to="to:$LISTEN" 'index($0, to) { last = $1 } END { print last }')
+    [ -n "$num" ] && iptables -t nat -D OUTPUT "$num"
+}
+
 # Every rule that sends lookups to Guard, deleted by the spec iptables prints
 # for it, so it needs no upstream.
 remove_rules() {
@@ -27,7 +35,7 @@ remove_rules() {
         [ -n "$spec" ] || return 0
         [ "$n" -lt 10 ] || return 1
         # shellcheck disable=SC2086 # the spec's words; none has a space
-        iptables -t nat -D $spec || return 1
+        iptables -t nat -D $spec 2>/dev/null || remove_rule_by_number || return 1
         n=$((n + 1))
     done
 }
