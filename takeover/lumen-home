@@ -12,7 +12,8 @@
 # In the background: it waits for SAM to answer (at most a minute), then
 # once a minute for about four minutes reads the default home and, while it
 # is Lumen, closes LG's Home if it runs and isn't in front, and logs SAM's
-# running list 10 s later, which shows whether keep-alive brought it back.
+# running list 10 s later: LG's Home gone, still exiting (the pid it had),
+# or brought back by keep-alive (another pid).
 #
 # docs/safety.md: it does nothing while the kill switch exists, returns at
 # once, and its background work ends by itself within five minutes; without
@@ -107,14 +108,21 @@ OUT=$(log_to)
             sed -n 's/.*"defaultApps"[[:space:]]*:[[:space:]]*{[^{}]*"home"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
     }
 
-    # The ids in SAM's running list, on one line.
-    running_ids() {
-        ask "$AM/running" '{}' | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' |
+    # ids_in LIST: the ids in SAM's running list (its answer), on one line.
+    ids_in() {
+        printf '%s\n' "$1" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' |
             sed 's/.*"\([^"]*\)"$/\1/' | tr '\n' ' '
     }
 
-    lg_running() {
-        case " $(running_ids) " in
+    # lg_pid_in LIST: LG's Home's processid in SAM's running list, or nothing.
+    # Each app is one flat object there.
+    lg_pid_in() {
+        printf '%s\n' "$1" | grep -o "{[^{}]*\"id\"[[:space:]]*:[[:space:]]*\"$LG\"[^{}]*}" |
+            sed -n 's/.*"processid"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
+    }
+
+    lg_in() {
+        case " $(ids_in "$1") " in
             *" $LG "*) return 0 ;;
         esac
         return 1
@@ -164,23 +172,38 @@ OUT=$(log_to)
             say "the default home is ${home:-unreadable}, not Lumen; nothing done"
             break
         fi
-        if ! lg_running; then
+        list=$(ask "$AM/running" '{}')
+        if ! ok "$list"; then
+            say "round $round: SAM didn't answer"
+        elif ! lg_in "$list"; then
             say "round $round: LG Home is not running"
         elif lg_in_front; then
             say "round $round: LG Home is in front; left alone"
         else
+            pid=$(lg_pid_in "$list")
             answer=$(ask "$AM/closeByAppId" "{\"id\":\"$LG\",\"forceMode\":true}")
             if ok "$answer"; then
-                say "round $round: closed LG Home"
+                say "round $round: closed LG Home (pid ${pid:-unknown})"
             else
                 say "round $round: FAILED to close LG Home: ${answer:-no answer}"
             fi
             sleep 10
-            ids=$(running_ids)
-            case " $ids " in
-                *" $LG "*) say "round $round: LG Home is back 10 s later; running: $ids" ;;
-                *) say "round $round: LG Home stayed closed 10 s later; running: $ids" ;;
-            esac
+            # The same pid is LG's Home still on its way out (the B9 took
+            # more than 10 s on 2026-10-31); another is keep-alive's restart.
+            list=$(ask "$AM/running" '{}')
+            ids=$(ids_in "$list")
+            now=$(lg_pid_in "$list")
+            if ! ok "$list"; then
+                say "round $round: SAM didn't answer 10 s later"
+            elif ! lg_in "$list"; then
+                say "round $round: LG Home stayed closed 10 s later; running: $ids"
+            elif [ -z "$pid" ] || [ -z "$now" ]; then
+                say "round $round: LG Home still listed 10 s later, pid unknown; running: $ids"
+            elif [ "$now" = "$pid" ]; then
+                say "round $round: LG Home still exiting 10 s later (pid $pid); running: $ids"
+            else
+                say "round $round: LG Home is back 10 s later as pid $now (was $pid); running: $ids"
+            fi
         fi
         # The next round only if it can start by the deadline.
         [ "$round" -lt 5 ] || break

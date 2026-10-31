@@ -71,14 +71,22 @@ case $uri in
     com.webos.applicationManager/running)
         n=$(grep -c "^luna $uri" "$CALLS")
         if [ "$n" -le "${FAKE_SAM_DOWN_FOR:-0}" ]; then echo '{"returnValue":false,"errorText":"not ready"}'; exit 0; fi
+        if [ "$n" -ge "${FAKE_SAM_DOWN_FROM:-99999}" ]; then echo '{"returnValue":false,"errorText":"not ready"}'; exit 0; fi
         printf '{"returnValue":true,"running":['
         sep=
-        while read -r id; do printf '%s{"id":"%s","processid":"42","webprocessid":""}' "$sep" "$id"; sep=,; done <"$T/running"
+        while read -r id; do
+            pid=42
+            [ ! -f "$T/pid_$id" ] || pid=$(cat "$T/pid_$id")
+            printf '%s{"id":"%s","processid":"%s","webprocessid":""}' "$sep" "$id" "$pid"
+            sep=,
+        done <"$T/running"
         echo ']}' ;;
     com.webos.applicationManager/getForegroundAppInfo)
         printf '{"appId":"%s","windowId":"","processId":"","returnValue":true}\n' "$(cat "$T/front")" ;;
     com.webos.applicationManager/closeByAppId)
         if [ -n "${FAKE_CLOSE_FAILS:-}" ]; then echo '{"returnValue":false,"errorText":"busy"}'; exit 0; fi
+        # A slow exit: still listed, with its pid, until the next minute.
+        if [ -n "${FAKE_SLOW_EXIT:-}" ]; then touch "$T/exiting"; echo '{"returnValue":true}'; exit 0; fi
         id=$(printf '%s\n' "$payload" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
         grep -vx "$id" "$T/running" >"$T/running.new"; mv "$T/running.new" "$T/running"
         echo '{"returnValue":true}' ;;
@@ -92,8 +100,9 @@ case $uri in
     *) echo '{"returnValue":false,"errorText":"unknown method"}' ;;
 esac
 EOF
-    # sleep: a moment, and the uptime moves on by the seconds asked. A fake
-    # SAM brings LG's Home back while it is kept alive, and the kill switch or
+    # sleep: a moment, and the uptime moves on by the seconds asked. A slowly
+    # exiting LG's Home is gone after a minute's sleep; a fake SAM brings it
+    # back, with the next pid, while it is kept alive; and the kill switch or
     # the home can change once the uptime passes a mark.
     cat >"$T/bin/sleep" <<'EOF'
 #!/bin/sh
@@ -101,8 +110,14 @@ echo "sleep $1" >>"$CALLS"
 read -r up _ <"$T/uptime"
 up=$((${up%%.*} + $1))
 echo "$up.00 0.00" >"$T/uptime"
+if [ -e "$T/exiting" ] && [ "$1" -ge 60 ]; then
+    grep -vx com.webos.app.home "$T/running" >"$T/running.new"
+    mv "$T/running.new" "$T/running"
+    rm "$T/exiting"
+fi
 if [ -n "${FAKE_KEEPALIVE:-}" ] && ! grep -qx com.webos.app.home "$T/running"; then
     echo com.webos.app.home >>"$T/running"
+    echo $(($(cat "$T/pid_com.webos.app.home" 2>/dev/null || echo 42) + 1)) >"$T/pid_com.webos.app.home"
 fi
 [ -z "${FAKE_KILL_AT:-}" ] || [ "$up" -lt "$FAKE_KILL_AT" ] || touch "$T/lumen_disable"
 [ -z "${FAKE_LG_HOME_AT:-}" ] || [ "$up" -lt "$FAKE_LG_HOME_AT" ] || echo com.webos.app.home >"$T/home"
@@ -359,7 +374,7 @@ commands() {
     wait_done
     log=$(cat "$T/lumen/log/lumen-home.log")
     [[ "$log" == *"SAM answers"* ]]
-    [[ "$log" == *"round 1: closed LG Home"* ]]
+    [[ "$log" == *"round 1: closed LG Home (pid 42)"* ]]
     [[ "$log" == *"round 1: LG Home stayed closed 10 s later; running: com.webos.app.hdmi3"* ]]
     [[ "$log" == *"round 2: LG Home is not running"* ]]
     run grep -c '^luna com.webos.applicationManager/closeByAppId {"id":"com.webos.app.home","forceMode":true}$' "$CALLS"
@@ -372,10 +387,45 @@ commands() {
     : >"$CALLS"
     FAKE_KEEPALIVE=1 run_hook
     wait_done
-    [[ "$(cat "$T/lumen/log/lumen-home.log")" == *"round 1: LG Home is back 10 s later"* ]]
+    log=$(cat "$T/lumen/log/lumen-home.log")
+    [[ "$log" == *"round 1: LG Home is back 10 s later as pid 43 (was 42)"* ]]
+    [[ "$log" == *"round 2: closed LG Home (pid 43)"* ]]
     run grep -c 'closeByAppId' "$CALLS"
     [ "$output" -ge 3 ]
     [ "$output" -le 5 ]
+}
+
+@test "the hook tells LG's Home still exiting 10 s later, the same pid, from keep-alive's restart" {
+    run_tv apply.sh
+    : >"$CALLS"
+    FAKE_SLOW_EXIT=1 run_hook
+    wait_done
+    log=$(cat "$T/lumen/log/lumen-home.log")
+    [[ "$log" == *"round 1: LG Home still exiting 10 s later (pid 42); running: com.webos.app.hdmi3 com.webos.app.home"* ]]
+    [[ "$log" == *"round 2: LG Home is not running"* ]]
+    not grep -q 'is back' <<<"$log"
+    [ "$(grep -c closeByAppId "$CALLS")" -eq 1 ]
+}
+
+@test "the hook says so when it can't read LG's Home's pid, or SAM stops answering" {
+    run_tv apply.sh
+    : >"$T/pid_$LG"
+    FAKE_SLOW_EXIT=1 run_hook
+    wait_done
+    log=$(cat "$T/lumen/log/lumen-home.log")
+    [[ "$log" == *"round 1: closed LG Home (pid unknown)"* ]]
+    [[ "$log" == *"round 1: LG Home still listed 10 s later, pid unknown"* ]]
+    rm "$T/pid_$LG"
+    echo "$LG" >>"$T/running"
+    : >"$CALLS"
+    # The wait for SAM and round 1's list answer; the rest don't.
+    FAKE_SAM_DOWN_FROM=3 run_hook
+    wait_done
+    log=$(cat "$T/lumen/log/lumen-home.log")
+    [[ "$log" == *"round 1: closed LG Home (pid 42)"* ]]
+    [[ "$log" == *"round 1: SAM didn't answer 10 s later"* ]]
+    [[ "$log" == *"round 2: SAM didn't answer"* ]]
+    [ "$(grep -c closeByAppId "$CALLS")" -eq 1 ]
 }
 
 @test "the hook's work ends by itself within five minutes, even with a late SAM and a close each round" {
@@ -465,6 +515,12 @@ commands() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"round 1: LG Home stayed closed"* ]]
     [[ "$output" == *"luna-send -n 1 luna://com.webos.applicationManager/running"* ]]
+    [[ "$output" == *"the first round ran"* ]]
+    wait_done
+    echo "$LG" >>"$T/running"
+    FAKE_SLOW_EXIT=1 run sh "$T/home-apply.sh" 3>&-
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"round 1: LG Home still exiting"* ]]
     [[ "$output" == *"the first round ran"* ]]
     wait_done
 }

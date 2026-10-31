@@ -49,6 +49,7 @@ i=0
 while [ "$i" -lt 90 ]; do
     case $(cat "$LOG") in
         *"round 1: LG Home is back"* | *"round 1: LG Home stayed"* | \
+            *"round 1: LG Home still"* | *"round 1: SAM didn't answer"* | \
             *"round 1: LG Home is not running"* | *"round 1: LG Home is in front"*)
             outcome=round
             break

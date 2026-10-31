@@ -49,7 +49,9 @@ closes the home it doesn't use: `applicationManager/closeByAppId` with
 * In the background it waits for SAM (at most a minute), then once a minute
   for about four minutes reads `defaultApps.home`. While that is Lumen's id,
   it closes LG's Home if it runs and isn't in front, and logs SAM's running
-  list 10 s later, which shows whether keep-alive brings it back.
+  list 10 s later, which shows whether keep-alive brings it back: by its
+  pid, since on the B9 LG's Home can take more than 10 s to exit and is
+  still listed meanwhile (seen on 2026-10-31).
 * It never sets the home: with any other default it says so and stops. It
   does nothing while the kill switch exists, returns at once, writes only
   its log, and is over within five minutes, timed by `/proc/uptime` because
