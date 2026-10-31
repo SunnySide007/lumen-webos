@@ -50,12 +50,14 @@ setup() {
 }
 
 # push and tunnel: argument checks happen before any connection.
-@test "push refuses remote paths outside scratch space" {
+@test "push refuses remote paths outside root's stage, /tmp and developer/temp too" {
     key="$BATS_TEST_TMPDIR/key"
     touch "$key"
     src="$BATS_TEST_TMPDIR/file"
     echo hi >"$src"
-    for bad in /etc/hosts /var/lib/x /media/developer/temp/ /tmp/ tmp/x \
+    for bad in /tmp/x /tmp/lumen-install.ipk /media/developer/temp/x \
+        /media/developer/temp/lumen-capture/tcpdump \
+        /etc/hosts /var/lib/x /media/developer/temp/ /tmp/ tmp/x \
         /var/lib/lumen/stage/ /var/lib/lumen/stagex /var/lib/lumen/stage/../guard/x \
         /tmp/../etc/passwd /media/developer/temp/a/../../../etc/x \
         '/tmp/a b' '/tmp/$(reboot)' "/tmp/a'b" /tmp//x; do
@@ -83,16 +85,34 @@ setup() {
 }
 
 # A fake ssh on PATH stands in for the TV: it runs the remote command locally,
-# with /tmp/ mapped to a test directory, and the apps' jails (/var/palm/jail)
-# to a jail directory beside it.
+# and a script sent to `sh -s` too, with /tmp/, the apps' jails
+# (/var/palm/jail) and /var/lib/lumen moved into tvroot, and root's uid
+# changed to ours, or to fake_ssh's argument. The /tmp/ line comes first: the
+# paths the others write are under /tmp themselves. FAKE_TAMPER changes the
+# IPK once it is uploaded.
 fake_ssh() {
-    mkdir -p "$BATS_TEST_TMPDIR/bin" "$BATS_TEST_TMPDIR/tvroot"
+    R="$BATS_TEST_TMPDIR/tvroot"
+    mkdir -p "$BATS_TEST_TMPDIR/bin" "$R"
+    cat >"$BATS_TEST_TMPDIR/tvmap.sed" <<EOF
+s#/tmp/#$R/#g
+s#/var/palm/jail#$R/jail#g
+s#/var/lib/lumen#$R/var/lib/lumen#g
+s#^ROOT_UID=0\$#ROOT_UID=${1:-$(id -u)}#
+EOF
     cat >"$BATS_TEST_TMPDIR/bin/ssh" <<EOF
 #!/bin/sh
 printf '%s\n' "\$*" >>"$BATS_TEST_TMPDIR/ssh-args"
 for last; do :; done
 case "\$*" in *" -N "*) exit 0 ;; esac
-exec sh -c "\$(printf '%s' "\$last" | sed -e "s#/tmp/#$BATS_TEST_TMPDIR/tvroot/#g" -e "s#/var/palm/jail#$BATS_TEST_TMPDIR/tvroot/jail#g")"
+cmd=\$(printf '%s' "\$last" | sed -f "$BATS_TEST_TMPDIR/tvmap.sed")
+if [ "\$cmd" = "sh -s" ]; then
+    sed -f "$BATS_TEST_TMPDIR/tvmap.sed" | sh -s
+    exit
+fi
+sh -c "\$cmd" || exit
+case "\$cmd" in
+    *"cat > "*install.ipk) [ -z "\${FAKE_TAMPER:-}" ] || printf x >>"$R/var/lib/lumen/stage/install.ipk" ;;
+esac
 EOF
     chmod +x "$BATS_TEST_TMPDIR/bin/ssh"
     PATH="$BATS_TEST_TMPDIR/bin:$PATH"
@@ -101,14 +121,86 @@ EOF
     export TV_HOST=192.0.2.1 TV_KEY="$key"
 }
 
-@test "push uploads the file and checks its size" {
+# A fake luna-send-pub: logs its call and answers that the app is installed.
+fake_installer() {
+    cat >"$BATS_TEST_TMPDIR/bin/luna-send-pub" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>"$BATS_TEST_TMPDIR/luna-calls"
+echo '{"returnValue": true, "details": {"state": "installed"}}'
+EOF
+    chmod +x "$BATS_TEST_TMPDIR/bin/luna-send-pub"
+}
+
+@test "push uploads into root's stage, made root's alone, and checks the size" {
     fake_ssh
     src="$BATS_TEST_TMPDIR/file"
     printf 'some bytes\n' >"$src"
-    run "$TV" push "$src" /tmp/lumen-test/sub/file
+    run "$TV" push "$src" /var/lib/lumen/stage/lumen-test/sub/file
     [ "$status" -eq 0 ]
     [[ "$output" == *"(11 bytes)"* ]]
-    cmp "$src" "$BATS_TEST_TMPDIR/tvroot/lumen-test/sub/file"
+    cmp "$src" "$R/var/lib/lumen/stage/lumen-test/sub/file"
+    [[ "$(ls -ldn "$R/var/lib/lumen/stage")" == drwx------* ]]
+    [[ "$(ls -ldn "$R/var/lib/lumen/stage/lumen-test/sub")" == drwx------* ]]
+    [[ "$(ls -ln "$R/var/lib/lumen/stage/lumen-test/sub/file")" == -rw-------* ]]
+}
+
+@test "push uploads nothing to a stage that is a link, others may write, or isn't root's" {
+    fake_ssh
+    src="$BATS_TEST_TMPDIR/file"
+    echo hi >"$src"
+    mkdir -p "$R/var/lib/lumen" "$R/elsewhere"
+    ln -s "$R/elsewhere" "$R/var/lib/lumen/stage"
+    run "$TV" push "$src" /var/lib/lumen/stage/x
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"stage is not a real folder"* ]]
+    [[ "$output" == *"nothing uploaded"* ]]
+    [ ! -e "$R/elsewhere/x" ]
+    rm "$R/var/lib/lumen/stage"
+    mkdir "$R/var/lib/lumen/stage"
+    chmod 777 "$R/var/lib/lumen/stage"
+    run "$TV" push "$src" /var/lib/lumen/stage/x
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"writable by others (drwxrwxrwx)"* ]]
+    [ ! -e "$R/var/lib/lumen/stage/x" ]
+    chmod 700 "$R/var/lib/lumen/stage"
+    fake_ssh 99999
+    run "$TV" push "$src" /var/lib/lumen/stage/x
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"is not root's"* ]]
+    [ ! -e "$R/var/lib/lumen/stage/x" ]
+}
+
+@test "install stages the IPK in root's stage, checks it, installs it from there and tidies up" {
+    fake_ssh
+    fake_installer
+    ipk="$BATS_TEST_TMPDIR/app.ipk"
+    printf 'an ipk\n' >"$ipk"
+    run "$TV" install "$ipk"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"installed"* ]]
+    grep -qF "\"ipkUrl\":\"$R/var/lib/lumen/stage/install.ipk\"" "$BATS_TEST_TMPDIR/luna-calls"
+    [ ! -e "$R/var/lib/lumen/stage/install.ipk" ]
+    [ ! -e "$R/var/lib/lumen/stage/install.log" ]
+    # Nothing went through /tmp.
+    [ "$(ls -A "$R")" = var ]
+}
+
+@test "install installs nothing when the staged IPK isn't the PC's, or the stage isn't safe" {
+    fake_ssh
+    fake_installer
+    ipk="$BATS_TEST_TMPDIR/app.ipk"
+    printf 'an ipk\n' >"$ipk"
+    FAKE_TAMPER=1 run "$TV" install "$ipk"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"the staged IPK is not this one"* ]]
+    [ ! -e "$BATS_TEST_TMPDIR/luna-calls" ]
+    [ ! -e "$R/var/lib/lumen/stage/install.ipk" ]
+    chmod 777 "$R/var/lib/lumen/stage"
+    run "$TV" install "$ipk"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"nothing uploaded"* ]]
+    [ ! -e "$BATS_TEST_TMPDIR/luna-calls" ]
+    [ ! -e "$R/var/lib/lumen/stage/install.ipk" ]
 }
 
 @test "tunnel forwards loopback only, to the dashboard port" {

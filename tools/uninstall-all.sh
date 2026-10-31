@@ -14,8 +14,9 @@
 # installed; Lumen's boot hooks (/var/lib/webosbrew/init.d/lumen-*), Lumen
 # Guard's resolv.conf mount, nat rules and process
 # (profiles/privacy/guard-undo.sh), Lumen Remote's line in root's
-# authorized_keys (tools/remote.sh remove), /var/lib/lumen, its kill switch,
-# the capture directory and its files in /tmp. --glasshouse runs
+# authorized_keys (tools/remote.sh remove), the capture (stopped first),
+# /var/lib/lumen, its kill switch, and what earlier versions left in /tmp and
+# /media/developer/temp/lumen-capture. --glasshouse runs
 # Glasshouse's documented undo (tvwebctl restores, stop, its files and boot
 # hooks), then removes its app.
 #
@@ -82,9 +83,11 @@ step run - "rm -f $INITD/lumen-*"
 step script - "$ROOT/profiles/privacy/guard-undo.sh"
 # Lumen Remote's key line, while lumen-ctl is still there for it to name.
 step remote - remove
+# The capture stopped while its helper is still there; the folder earlier
+# versions used, in apps' reach, only deleted: root runs nothing from it.
+step run - "if [ -f /var/lib/lumen/capture/lumen-capture.sh ]; then sh /var/lib/lumen/capture/lumen-capture.sh clean; fi; rm -rf /media/developer/temp/lumen-capture"
 step run - "rm -rf /var/lib/lumen"
 step run - "rm -f /var/luna/preferences/lumen_disable"
-step run - "if [ -f /media/developer/temp/lumen-capture/lumen-capture.sh ]; then sh /media/developer/temp/lumen-capture/lumen-capture.sh clean; else rm -rf /media/developer/temp/lumen-capture; fi"
 step run - "rm -f /tmp/lumen-*"
 
 if [ $glasshouse -eq 1 ]; then

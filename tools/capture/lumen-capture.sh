@@ -4,17 +4,22 @@
 # pcap files. tools/capture.sh pushes it next to tcpdump and calls it; nothing
 # here survives a reboot or adds a boot hook.
 #
-#   lumen-capture.sh start [HOURS] [FILE_MB] [FILES]   defaults: 24 50 10
+#   lumen-capture.sh start [HOURS] [FILE_MB] [FILES]   defaults: 24 20 5
 #   lumen-capture.sh status
 #   lumen-capture.sh stop
 #   lumen-capture.sh list                              pcap files, one per line
 #   lumen-capture.sh clean                             stop, then delete DIR
 #
-# Everything lives in DIR (default /media/developer/temp/lumen-capture).
+# Everything lives in DIR, /var/lib/lumen/capture: root runs tcpdump from it
+# and tcpdump writes there as root, so start refuses unless DIR and its pcap
+# folder are real folders, root's, that no one else may write. /var is small
+# on the B9 (525 MB, LG's settings live there): start also keeps 100 MB of it
+# free beyond the ring's worst case.
 set -eu
 
-DIR=${LUMEN_CAPTURE_DIR:-/media/developer/temp/lumen-capture}
-TCPDUMP=${LUMEN_CAPTURE_TCPDUMP:-$DIR/tcpdump}
+DIR=/var/lib/lumen/capture
+ROOT_UID=0
+TCPDUMP=$DIR/tcpdump
 PIDFILE=$DIR/tcpdump.pid
 LOG=$DIR/tcpdump.log
 PCAPS=$DIR/pcap
@@ -40,12 +45,30 @@ die() {
     exit 1
 }
 
-# rm -rf and the pcap writes must stay inside scratch space.
-case $DIR in
-    *..* | *[!A-Za-z0-9._/-]*) die "refusing to work in $DIR" ;;
-    /media/developer/temp/lumen-capture | /tmp/?*) ;;
-    *) die "refusing to work in $DIR" ;;
-esac
+# root_alone FOLDER...: each is a real folder, not a link, root's, and
+# writable by no one else.
+root_alone() {
+    for d in "$@"; do
+        if [ -L "$d" ] || [ ! -d "$d" ]; then
+            echo "$d is not a real folder"
+            return 1
+        fi
+        # ls -ln is POSIX, and stat is not: its mode and owner, split into words.
+        # shellcheck disable=SC2046,SC2012
+        set -- $(ls -ldn "$d")
+        case $1 in
+            d????[!w]??[!w]*) ;;
+            *)
+                echo "$d is writable by others ($1)"
+                return 1
+                ;;
+        esac
+        if [ "$3" != "$ROOT_UID" ]; then
+            echo "$d is not root's (uid $3)"
+            return 1
+        fi
+    done
+}
 
 is_number() {
     case $1 in '' | *[!0-9]*) return 1 ;; esac
@@ -84,22 +107,24 @@ timeout_args() {
 }
 
 cmd_start() {
-    hours=${1:-24} mb=${2:-50} files=${3:-10}
+    hours=${1:-24} mb=${2:-20} files=${3:-5}
     in_range "$hours" 1 72 || die "HOURS must be 1 to 72, not $hours"
     in_range "$mb" 1 200 || die "FILE_MB must be 1 to 200, not $mb"
     in_range "$files" 2 50 || die "FILES must be 2 to 50, not $files"
     if pid=$(running_pid); then
         die "a capture is already running (pid $pid); stop it first"
     fi
+    why=$(root_alone "$DIR") || die "$why; nothing started"
     [ -x "$TCPDUMP" ] || die "no tcpdump at $TCPDUMP: run tools/capture.sh push"
 
-    # Keep the ring's worst case plus 200 MB free for the apps partition.
-    need=$(( (mb * files + 200) * 1024 ))
+    # Keep the ring's worst case plus 100 MB free for webOS.
+    need=$(( (mb * files + 100) * 1024 ))
     have=$(free_kb "$DIR")
     [ "$have" -ge "$need" ] ||
         die "only $((have / 1024)) MB free in $DIR; the ring needs $((need / 1024)) MB"
 
-    mkdir -p "$PCAPS"
+    (umask 077 && mkdir -p "$PCAPS")
+    why=$(root_alone "$PCAPS") || die "$why; nothing started"
     stamp=$(date +%Y%m%d-%H%M%S)
     secs=$((hours * 3600))
     # shellcheck disable=SC2046 # timeout_args is one or two words on purpose

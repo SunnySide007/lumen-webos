@@ -41,7 +41,10 @@ tools/tv.sh log             # what the shell logged on the TV
   (and where nothing stops a link an app put there): logs and staged files
   go under `/var/lib/lumen`. Files pushed to the TV as root are staged under
   `/var/lib/lumen/stage/` and checked against the PC's SHA-256 while staged,
-  before they go anywhere they can run. Boot hooks log to
+  before they go anywhere they can run; `tools/tv.sh push` and `install`
+  accept no other place, and check first that the stage is root's alone.
+  The same holds for `/media/developer/temp`, which apps can reach too: root
+  runs nothing from it and writes nothing to it. Boot hooks log to
   `/var/lib/lumen/log/<hook>.log`, keeping the run before as `.log.1`, and
   log nothing when that folder is not root's alone.
 * JavaScript that runs on webOS 4 (key filters): ES5 only, since node 0.12 and

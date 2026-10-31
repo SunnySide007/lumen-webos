@@ -6,7 +6,8 @@
 #   tools/tv.sh shell               interactive root shell
 #   tools/tv.sh run '<command>'     run one command
 #   tools/tv.sh script <file>       run a local shell script on the TV
-#   tools/tv.sh install <file.ipk>  install or update an app
+#   tools/tv.sh install <file.ipk>  install or update an app, staged in
+#                                   /var/lib/lumen/stage/ and checked first
 #   tools/tv.sh launch <app id>     start an app
 #   tools/tv.sh close <app id>      stop an app
 #   tools/tv.sh remove <app id>     uninstall an app
@@ -14,13 +15,17 @@
 #                                   (lumen-shell.log, and the .fallback.log if any)
 #   tools/tv.sh push <local> <remote>
 #                                   upload a file; <remote> must be under
-#                                   /media/developer/temp/, /tmp/ or, for files
-#                                   root will run, /var/lib/lumen/stage/
+#                                   /var/lib/lumen/stage/, root's alone (never
+#                                   /tmp or /media/developer/temp, which apps
+#                                   can reach)
 #   tools/tv.sh tunnel [port]       forward 127.0.0.1:<port> (default 8080) here
 #                                   to the TV's Glasshouse dashboard; Ctrl-C ends it
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# Where uploads land on the TV: root's alone, unlike /tmp, which every app's
+# jail shares and where nothing stops a link an app put there.
+STAGE=/var/lib/lumen/stage
 
 usage() {
     sed -n '2,/^set -eu$/{/^set -eu$/d;s/^# \{0,1\}//;p;}' "$0"
@@ -87,15 +92,52 @@ cmd_script() {
     { echo '{'; cat "$1"; printf '\n} </dev/null\n'; } | tv_ssh 'sh -s'
 }
 
+sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum <"$1" | cut -d' ' -f1
+    else
+        shasum -a 256 <"$1" | cut -d' ' -f1
+    fi
+}
+
+# Makes the stage on the TV if need be and checks it: /var/lib/lumen and the
+# stage must be real folders, root's, that no one else may write, or nothing
+# is uploaded. Inside them nothing an app does can swap a file or redirect a
+# write. busybox sh.
+stage_ready() {
+    tv_ssh 'sh -s' <<EOF || die "the stage on the TV is not safe to use; nothing uploaded"
+ROOT_UID=0
+umask 077
+mkdir -p $STAGE
+for d in /var/lib/lumen $STAGE; do
+    if [ -L "\$d" ] || [ ! -d "\$d" ]; then echo "\$d is not a real folder" >&2; exit 1; fi
+    set -- \$(ls -ldn "\$d")
+    case \$1 in
+        d????[!w]??[!w]*) ;;
+        *) echo "\$d is writable by others (\$1)" >&2; exit 1 ;;
+    esac
+    [ "\$3" = "\$ROOT_UID" ] || { echo "\$d is not root's (uid \$3)" >&2; exit 1; }
+done
+EOF
+}
+
 cmd_install() {
     need_arg "${1:-}"
     [ -f "$1" ] || die "no such file: $1"
-    remote=/tmp/lumen-install.ipk
-    tv_ssh "cat > $remote" < "$1"
-    # appInstallService streams progress; watch it for up to 60 s, the way
-    # webos-galaxy-launcher's installer does.
+    want=$(sha256 "$1")
+    stage_ready
+    remote=$STAGE/install.ipk
+    tv_ssh "umask 077; cat > $remote" < "$1"
+    # Checked against the PC's SHA-256 while staged. appInstallService streams
+    # progress; watch it for up to 60 s, the way webos-galaxy-launcher's
+    # installer does.
     tv_ssh 'sh -s' <<EOF
-log=/tmp/lumen-install.log
+log=$STAGE/install.log
+if [ "\$(sha256sum < $remote | cut -d' ' -f1)" != $want ]; then
+    rm -f $remote
+    echo "the staged IPK is not this one ($want); nothing installed"
+    exit 1
+fi
 luna-send-pub -i luna://com.webos.appInstallService/dev/install \
     '{"id":"com.ares.defaultName","ipkUrl":"$remote","subscribe":true}' </dev/null >\$log 2>&1 &
 pid=\$!
@@ -165,15 +207,16 @@ check_push_args() {
     case $2 in
         *[!A-Za-z0-9._/-]*) die "remote path has unsupported characters: $2" ;;
         */../* | */.. | */./* | */. | *//*) die "remote path must be plain: $2" ;;
-        /media/developer/temp/?* | /tmp/?* | /var/lib/lumen/stage/?*) ;;
-        *) die "remote path must be under /media/developer/temp/, /tmp/ or /var/lib/lumen/stage/: $2" ;;
+        "$STAGE"/?*) ;;
+        *) die "remote path must be under $STAGE/: $2" ;;
     esac
     case $2 in */) die "remote path must name a file: $2" ;; esac
 }
 
 cmd_push() {
     remote_dir=$(dirname "$2")
-    tv_ssh "mkdir -p '$remote_dir' && cat > '$2'" < "$1"
+    stage_ready
+    tv_ssh "umask 077; mkdir -p '$remote_dir' && cat > '$2'" < "$1"
     want=$(wc -c < "$1" | tr -d ' ')
     got=$(tv_ssh "wc -c < '$2'" </dev/null | tr -d ' \r')
     [ "$got" = "$want" ] || die "upload of $1 is $got bytes on the TV, expected $want"

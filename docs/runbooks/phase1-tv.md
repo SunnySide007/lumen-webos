@@ -77,11 +77,14 @@ tools/capture.sh push
 ```
 
 Expect two `pushed … bytes` lines, tcpdump's version (`tcpdump version
-4.99.7`, `libpcap version 1.10.7`), and `tcpdump on the TV matches
-dist/capture/tcpdump (63b86ba57be346ec7042acbb16c9bcfb7e2fb65f0ffdc66f1266c17924d63330)`,
-the hash in BUILD-INFO.txt (the build is reproducible: two builds on
-2026-10-20 gave this hash). Everything goes to
-`/media/developer/temp/lumen-capture/`.
+4.99.7`, `libpcap version 1.10.7`), and `tcpdump and the helper on the TV
+match this checkout (…)`, whose first hash is the one in BUILD-INFO.txt
+(63b86ba57be346ec7042acbb16c9bcfb7e2fb65f0ffdc66f1266c17924d63330; the build
+is reproducible: two builds on 2026-10-20 gave it). Everything goes to
+`/var/lib/lumen/capture/`, a folder only root may use (since 2026-10-31;
+before, `/media/developer/temp/lumen-capture/`, which apps can reach). /var
+is small on the B9, so the ring is 5 files of 20 MB, with 100 MB of /var kept
+free.
 
 If tcpdump fails to start on the TV (a missing library or symbol), stop
 here: the capture needs a rebuild, and Stage B continues with B7 only.
@@ -110,7 +113,7 @@ marked `allow`. Link type 113 (or 276) in the header line.
 Then clear the smoke files on the TV, so they do not mix with the real run:
 
 ```bash
-tools/tv.sh run 'rm -f /media/developer/temp/lumen-capture/pcap/lumen-*'
+tools/tv.sh run 'rm -f /var/lib/lumen/capture/pcap/lumen-*'
 ```
 
 ### B6. Start the 24-hour baseline capture
@@ -339,7 +342,7 @@ Read it for:
 tools/capture.sh clean
 ```
 
-Expect `removed /media/developer/temp/lumen-capture`.
+Expect `removed /var/lib/lumen/capture`.
 
 Then the paperwork: decision 6 from proposed to accepted (with what
 changed), the Phase 1 checklist in docs/roadmap.md, and the B9 notes.
