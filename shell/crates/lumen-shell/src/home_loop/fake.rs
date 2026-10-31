@@ -5,21 +5,23 @@
 //! fake writes what it was asked to do, in order, into one shared `Acts`.
 
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use lumen_core::apps::{App, AppId, LaunchError, Launcher, MockLauncher};
+use lumen_core::art::{Hero, Look};
 use lumen_core::home::Home;
 
-use crate::draw;
+use crate::draw::{self, HeroLayer};
 use crate::gl;
-use crate::render::Batch;
+use crate::render::{Batch, Texture};
 use crate::sdl::{Event, Rate, Refresh};
 use crate::timing::FrameSplit;
 
-use super::{Events, Frame, Screen, WallClock};
+use super::hero::ATLAS_BYTES;
+use super::{Events, Frame, HeroNews, Screen, Uploaded, WallClock};
 
 /// One frame at 60 Hz.
 pub const FRAME: Duration = Duration::from_nanos(16_666_667);
@@ -28,6 +30,13 @@ const LIMIT: Duration = Duration::from_secs(3600);
 /// How many polls the loop may make with the clock standing still before it
 /// is taken to spin: a pass that neither waits nor draws moves no clock.
 const SPIN: u32 = 10_000;
+/// What the ambient hero's three layers count against the texture budget,
+/// as `heroes.rs` decodes lane E's art (its tests hold the two to this).
+pub const AMBIENT_BYTES: usize = 9_600_000;
+/// What any other hero counts: one 1920 x 640 layer at 4 bytes a pixel.
+pub const FLAT_BYTES: usize = 1920 * 640 * 4;
+/// The rows the ambient hero's layers cover, back to front.
+const AMBIENT_ROWS: [(f32, f32); 3] = [(0.0, 1.0), (0.0, 425.0 / 640.0), (455.0 / 640.0, 1.0)];
 
 /// Wall time that moves only when a fake moves it: a wait to its deadline or
 /// to the next event, a swap by the frame's time, a launch by luna's.
@@ -87,6 +96,12 @@ pub enum Act {
     HidePointer(Duration),
     /// A launch, when luna was asked.
     Launch(Duration),
+    /// A hero's files asked of the art loader, by the hero's name.
+    LoadHero(Duration, String),
+    /// A hero put into textures.
+    UploadHero(Duration, String),
+    /// A hero's textures, or its decoded pixels, freed.
+    FreeHero(Duration, String),
 }
 
 pub type Acts = Rc<RefCell<Vec<Act>>>;
@@ -214,10 +229,15 @@ pub struct Painted {
     pub focused: Option<(usize, f32)>,
     /// The atlas uploads it made.
     pub uploads: usize,
+    /// The Top Shelf: the hero drawn at full, if one is, and the one fading
+    /// over it with its alpha (`None` for the placeholder).
+    pub shelf: (Option<String>, Option<(Option<String>, f32)>),
 }
 
 /// A screen that paints with the real draw code into the CPU atlas, and
-/// takes the frame time the test gives each swap.
+/// takes the frame time the test gives each swap. Its art loader decodes a
+/// hero in a set time and its textures are names only, counted against the
+/// texture budget.
 pub struct FakeScreen {
     clock: ManualClock,
     acts: Acts,
@@ -232,6 +252,20 @@ pub struct FakeScreen {
     pub frames: Vec<Painted>,
     /// The uploads `warm` made.
     pub warm_uploads: usize,
+    /// The look the heroes are loaded for: every feature on.
+    look: Look,
+    /// The apps the owner made art for, until told.
+    owner: Option<HashSet<AppId>>,
+    /// How long a hero takes to decode.
+    decode: Duration,
+    /// Heroes whose files are broken.
+    broken: Vec<Hero>,
+    decoding: Vec<(Hero, Instant)>,
+    decoded: Vec<Hero>,
+    uploaded: Vec<(Hero, usize)>,
+    next_texture: u32,
+    /// The most the textures held: the atlas and every hero.
+    pub textures_max: usize,
 }
 
 impl FakeScreen {
@@ -246,7 +280,49 @@ impl FakeScreen {
             icon_at: None,
             frames: Vec::new(),
             warm_uploads: 0,
+            look: Look::FULL,
+            owner: Some(HashSet::new()),
+            decode: Duration::from_millis(40),
+            broken: Vec::new(),
+            decoding: Vec::new(),
+            decoded: Vec::new(),
+            uploaded: Vec::new(),
+            next_texture: 1,
+            textures_max: ATLAS_BYTES,
         }
+    }
+
+    /// The owner made art for `apps`.
+    pub fn owner_art(mut self, apps: &[&str]) -> Self {
+        self.owner = Some(apps.iter().map(|id| AppId::new(*id)).collect());
+        self
+    }
+
+    /// A hero takes `ms` to decode.
+    pub fn decode_ms(mut self, ms: u64) -> Self {
+        self.decode = Duration::from_millis(ms);
+        self
+    }
+
+    /// `hero`'s files are broken.
+    pub fn broken(mut self, hero: Hero) -> Self {
+        self.broken.push(hero);
+        self
+    }
+
+    /// A hero's layers and what they count against the budget.
+    fn layers(&self, hero: &Hero) -> Vec<((f32, f32), usize)> {
+        if hero.is_layered(&self.look) {
+            let sizes = [FLAT_BYTES, 3_264_000, 1_420_800];
+            AMBIENT_ROWS.into_iter().zip(sizes).collect()
+        } else {
+            vec![((0.0, 1.0), FLAT_BYTES)]
+        }
+    }
+
+    /// The atlas and every hero in textures.
+    pub fn textures(&self) -> usize {
+        ATLAS_BYTES + self.uploaded.iter().map(|(_, b)| b).sum::<usize>()
     }
 
     /// Every swap takes `took`.
@@ -277,6 +353,12 @@ impl Screen for FakeScreen {
                 .find(|tile| tile.focused)
                 .map(|tile| (tile.index, tile.lift)),
             uploads: uploads.len(),
+            shelf: (
+                view.shelf_art.base.map(Hero::name),
+                view.shelf_art
+                    .over
+                    .map(|(hero, alpha)| (hero.map(Hero::name), alpha)),
+            ),
         };
         self.painting = Some((painted, bytes));
     }
@@ -340,6 +422,80 @@ impl Screen for FakeScreen {
     fn gl_error(&mut self) -> u32 {
         act(&self.acts, &self.clock, Act::GlRead);
         gl::NO_ERROR
+    }
+
+    fn load_hero(&mut self, hero: &Hero) {
+        act(&self.acts, &self.clock, |at| Act::LoadHero(at, hero.name()));
+        self.decoding
+            .push((hero.clone(), self.clock.now() + self.decode));
+    }
+
+    fn hero_news(&mut self) -> Vec<HeroNews> {
+        let mut news: Vec<HeroNews> = self
+            .owner
+            .take()
+            .map(|apps| HeroNews::OwnerArt {
+                apps,
+                refused: Vec::new(),
+            })
+            .into_iter()
+            .collect();
+        let now = self.clock.now();
+        let done: Vec<_> = self
+            .decoding
+            .extract_if(.., |(_, done)| *done <= now)
+            .collect();
+        for (hero, _) in done {
+            if self.broken.contains(&hero) {
+                let why = format!("{}.png: not a PNG", hero.name());
+                news.push(HeroNews::Failed { hero, why });
+            } else {
+                let layers = self.layers(&hero);
+                news.push(HeroNews::Decoded {
+                    hero: hero.clone(),
+                    layers: layers.len(),
+                    bytes: layers.iter().map(|(_, b)| b).sum(),
+                    took: self.decode,
+                });
+                self.decoded.push(hero);
+            }
+        }
+        news
+    }
+
+    fn upload_hero(&mut self, hero: &Hero) -> Result<Uploaded, String> {
+        act(&self.acts, &self.clock, |at| {
+            Act::UploadHero(at, hero.name())
+        });
+        let at = self.decoded.iter().position(|h| h == hero);
+        self.decoded.remove(at.ok_or("not decoded")?);
+        let layers = self.layers(hero);
+        let bytes = layers.iter().map(|(_, b)| b).sum();
+        let made = layers
+            .iter()
+            .map(|(rows, _)| {
+                self.next_texture += 1;
+                HeroLayer {
+                    texture: Texture::Own(self.next_texture),
+                    rows: *rows,
+                }
+            })
+            .collect();
+        self.assets.heroes.insert(hero.clone(), made);
+        self.uploaded.push((hero.clone(), bytes));
+        self.textures_max = self.textures_max.max(self.textures());
+        Ok(Uploaded {
+            layers: layers.len(),
+            bytes,
+            took: Duration::ZERO,
+        })
+    }
+
+    fn free_hero(&mut self, hero: &Hero) {
+        act(&self.acts, &self.clock, |at| Act::FreeHero(at, hero.name()));
+        self.assets.heroes.remove(hero);
+        self.uploaded.retain(|(h, _)| h != hero);
+        self.decoded.retain(|h| h != hero);
     }
 }
 

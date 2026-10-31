@@ -10,11 +10,13 @@
 //! tests' are in `home_loop/fake.rs`. The loop keeps every decision, and the
 //! adapters only carry them out.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use lumen_core::apps::{App, LaunchError, Launcher};
+use lumen_core::apps::{App, AppId, LaunchError, Launcher};
+use lumen_core::art::Hero;
 use lumen_core::home::Home;
 use lumen_core::input::Input;
 use lumen_core::script::Script;
@@ -29,13 +31,15 @@ use crate::watch;
 
 mod clock;
 #[cfg(test)]
-mod fake;
+pub(crate) mod fake;
+mod hero;
 mod shell;
 
 use clock::Clock;
+use hero::HeroPlan;
 use shell::Shell;
 
-/// When `--screenshot` takes its frame.
+/// When `--screenshot` takes its frame, unless `--screenshot-at` says.
 const SCREENSHOT_AFTER: Duration = Duration::from_millis(1500);
 /// How often a settled screen looks for icons while the loader has some.
 const ICON_POLL: Duration = Duration::from_millis(16);
@@ -78,6 +82,49 @@ pub trait Screen {
     fn refresh(&mut self) -> Refresh;
     /// GL's error flag, which reading clears.
     fn gl_error(&mut self) -> u32;
+    /// Starts decoding `hero`'s files, off the frame (at once under a fixed
+    /// clock); `hero_news` tells when it is done.
+    fn load_hero(&mut self, hero: &Hero);
+    /// What the art loader finished since the last call: the owner's art,
+    /// listed once, and each hero decoded or failed.
+    fn hero_news(&mut self) -> Vec<HeroNews>;
+    /// Puts a decoded hero into textures of its own, and frees its decoded
+    /// pixels.
+    fn upload_hero(&mut self, hero: &Hero) -> Result<Uploaded, String>;
+    /// Frees `hero`'s textures, or its decoded pixels if it was never
+    /// uploaded.
+    fn free_hero(&mut self, hero: &Hero);
+}
+
+/// What the art loader has to say (`Screen::hero_news`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum HeroNews {
+    /// The apps the owner made Top Shelf art for, and a line for each file
+    /// in their folder that was refused, and why.
+    OwnerArt {
+        apps: HashSet<AppId>,
+        refused: Vec<String>,
+    },
+    /// A hero decoded and waiting to be uploaded: its layers, what its
+    /// textures will count against the texture budget, and how long it
+    /// took to decode.
+    Decoded {
+        hero: Hero,
+        layers: usize,
+        bytes: usize,
+        took: Duration,
+    },
+    /// A hero that will not load: which file, and why.
+    Failed { hero: Hero, why: String },
+}
+
+/// A hero the screen uploaded: its layers, what they count against the
+/// texture budget, and how long the upload took.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Uploaded {
+    pub layers: usize,
+    pub bytes: usize,
+    pub took: Duration,
 }
 
 /// The wall clock.
@@ -143,6 +190,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
     let mut stats = FrameStats::new();
     let mut clock = Clock::new(wall, start.zero, opts.fixed_dt, None);
     let mut screenshot = opts.screenshot.clone();
+    let shot_at = opts.screenshot_at.unwrap_or(SCREENSHOT_AFTER);
     let mut settled_shot = opts.screenshot_when_settled.clone();
     let mut script = opts.keys.clone();
     // Every title's glyphs are made once (`warm`), while visible, when the
@@ -155,11 +203,14 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
     let mut shell = Shell::new(
         start.launcher,
         start.apps,
+        opts.look,
         start.shared,
         clock.at(start.listing),
     );
     shell.can_hide_pointer = events.can_hide_pointer();
     shell.stamps_from = (!clock.is_fixed()).then_some(clock.start);
+    // The Top Shelf hero: what to load, upload and free, and when.
+    let mut heroes = HeroPlan::new(opts.look.hero, shell.idle.last_input());
     // The last frame's quads, for the frame lines.
     let mut quads = 0;
     // Logged once, with the first frame or with why there was none.
@@ -172,7 +223,8 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         let shot_ready = settled_shot.is_some()
             && shell.visible
             && keys_done(script.as_ref(), &shell.input)
-            && !screen.icons_loading();
+            && !screen.icons_loading()
+            && !heroes.pending(&shell.home);
         // A pass that starts with an idle wait: the GPU has most likely
         // finished with the atlas, so icons may be placed in it.
         let waited = !(shell.wants_frame() || shot_ready);
@@ -193,6 +245,9 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
             }
             if !warmed && !over.lines.is_empty() {
                 warm_at = Some(clock.real() + WARM_AFTER);
+            }
+            if !over.lines.is_empty() {
+                heroes.burst_over(clock.now(), shell.idle.last_input());
             }
             // Every title's glyphs, once the screen has stayed settled for
             // `WARM_AFTER`, so no burst waits on an upload and the GPU is
@@ -218,7 +273,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
                 screenshot
                     .as_ref()
                     .filter(|_| shell.visible)
-                    .map(|_| SCREENSHOT_AFTER),
+                    .map(|_| shot_at),
                 // The same for icons; showing the shell again wakes the loop.
                 (shell.visible && screen.icons_loading()).then(|| clock.now() + ICON_POLL),
                 // The idle heartbeat. Not under a fixed clock, which would
@@ -227,6 +282,10 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
                 (!clock.is_fixed()).then(|| shell.idle.next_deadline()),
                 // Glyphs made ahead, once the burst's frames have gone out.
                 warm_at.filter(|_| shell.visible),
+                // The hero: the loader's news, or focus having rested.
+                heroes
+                    .deadline(&shell.home, clock.now(), !shell.input.is_holding())
+                    .filter(|_| shell.visible),
             ]
             .into_iter()
             .flatten()
@@ -294,7 +353,18 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
             info!("exit-after reached");
             break;
         }
-        if screenshot.is_some() && now >= SCREENSHOT_AFTER {
+        for line in heroes.take_news(screen, &mut shell.home) {
+            info!("{line}");
+        }
+        // A hero loads and goes into textures only on a pass that began with
+        // an idle wait and that no event has given a frame to draw, with no
+        // key held: a held key's tiles are passing, not resting.
+        if waited && shell.visible && !shell.wants_frame() && !shell.input.is_holding() {
+            for line in heroes.idle(&mut shell.home, screen, now) {
+                info!("{line}");
+            }
+        }
+        if screenshot.is_some() && now >= shot_at {
             shell.home.mark_dirty();
         }
         if icons_arrived(screen, waited) {
@@ -302,11 +372,12 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         }
         shell.home.advance_to(clock.shows(now));
         // The settled screenshot: the keys are all played and released,
-        // nothing moves and every icon is in, so draw the settled frame once
-        // more and keep it.
+        // nothing moves and every icon and hero is in, so draw the settled
+        // frame once more and keep it.
         let take_settled = settled_shot.is_some()
             && keys_done(script.as_ref(), &shell.input)
             && !screen.icons_loading()
+            && !heroes.pending(&shell.home)
             && !shell.wants_frame();
         if take_settled {
             shell.home.mark_dirty();
@@ -319,7 +390,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         }
 
         screen.paint(&shell.home);
-        if now >= SCREENSHOT_AFTER
+        if now >= shot_at
             && let Some(path) = screenshot.take()
         {
             screen.screenshot(&path);
@@ -336,6 +407,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         }
         shell.frame_shown(frame.shown);
         shell.home.frame_drawn();
+        heroes.frame_drawn(&shell.home);
         clock.frame_drawn(pass);
         if shell.quit {
             break;
@@ -412,7 +484,9 @@ mod tests {
     use std::path::PathBuf;
 
     use lumen_core::apps::{AppId, MockLauncher};
+    use lumen_core::art::Look;
     use lumen_core::input::scancode;
+    use lumen_core::style;
 
     use crate::sdl::window;
     use fake::{Act, Acts, FakeEvents, FakeScreen, ManualClock, Painted, SharedLauncher, down};
@@ -441,6 +515,9 @@ mod tests {
         frames: Vec<Painted>,
         warm_uploads: usize,
         launched: Vec<AppId>,
+        /// The most the textures held, and what they held at the end.
+        textures_max: usize,
+        textures_left: usize,
     }
 
     impl Setup {
@@ -451,7 +528,11 @@ mod tests {
                 events: FakeEvents::new(&clock, &acts),
                 screen: FakeScreen::new(&clock, &acts),
                 launcher: SharedLauncher::new(MockLauncher::default(), &clock, &acts),
-                opts: Options::default(),
+                // As main drew: the tests of the look's features set theirs.
+                opts: Options {
+                    look: Look::PLAIN,
+                    ..Options::default()
+                },
                 vsync: false,
                 clock,
                 acts,
@@ -490,6 +571,8 @@ mod tests {
                     .filter(|line| !line.starts_with("key down"))
                     .collect(),
                 acts: self.acts.take(),
+                textures_max: self.screen.textures_max,
+                textures_left: self.screen.textures(),
                 frames: self.screen.frames,
                 warm_uploads: self.screen.warm_uploads,
                 launched: self.launcher.launched(),
@@ -886,5 +969,282 @@ mod tests {
         // Cold, as a fixed clock leaves it, the same walk uploads mid-burst.
         let cold = walked(Some(fake::FRAME));
         assert!(cold.frames.iter().skip(1).map(|f| f.uploads).sum::<usize>() > 0);
+    }
+
+    // The Top Shelf hero.
+
+    /// A run with every feature of the look on, its art from `screen`.
+    fn with_heroes(screen: impl FnOnce(FakeScreen) -> FakeScreen) -> Setup {
+        let mut setup = Setup::new();
+        setup.opts.look = Look::FULL;
+        setup.screen = screen(setup.screen);
+        setup
+    }
+
+    /// A shelf showing `hero` alone, settled.
+    fn shows(hero: &str) -> (Option<String>, Option<(Option<String>, f32)>) {
+        (Some(hero.to_owned()), None)
+    }
+
+    impl Ran {
+        /// What was asked of the art loader and the textures: `L`oad,
+        /// `U`pload or `F`ree, when, and the hero's name.
+        fn hero_acts(&self) -> Vec<(char, Duration, &str)> {
+            self.acts
+                .iter()
+                .filter_map(|act| match act {
+                    Act::LoadHero(at, name) => Some(('L', *at, name.as_str())),
+                    Act::UploadHero(at, name) => Some(('U', *at, name.as_str())),
+                    Act::FreeHero(at, name) => Some(('F', *at, name.as_str())),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        fn lines_starting(&self, start: &str) -> Vec<&String> {
+            self.lines.iter().filter(|l| l.starts_with(start)).collect()
+        }
+    }
+
+    #[test]
+    fn a_hero_loads_and_uploads_only_on_a_pass_that_began_idle() {
+        let mut setup = with_heroes(|s| s).events(|e| {
+            e.tap(1_000, scancode::RIGHT)
+                .tap(1_100, scancode::RIGHT)
+                .tap(1_200, scancode::RIGHT)
+                .at(5_000, Event::Quit)
+        });
+        setup.vsync = true;
+        let ran = setup.run();
+        // The first frame does not wait for art: the shelf's gradient.
+        assert_eq!(ran.frames[0].shelf, (None, None));
+        // Every load and upload came after an idle wait, with no frame
+        // painted or swapped between them.
+        let mut idle = false;
+        for act in &ran.acts {
+            match act {
+                Act::Wait(..) => idle = true,
+                Act::Paint(_) | Act::Swap(_) => idle = false,
+                Act::LoadHero(at, _) | Act::UploadHero(at, _) => {
+                    assert!(idle, "{act:?} at {at:?} inside a burst");
+                }
+                _ => {}
+            }
+        }
+        // Netflix's ambient hero at the start, then Plex's once the taps
+        // have rested; the ambient one's textures go once its crossfade out
+        // has settled.
+        let acts: Vec<_> = ran.hero_acts().iter().map(|&(k, _, n)| (k, n)).collect();
+        assert_eq!(
+            acts,
+            [
+                ('L', "hero-ambient"),
+                ('U', "hero-ambient"),
+                ('L', "hero-plex"),
+                ('U', "hero-plex"),
+                ('F', "hero-ambient"),
+            ]
+        );
+        let plex_loaded = ran.hero_acts()[2].1;
+        assert!(
+            plex_loaded >= ms(1_200) + style::HERO_REST,
+            "{plex_loaded:?}"
+        );
+        assert_eq!(
+            ran.frames.last().map(|f| &f.shelf),
+            Some(&shows("hero-plex"))
+        );
+        assert_eq!(
+            ran.lines_starting("hero hero-plex: 1 layer, 4800 KB; decoded in 40.0 ms")
+                .len(),
+            1
+        );
+        assert_eq!(ran.lines_starting("crossfade ").len(), 2, "{:?}", ran.lines);
+        assert!(ran.has_line("crossfade gradient to hero-ambient: "));
+        assert!(ran.has_line("crossfade hero-ambient to hero-plex: "));
+        assert_eq!(ran.lines_starting("textures: ").len(), 1);
+    }
+
+    #[test]
+    fn a_key_held_along_row_0_loads_nothing_until_it_stops() {
+        // The owner's art for Prime Video and YouTube gives the tiles the
+        // held key passes heroes of their own. Right is held from 1 s and
+        // repeats at 1.4 s and 1.52 s, then let go on Plex.
+        let mut setup =
+            with_heroes(|s| s.owner_art(&["amazon", "youtube.leanback.v4"])).events(|e| {
+                e.at(1_000, down(scancode::RIGHT))
+                    .at(1_530, up(scancode::RIGHT))
+                    .at(5_000, Event::Quit)
+            });
+        setup.vsync = true;
+        let ran = setup.run();
+        assert!(ran.has_line("art-owner: art for 2 apps: amazon, youtube.leanback.v4"));
+        let held = ms(1_000)..=ms(1_530);
+        for (kind, at, name) in ran.hero_acts() {
+            assert!(!held.contains(&at), "{kind} {name} at {at:?}");
+            assert!(!name.starts_with("art-owner/"), "{kind} {name} at {at:?}");
+        }
+        let loads: Vec<_> = ran
+            .hero_acts()
+            .into_iter()
+            .filter(|&(k, ..)| k == 'L')
+            .map(|(_, at, name)| (at, name))
+            .collect();
+        assert_eq!(loads.len(), 2, "{loads:?}");
+        assert_eq!(loads[1].1, "hero-plex");
+        assert!(loads[1].0 > ms(1_530) + style::HERO_REST);
+        assert_eq!(
+            ran.frames.last().map(|f| &f.shelf),
+            Some(&shows("hero-plex"))
+        );
+    }
+
+    #[test]
+    fn a_crossfade_out_of_the_ambient_hero_keeps_the_textures_in_budget() {
+        // The worst moment: the atlas, the ambient hero's three layers and
+        // the hero it fades to.
+        let mut setup = with_heroes(|s| s).events(|e| {
+            e.tap(1_000, scancode::RIGHT)
+                .tap(1_100, scancode::RIGHT)
+                .tap(1_200, scancode::RIGHT)
+                .tap(3_000, scancode::LEFT)
+                .at(6_000, Event::Quit)
+        });
+        setup.vsync = true;
+        let ran = setup.run();
+        let worst = hero::ATLAS_BYTES + fake::AMBIENT_BYTES + fake::FLAT_BYTES;
+        assert_eq!(ran.textures_max, worst);
+        assert!(worst <= hero::TEXTURE_BUDGET, "{worst}");
+        // Each crossfade's line says the most its textures held: out of the
+        // ambient hero and back into it, the worst moment.
+        let fades = ran.lines_starting("crossfade ");
+        assert_eq!(fades.len(), 3, "{:?}", ran.lines);
+        for fade in &fades[1..] {
+            assert!(
+                fade.ends_with(&format!("textures {} KB at most", worst / 1024)),
+                "{fade}"
+            );
+        }
+        // Settled back on Netflix, the ambient hero is all that is left
+        // besides the atlas.
+        assert_eq!(ran.textures_left, hero::ATLAS_BYTES + fake::AMBIENT_BYTES);
+        assert_eq!(
+            ran.frames.last().map(|f| &f.shelf),
+            Some(&shows("hero-ambient"))
+        );
+    }
+
+    #[test]
+    fn a_crossfade_settles_and_the_loop_goes_idle() {
+        let ran = with_heroes(|s| s)
+            .events(|e| e.at(60_000, Event::Quit))
+            .run();
+        let line = ran
+            .lines_starting("crossfade gradient to hero-ambient: ")
+            .first()
+            .map(|l| (*l).clone())
+            .expect("a crossfade line");
+        let frames: u32 = line
+            .split(": ")
+            .nth(1)
+            .and_then(|l| l.split(' ').next())
+            .and_then(|n| n.parse().ok())
+            .expect("its frames");
+        assert!((15..60).contains(&frames), "{line}");
+        // After it, the loop waits out to the idle heartbeat: no polls.
+        let uploaded = ran.hero_acts()[1].1;
+        let waits_after = ran.waits().filter(|&(at, _)| at > uploaded).count();
+        assert!(waits_after <= 4, "{:?}", ran.acts);
+        assert!(ran.has_line("no input for 30 s;"));
+    }
+
+    #[test]
+    fn a_broken_hero_leaves_the_gradient_and_says_so_once() {
+        let ran = with_heroes(|s| s.broken(Hero::Ambient))
+            .events(|e| {
+                e.tap(1_000, scancode::RIGHT)
+                    .tap(2_000, scancode::LEFT)
+                    .at(4_000, Event::Quit)
+            })
+            .run();
+        assert_eq!(
+            ran.lines_starting("hero hero-ambient: "),
+            ["hero hero-ambient: hero-ambient.png: not a PNG; the shelf shows its gradient"]
+        );
+        assert_eq!(
+            ran.hero_acts(),
+            [('L', ran.hero_acts()[0].1, "hero-ambient")]
+        );
+        assert!(ran.frames.iter().all(|f| f.shelf == (None, None)));
+        assert!(!ran.has_line("crossfade "));
+    }
+
+    #[test]
+    fn the_owners_art_is_the_shelf_tiles_hero() {
+        let ran = with_heroes(|s| s.owner_art(&["netflix"]))
+            .events(|e| e.at(2_000, Event::Quit))
+            .run();
+        assert!(ran.has_line("art-owner: art for 1 apps: netflix"));
+        assert_eq!(ran.hero_acts()[0].2, "art-owner/netflix");
+        assert_eq!(
+            ran.frames.last().map(|f| &f.shelf),
+            Some(&shows("art-owner/netflix"))
+        );
+    }
+
+    #[test]
+    fn the_plain_look_asks_for_no_art_and_draws_the_gradient() {
+        let ran = Setup::new()
+            .events(|e| {
+                e.tap(1_000, scancode::RIGHT)
+                    .tap(1_500, scancode::DOWN)
+                    .tap(2_000, scancode::UP)
+                    .at(4_000, Event::Quit)
+            })
+            .run();
+        assert!(ran.hero_acts().is_empty());
+        assert!(ran.frames.iter().all(|f| f.shelf == (None, None)));
+        assert!(
+            !ran.lines.iter().any(|l| l.starts_with("hero ")
+                || l.starts_with("crossfade ")
+                || l.starts_with("textures")),
+            "{:?}",
+            ran.lines
+        );
+    }
+
+    #[test]
+    fn a_fixed_clock_shoots_the_settled_screen_with_its_hero_in() {
+        // Under a fixed clock heroes decode at once, and the fake's wall
+        // clock stands still between frames.
+        let mut setup = with_heroes(|s| s.decode_ms(0));
+        setup.opts.fixed_dt = Some(ms(20));
+        setup.opts.keys = Some(Script::parse("R,R,R").expect("keys"));
+        setup.opts.screenshot_when_settled = Some(PathBuf::from("settled.png"));
+        let ran = setup.run();
+        assert!(ran.has_line("settled at "));
+        assert_eq!(
+            ran.frames.last().map(|f| &f.shelf),
+            Some(&shows("hero-plex"))
+        );
+        // Netflix's hero loaded and went in at the idle passes after the
+        // first frame, before the first key at 0.5 s: nothing but the plan
+        // wakes a fixed clock for it (the fake's clock moves with frames).
+        let first_frame = ran
+            .acts
+            .iter()
+            .find_map(|act| match act {
+                Act::Swap(at) => Some(*at),
+                _ => None,
+            })
+            .expect("a frame");
+        let acts: Vec<_> = ran.hero_acts().into_iter().take(2).collect();
+        assert_eq!(
+            acts,
+            [
+                ('L', first_frame, "hero-ambient"),
+                ('U', first_frame, "hero-ambient")
+            ]
+        );
     }
 }

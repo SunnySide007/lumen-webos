@@ -33,6 +33,7 @@ pub const TEXTURE_WRAP_T: u32 = 0x2803;
 pub const LINEAR: i32 = 0x2601;
 pub const CLAMP_TO_EDGE: i32 = 0x812F;
 pub const UNPACK_ALIGNMENT: u32 = 0x0CF5;
+pub const RGB: u32 = 0x1907;
 
 pub struct Gl {
     pub clear_color: unsafe extern "C" fn(f32, f32, f32, f32),
@@ -57,8 +58,10 @@ pub struct Gl {
     pub get_attrib_location: unsafe extern "C" fn(u32, *const c_char) -> i32,
     pub get_uniform_location: unsafe extern "C" fn(u32, *const c_char) -> i32,
     pub uniform2f: unsafe extern "C" fn(i32, f32, f32),
+    pub uniform1f: unsafe extern "C" fn(i32, f32),
     pub uniform1i: unsafe extern "C" fn(i32, i32),
     pub gen_textures: unsafe extern "C" fn(i32, *mut u32),
+    pub delete_textures: unsafe extern "C" fn(i32, *const u32),
     pub bind_texture: unsafe extern "C" fn(u32, u32),
     pub active_texture: unsafe extern "C" fn(u32),
     pub tex_parameteri: unsafe extern "C" fn(u32, u32, i32),
@@ -126,8 +129,10 @@ impl Gl {
                 get_attrib_location: load_fn(l, c"glGetAttribLocation")?,
                 get_uniform_location: load_fn(l, c"glGetUniformLocation")?,
                 uniform2f: load_fn(l, c"glUniform2f")?,
+                uniform1f: load_fn(l, c"glUniform1f")?,
                 uniform1i: load_fn(l, c"glUniform1i")?,
                 gen_textures: load_fn(l, c"glGenTextures")?,
+                delete_textures: load_fn(l, c"glDeleteTextures")?,
                 bind_texture: load_fn(l, c"glBindTexture")?,
                 active_texture: load_fn(l, c"glActiveTexture")?,
                 tex_parameteri: load_fn(l, c"glTexParameteri")?,

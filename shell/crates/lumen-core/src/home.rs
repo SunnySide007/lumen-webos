@@ -4,13 +4,16 @@
 //! here draws or reads a clock: every call that can change the screen takes
 //! the current time.
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::anim::{Spring, Tuning, kick_for_peak};
 use crate::apps::{App, AppId, LaunchError};
+use crate::art::{Hero, Look, hero_for};
 use crate::focus::{Dir, GridFocus, Move};
 use crate::input::{Action, Press};
 use crate::layout::{self, Rect};
+use crate::shelf::{Faded, Shelf, ShelfView};
 use crate::style;
 
 // The springs' values live in `style`.
@@ -47,6 +50,29 @@ pub struct TileView<'a> {
     pub focused: bool,
     /// Position in the launcher's list.
     pub index: usize,
+    /// Its lean, in radians: about its upright axis (positive leans its
+    /// right edge back) and its level one (positive leans its lower edge
+    /// back).
+    pub tilt: [f32; 2],
+    /// The light crossing it, if it is.
+    pub sweep: Option<SweepView>,
+}
+
+/// The light crossing a newly focused tile: the middle of its band, as a
+/// fraction of the tile along `dir` (below 0 before it enters, above 1 after
+/// it leaves), and the way it travels, the way focus moved.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SweepView {
+    pub at: f32,
+    pub dir: Dir,
+}
+
+/// A sweep under way: which tile, which way, and when it began.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Sweep {
+    tile: usize,
+    dir: Dir,
+    from: Duration,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +80,12 @@ pub struct View<'a> {
     /// The Top Shelf band, on screen.
     pub shelf: Rect,
     pub shelf_title: Option<&'a str>,
+    /// The shelf's art: its hero, or the placeholder, and any crossfade.
+    pub shelf_art: ShelfView<'a>,
+    /// How far a layered hero's layers have drifted against the last move,
+    /// across and down, 1 at most: each layer moves its own
+    /// `style::PARALLAX_PX` times this.
+    pub shelf_drift: [f32; 2],
     /// Tiles on screen, back to front: the focused tile comes last.
     pub tiles: Vec<TileView<'a>>,
     pub status: Option<&'a str>,
@@ -66,6 +98,11 @@ pub struct Home {
     apps: Vec<App>,
     focus: GridFocus,
     lifts: Vec<Spring>,
+    /// Each tile's lean, as `TileView::tilt`.
+    tilts: Vec<[Spring; 2]>,
+    /// The layered hero's drift, as `View::shelf_drift`.
+    drift: [Spring; 2],
+    sweep: Option<Sweep>,
     scroll: Spring,
     bump_x: Spring,
     bump_y: Spring,
@@ -74,6 +111,14 @@ pub struct Home {
     bump_owner: usize,
     /// The row-0 tile the Top Shelf shows, kept while focus is lower down.
     shelf_index: usize,
+    /// Which Phase 4 features are on.
+    look: Look,
+    /// The apps the owner made Top Shelf art for.
+    owner_art: HashSet<AppId>,
+    /// The hero for the tile the shelf shows, if the look has heroes.
+    wanted: Option<Hero>,
+    /// The shelf's art and its crossfade.
+    shelf: Shelf,
     back_at_top: BackAtTop,
     status: Option<(String, Duration)>,
     now: Duration,
@@ -87,8 +132,12 @@ impl Home {
         let lifts = (0..apps.len())
             .map(|i| Spring::new(if i == 0 { 1.0 } else { 0.0 }, LIFT))
             .collect();
+        let upright = Spring::new(0.0, style::TILT);
         Self {
             focus: GridFocus::new(apps.len(), layout::COLUMNS),
+            tilts: vec![[upright; 2]; apps.len()],
+            drift: [Spring::new(0.0, style::PARALLAX); 2],
+            sweep: None,
             apps,
             lifts,
             scroll: Spring::new(0.0, SCROLL),
@@ -96,6 +145,10 @@ impl Home {
             bump_y: Spring::new(0.0, BUMP),
             bump_owner: 0,
             shelf_index: 0,
+            look: Look::PLAIN,
+            owner_art: HashSet::new(),
+            wanted: None,
+            shelf: Shelf::default(),
             back_at_top,
             status: None,
             now: Duration::ZERO,
@@ -103,8 +156,64 @@ impl Home {
         }
     }
 
+    /// The same home screen with the Phase 4 features `look` turns on;
+    /// `new` has none of them, as the shell MVP drew it.
+    pub fn with_look(mut self, look: Look) -> Self {
+        self.look = look;
+        self.update_wanted();
+        self
+    }
+
+    pub fn look(&self) -> &Look {
+        &self.look
+    }
+
     pub fn apps(&self) -> &[App] {
         &self.apps
+    }
+
+    /// The apps the owner made Top Shelf art for, once the shell has listed
+    /// them.
+    pub fn set_owner_art(&mut self, apps: HashSet<AppId>) {
+        self.owner_art = apps;
+        self.update_wanted();
+    }
+
+    fn update_wanted(&mut self) {
+        self.wanted = match self.apps.get(self.shelf_index) {
+            Some(app) if self.look.hero => Some(hero_for(app, &self.owner_art)),
+            _ => None,
+        };
+    }
+
+    /// The hero for the tile the shelf shows: what it should show once its
+    /// textures are in. `None` without heroes in the look, or apps.
+    pub fn wanted_hero(&self) -> Option<&Hero> {
+        self.wanted.as_ref()
+    }
+
+    /// What the shelf shows, or is fading to; `None` is the placeholder.
+    pub fn shelf_target(&self) -> Option<&Hero> {
+        self.shelf.target()
+    }
+
+    /// `hero`'s textures are in (`None`: the shelf is to show its
+    /// placeholder): the shelf fades to it.
+    pub fn show_hero(&mut self, hero: Option<Hero>) {
+        if self.shelf.show(hero) {
+            self.dirty = true;
+        }
+    }
+
+    /// The oldest crossfade that finished since the last call, so its old
+    /// hero's textures can go.
+    pub fn take_faded(&mut self) -> Option<Faded> {
+        self.shelf.take_faded()
+    }
+
+    /// Whether the shelf's art is fading from one to another.
+    pub fn is_fading(&self) -> bool {
+        self.shelf.is_animating()
     }
 
     pub fn focused(&self) -> Option<usize> {
@@ -131,23 +240,35 @@ impl Home {
             return;
         };
         match self.focus.move_focus(dir) {
-            Move::Moved => self.focus_changed(from),
+            Move::Moved => self.focus_changed(from, dir),
             // A repeat that reaches an edge stops there; only a fresh press bumps.
             Move::Blocked if !repeat => self.bump(dir),
             Move::Blocked => {}
         }
     }
 
-    fn focus_changed(&mut self, from: usize) {
+    /// Focus went from `from` the way `dir` points: the new tile lifts,
+    /// leans toward the move and the light crosses it.
+    fn focus_changed(&mut self, from: usize, dir: Dir) {
         let Some(to) = self.focus.index() else {
             return;
         };
         self.lifts[from].set_target(0.0);
         self.lifts[to].set_target(1.0);
+        self.lean(to, dir);
+        self.drift(dir);
+        if self.look.light {
+            self.sweep = Some(Sweep {
+                tile: to,
+                dir,
+                from: self.now,
+            });
+        }
         let row = self.focus.row();
         self.scroll.set_target(layout::scroll_for_row(row));
-        if row == 0 {
+        if row == 0 && self.shelf_index != to {
             self.shelf_index = to;
+            self.update_wanted();
         }
         self.dirty = true;
     }
@@ -173,7 +294,56 @@ impl Home {
         let already = (spring.value() * sign).max(0.0);
         let room = (1.0 - already / BUMP_PEAK).max(0.0);
         spring.set_velocity(sign * room * kick_for_peak(BUMP_PEAK, BUMP.omega));
+        // A blocked tile leans too, as if it met the edge; focus stays, so
+        // no light crosses it.
+        self.lean(focused, dir);
+        self.drift(dir);
         self.dirty = true;
+    }
+
+    /// Drifts a layered hero's layers against a move toward `dir`, with
+    /// the tile's lean, and lets them spring back, if the look has parallax
+    /// and the shelf, on screen with row 0, shows such a hero. With the
+    /// lean's room, a held key never drifts them past their
+    /// `style::PARALLAX_PX`.
+    fn drift(&mut self, dir: Dir) {
+        let layered = self
+            .shelf
+            .target()
+            .is_some_and(|hero| hero.is_layered(&self.look));
+        if !self.look.tilt || !layered || self.focus.row() != 0 {
+            return;
+        }
+        let (axis, sign) = match dir {
+            Dir::Left => (0, 1.0),
+            Dir::Right => (0, -1.0),
+            Dir::Up => (1, 1.0),
+            Dir::Down => (1, -1.0),
+        };
+        let spring = &mut self.drift[axis];
+        let room = (1.0 - (spring.value() * sign).max(0.0)).max(0.0);
+        spring.set_velocity(sign * room * kick_for_peak(1.0, style::PARALLAX.omega));
+    }
+
+    /// Leans `tile` toward `dir` and lets it spring upright, if the look
+    /// tilts. Like the bump, a lean under way only gets the kick it has room
+    /// for, so a key held or mashed never leans a tile past
+    /// `style::TILT_DEGREES`.
+    fn lean(&mut self, tile: usize, dir: Dir) {
+        if !self.look.tilt {
+            return;
+        }
+        let (axis, sign) = match dir {
+            Dir::Left => (0, -1.0),
+            Dir::Right => (0, 1.0),
+            Dir::Up => (1, -1.0),
+            Dir::Down => (1, 1.0),
+        };
+        let peak = style::TILT_DEGREES.to_radians();
+        let spring = &mut self.tilts[tile][axis];
+        let already = (spring.value() * sign).max(0.0);
+        let room = (1.0 - already / peak).max(0.0);
+        spring.set_velocity(sign * room * kick_for_peak(peak, style::TILT.omega));
     }
 
     fn select(&mut self) -> Option<Effect> {
@@ -188,7 +358,7 @@ impl Home {
             && self.focus.row() > 0
         {
             self.focus.set(self.focus.column());
-            self.focus_changed(from);
+            self.focus_changed(from, Dir::Up);
             return None;
         }
         match self.back_at_top {
@@ -228,6 +398,7 @@ impl Home {
             for spring in self.springs_mut() {
                 spring.step(dt);
             }
+            self.shelf.step(dt);
             self.dirty = true;
         }
         if let Some((_, until)) = &self.status
@@ -236,20 +407,33 @@ impl Home {
             self.status = None;
             self.dirty = true;
         }
+        if self
+            .sweep
+            .is_some_and(|s| self.now >= s.from + style::SWEEP_TIME)
+        {
+            self.sweep = None;
+            self.dirty = true;
+        }
     }
 
     fn springs_mut(&mut self) -> impl Iterator<Item = &mut Spring> {
         self.lifts
             .iter_mut()
+            .chain(self.tilts.iter_mut().flatten())
+            .chain(&mut self.drift)
             .chain([&mut self.scroll, &mut self.bump_x, &mut self.bump_y])
     }
 
     pub fn is_animating(&self) -> bool {
-        !self
-            .lifts
-            .iter()
-            .chain([&self.scroll, &self.bump_x, &self.bump_y])
-            .all(Spring::is_settled)
+        self.shelf.is_animating()
+            || self.sweep.is_some()
+            || !self
+                .lifts
+                .iter()
+                .chain(self.tilts.iter().flatten())
+                .chain(&self.drift)
+                .chain([&self.scroll, &self.bump_x, &self.bump_y])
+                .all(Spring::is_settled)
     }
 
     /// Nothing moves and the last frame drawn is still right: stop drawing.
@@ -280,6 +464,24 @@ impl Home {
         for spring in self.springs_mut() {
             spring.snap();
         }
+        self.sweep = None;
+        self.shelf.settle_now();
+    }
+
+    /// Where the light is on `tile`, if it is crossing it: its band's
+    /// middle runs from one band's width before the tile to one after,
+    /// easing in and out.
+    fn sweep_on(&self, tile: usize) -> Option<SweepView> {
+        let sweep = self.sweep.filter(|s| s.tile == tile)?;
+        let t = (self.now.saturating_sub(sweep.from).as_secs_f32()
+            / style::SWEEP_TIME.as_secs_f32())
+        .clamp(0.0, 1.0);
+        let eased = t * t * (3.0 - 2.0 * t);
+        let w = style::SWEEP_WIDTH;
+        Some(SweepView {
+            at: -w / 2.0 + (1.0 + w) * eased,
+            dir: sweep.dir,
+        })
     }
 
     pub fn view(&self) -> View<'_> {
@@ -303,6 +505,8 @@ impl Home {
                 lift,
                 focused: focused == Some(i),
                 index: i,
+                tilt: self.tilts[i].map(|s| s.value()),
+                sweep: self.sweep_on(i),
             };
             if tile.focused {
                 front = Some(tile);
@@ -314,6 +518,8 @@ impl Home {
         View {
             shelf: layout::TOP_SHELF.offset(0.0, -scroll),
             shelf_title: self.apps.get(self.shelf_index).map(|a| a.title.as_str()),
+            shelf_art: self.shelf.view(&self.look),
+            shelf_drift: self.drift.map(|s| s.value()),
             tiles,
             status: self.status.as_ref().map(|(text, _)| text.as_str()),
             empty: self.apps.is_empty(),
@@ -677,6 +883,312 @@ mod tests {
         assert_eq!(sim.focused_view().lift, lift);
     }
 
+    const PLEX: Hero = Hero::Named("hero-plex");
+
+    /// A `Sim` with every Phase 4 feature on.
+    fn full(apps: Vec<App>) -> Sim {
+        let mut sim = Sim {
+            home: Home::new(apps, BackAtTop::Exit).with_look(Look::FULL),
+            now: Duration::ZERO,
+            drawn_shelf_y: None,
+        };
+        sim.draw_if_needed();
+        sim
+    }
+
+    #[test]
+    fn the_plain_home_wants_no_hero_and_shows_the_placeholder() {
+        let mut sim = Sim::mock();
+        assert_eq!(sim.home.look(), &Look::PLAIN);
+        assert_eq!(sim.home.wanted_hero(), None);
+        for _ in 0..3 {
+            sim.press(RIGHT);
+        }
+        assert_eq!(sim.home.wanted_hero(), None);
+        assert_eq!(sim.home.view().shelf_art, ShelfView::PLACEHOLDER);
+    }
+
+    #[test]
+    fn the_wanted_hero_follows_the_tile_the_shelf_shows() {
+        let mut sim = full(mock_apps());
+        // Netflix has no colour in the mock: the ambient hero.
+        assert_eq!(sim.home.wanted_hero(), Some(&Hero::Ambient));
+        for _ in 0..3 {
+            sim.press(RIGHT);
+        }
+        assert_eq!(sim.home.wanted_hero(), Some(&PLEX));
+        // Lower rows keep the shelf's tile, and so its hero.
+        sim.press(DOWN);
+        assert_eq!(sim.home.focused(), Some(8));
+        assert_eq!(sim.home.wanted_hero(), Some(&PLEX));
+        // Nothing is shown until the shell says the textures are in.
+        assert_eq!(sim.home.shelf_target(), None);
+        assert_eq!(sim.home.view().shelf_art, ShelfView::PLACEHOLDER);
+    }
+
+    #[test]
+    fn the_owners_art_changes_the_wanted_hero() {
+        let mut sim = full(mock_apps());
+        let owner: HashSet<AppId> = [AppId::new("netflix")].into_iter().collect();
+        sim.home.set_owner_art(owner);
+        assert_eq!(
+            sim.home.wanted_hero(),
+            Some(&Hero::Owner(AppId::new("netflix")))
+        );
+    }
+
+    #[test]
+    fn the_view_carries_the_crossfade_and_the_screen_settles_after_it() {
+        let mut sim = full(mock_apps());
+        sim.settle();
+        sim.home.show_hero(Some(Hero::Ambient));
+        assert!(!sim.home.is_settled(), "the crossfade owes frames");
+        assert!(sim.home.is_fading());
+        sim.frame();
+        sim.frame();
+        let art = sim.home.view().shelf_art;
+        // The layered hero is the base; the placeholder fades out over it.
+        assert_eq!(art.base, Some(&Hero::Ambient));
+        let (over, alpha) = art.over.expect("mid crossfade");
+        assert_eq!(over, None);
+        assert!(alpha > 0.0 && alpha < 1.0, "{alpha}");
+        let frames = sim.settle();
+        assert!((25..50).contains(&frames), "{frames} frames");
+        assert!(sim.home.is_settled());
+        let art = sim.home.view().shelf_art;
+        assert_eq!(
+            (art.base, art.over, art.placeholder),
+            (Some(&Hero::Ambient), None, 0.0)
+        );
+        assert_eq!(
+            sim.home.take_faded(),
+            Some(Faded {
+                from: None,
+                to: Some(Hero::Ambient)
+            })
+        );
+        // The same hero again changes nothing.
+        sim.home.show_hero(Some(Hero::Ambient));
+        assert!(sim.home.is_settled());
+    }
+
+    #[test]
+    fn settle_now_ends_a_crossfade() {
+        let mut sim = full(mock_apps());
+        sim.home.show_hero(Some(PLEX));
+        sim.frame();
+        sim.home.settle_now();
+        assert!(!sim.home.is_fading());
+        assert_eq!(sim.home.shelf_target(), Some(&PLEX));
+        assert_eq!(sim.home.view().shelf_art.base, Some(&PLEX));
+    }
+
+    const PEAK: f32 = style::TILT_DEGREES * std::f32::consts::PI / 180.0;
+
+    /// Frames until settled, keeping each tile's largest lean either way
+    /// and every light seen.
+    fn watch(sim: &mut Sim) -> (Vec<[f32; 2]>, Vec<(usize, SweepView)>) {
+        let mut most = vec![[0.0f32; 2]; sim.home.apps().len()];
+        let mut sweeps = Vec::new();
+        let mut frames = 0;
+        loop {
+            for tile in sim.home.view().tiles {
+                for (most, tilt) in most[tile.index].iter_mut().zip(tile.tilt) {
+                    if tilt.abs() > most.abs() {
+                        *most = tilt;
+                    }
+                }
+                sweeps.extend(tile.sweep.map(|s| (tile.index, s)));
+            }
+            if !sim.frame() {
+                return (most, sweeps);
+            }
+            frames += 1;
+            assert!(frames < 600, "never settled");
+        }
+    }
+
+    #[test]
+    fn a_newly_focused_tile_leans_toward_the_move_and_the_light_crosses_it() {
+        let mut sim = full(mock_apps());
+        sim.settle();
+        sim.press(RIGHT);
+        let (most, sweeps) = watch(&mut sim);
+        // Prime Video leans its right edge back, up to the peak; nothing else
+        // leans.
+        assert!(
+            most[1][0] > 0.95 * PEAK && most[1][0] <= PEAK,
+            "{:?}",
+            most[1]
+        );
+        assert_eq!(most[1][1], 0.0);
+        assert!(
+            most.iter()
+                .enumerate()
+                .all(|(i, m)| i == 1 || *m == [0.0; 2])
+        );
+        // The light crosses it once, the way focus moved, entering before
+        // its left edge and leaving past its right.
+        assert!(sweeps.iter().all(|&(i, s)| i == 1 && s.dir == Dir::Right));
+        let ats: Vec<f32> = sweeps.iter().map(|(_, s)| s.at).collect();
+        assert!(ats.windows(2).all(|w| w[0] <= w[1]), "{ats:?}");
+        assert!(ats[0] < 0.0 && ats[ats.len() - 1] > 1.0, "{ats:?}");
+        // Then everything is upright and dark again, and the screen settles.
+        let tile = sim.focused_view();
+        assert_eq!((tile.tilt, tile.sweep), ([0.0; 2], None));
+        assert!(sim.home.is_settled());
+        // Down leans the lower edge back.
+        sim.press(DOWN);
+        let (most, _) = watch(&mut sim);
+        assert!(
+            most[6][1] > 0.95 * PEAK && most[6][0] == 0.0,
+            "{:?}",
+            most[6]
+        );
+    }
+
+    #[test]
+    fn a_held_key_never_leans_a_tile_past_the_peak() {
+        // Right repeats every 120 ms along row 0, then Left and Right back
+        // and forth over two tiles faster than they settle.
+        let mut sim = full(mock_apps());
+        sim.settle();
+        let mut most = vec![0.0f32; sim.home.apps().len()];
+        let keep = |sim: &Sim, most: &mut Vec<f32>| {
+            for tile in sim.home.view().tiles {
+                most[tile.index] = most[tile.index].max(tile.tilt[0].abs());
+            }
+        };
+        let presses = [RIGHT; 4].into_iter().chain([LEFT, RIGHT].repeat(6));
+        for (n, action) in presses.enumerate() {
+            let _ = sim.home.handle(
+                Press {
+                    action,
+                    repeat: n > 0 && n < 4,
+                },
+                sim.now,
+            );
+            for _ in 0..7 {
+                sim.frame();
+                keep(&sim, &mut most);
+            }
+        }
+        assert!(most.iter().all(|&m| m <= PEAK * 1.0001), "{most:?}");
+        assert!(most[1..5].iter().all(|&m| m > 0.5 * PEAK), "{most:?}");
+        sim.settle();
+        assert!(sim.home.view().tiles.iter().all(|t| t.tilt == [0.0; 2]));
+    }
+
+    #[test]
+    fn a_blocked_move_leans_the_tile_with_no_light() {
+        let mut sim = full(mock_apps());
+        sim.settle();
+        sim.press(LEFT);
+        let (most, sweeps) = watch(&mut sim);
+        assert!(most[0][0] < -0.95 * PEAK, "{:?}", most[0]);
+        assert!(sweeps.is_empty());
+    }
+
+    #[test]
+    fn the_light_alone_or_neither_as_the_look_says() {
+        let light_only = Look {
+            tilt: false,
+            ..Look::FULL
+        };
+        let mut sim = full(mock_apps());
+        sim.home = Home::new(mock_apps(), BackAtTop::Exit).with_look(light_only);
+        sim.settle();
+        sim.press(RIGHT);
+        let (most, sweeps) = watch(&mut sim);
+        assert!(most.iter().all(|m| *m == [0.0; 2]));
+        assert!(!sweeps.is_empty());
+        // As main drew: no lean and no light.
+        let mut sim = Sim::mock();
+        sim.settle();
+        sim.press(RIGHT);
+        sim.press(LEFT);
+        let (most, sweeps) = watch(&mut sim);
+        assert!(most.iter().all(|m| *m == [0.0; 2]) && sweeps.is_empty());
+    }
+
+    /// Frames until settled, keeping the shelf's largest drift either way.
+    fn drifted(sim: &mut Sim) -> [f32; 2] {
+        let mut most = [0.0f32; 2];
+        loop {
+            for (most, drift) in most.iter_mut().zip(sim.home.view().shelf_drift) {
+                if drift.abs() > most.abs() {
+                    *most = drift;
+                }
+            }
+            if !sim.frame() {
+                return most;
+            }
+        }
+    }
+
+    #[test]
+    fn the_ambient_heros_layers_drift_against_a_move_on_row_0_and_settle() {
+        let mut sim = full(mock_apps());
+        sim.home.show_hero(Some(Hero::Ambient));
+        sim.settle();
+        // Right to Prime Video, whose hero is the ambient one too: the
+        // layers drift left, to their farthest and no further, and back.
+        sim.press(RIGHT);
+        let most = drifted(&mut sim);
+        assert!(most[0] < -0.95 && most[0] >= -1.0, "{most:?}");
+        assert_eq!(most[1], 0.0);
+        assert_eq!(sim.home.view().shelf_drift, [0.0; 2]);
+        assert!(sim.home.is_settled());
+        // Mashed Left and Right, never past 1.
+        for action in [LEFT, RIGHT].repeat(5) {
+            sim.press(action);
+            for _ in 0..4 {
+                sim.frame();
+                assert!(sim.home.view().shelf_drift[0].abs() <= 1.0001);
+            }
+        }
+        sim.settle();
+        // Down scrolls the shelf away: nothing drifts.
+        sim.press(DOWN);
+        assert_eq!(drifted(&mut sim), [0.0; 2]);
+    }
+
+    #[test]
+    fn a_flat_hero_or_a_look_without_parallax_or_tilt_never_drifts() {
+        let no_parallax = Look {
+            parallax: false,
+            ..Look::FULL
+        };
+        let no_tilt = Look {
+            tilt: false,
+            ..Look::FULL
+        };
+        for (look, hero) in [
+            (Look::FULL, PLEX),
+            (no_parallax, Hero::Ambient),
+            (no_tilt, Hero::Ambient),
+        ] {
+            let mut sim = full(mock_apps());
+            sim.home = Home::new(mock_apps(), BackAtTop::Exit).with_look(look);
+            sim.home.show_hero(Some(hero.clone()));
+            sim.settle();
+            sim.press(RIGHT);
+            assert_eq!(drifted(&mut sim), [0.0; 2], "{look:?} {hero:?}");
+        }
+    }
+
+    #[test]
+    fn settle_now_stands_tiles_upright_and_ends_the_light() {
+        let mut sim = full(mock_apps());
+        sim.press(RIGHT);
+        sim.frame();
+        assert!(sim.focused_view().sweep.is_some());
+        sim.home.settle_now();
+        let tile = sim.focused_view();
+        assert_eq!((tile.tilt, tile.sweep), ([0.0; 2], None));
+        assert!(!sim.home.is_animating());
+    }
+
     /// A fixed-seed random walk over keys, repeat flags, frame lengths and
     /// app counts: nothing panics, every rect stays finite, and every screen
     /// settles once the keys stop.
@@ -701,6 +1213,9 @@ mod tests {
             let count = next(14) as usize;
             let apps = mock_apps().into_iter().cycle().take(count).collect();
             let mut sim = Sim::new(apps, BackAtTop::Stay);
+            if next(2) == 0 {
+                sim.home.look = Look::FULL;
+            }
             for _ in 0..30 {
                 let press = Press {
                     action: actions[next(6) as usize],
@@ -714,10 +1229,11 @@ mod tests {
                 for tile in sim.home.view().tiles {
                     let r = tile.rect;
                     assert!(
-                        [r.x, r.y, r.w, r.h, tile.lift]
+                        [r.x, r.y, r.w, r.h, tile.lift, tile.tilt[0], tile.tilt[1]]
                             .iter()
                             .all(|v| v.is_finite())
                     );
+                    assert!(tile.tilt.iter().all(|t| t.abs() <= PEAK * 1.0001));
                 }
                 sim.draw_if_needed();
             }

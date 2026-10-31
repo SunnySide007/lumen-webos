@@ -1430,3 +1430,101 @@ EOF
     [[ "$output" == *"  dropped          1 100% %s odd"$'\n'* ]]
     [[ "$output" != *$'\r'* ]]
 }
+
+# The Top Shelf hero's lines (lane J): the art, the heroes put into
+# textures, the crossfades and the texture total.
+
+@test "the top shelf section sums up the art, the heroes, the crossfades and the textures" {
+    log="$BATS_TEST_TMPDIR/shelf.log"
+    {
+        echo '[1792799999.000] look: hero on, dither on, tilt on, light on, parallax on; art full size'
+        echo '[1792800000.000] art-owner/"hulu.png": 1920x1080; the owner'"'"'s art is 1920x640 or 960x320; not used'
+        echo '[1792800000.001] art-owner: art for 2 apps: com.webos.app.hdmi1, netflix'
+        echo '[1792800000.100] hero hero-ambient: 3 layers, 9375 KB; decoded in 140.2 ms, uploaded in 30.5 ms'
+        echo '[1792800000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 18.00 ms, 52 quads); idle'
+        echo '[1792800000.700] crossfade gradient to hero-ambient: 43 frames; textures 17567 KB at most'
+        echo '[1792800000.701] textures: 17567 KB in all (atlas 8192 KB, heroes 9375 KB); 17567 KB at most so far'
+        echo '[1792800002.000] hero hero-palette-3: decoded in 60.0 ms; dropped, focus moved on'
+        echo '[1792800003.000] hero hero-plex: 1 layer, 4800 KB; decoded in 92.4 ms, uploaded in 11.0 ms'
+        echo '[1792800003.800] crossfade hero-ambient to hero-plex: 41 frames; textures 22367 KB at most'
+        echo '[1792800004.000] hero hero-settings: hero-settings.png: not a PNG; the shelf shows its gradient'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 0 ]
+    expected='top shelf (look, hero, crossfade, textures and art-owner lines):
+  look             hero on, dither on, tilt on, light on, parallax on; art full size
+  owner art        2 apps with art, 1 files left out
+  heroes           2; decode p50 92.4, max 140.2 ms; upload p50 11.0, max 30.5 ms
+  hero textures    9375 KB the most for one hero
+  dropped          1 decoded after focus moved on
+  failed           hero-settings: hero-settings.png: not a PNG
+  crossfades       2; frames p50 41, max 43; textures 22367 KB at most
+  textures         17567 KB in all at the first idle (atlas 8192 KB, heroes 9375 KB)
+  budget           22367 KB at most of 23437 KB: within'
+    [[ "$output" == *"$expected"* ]]
+    # After the frame statistics.
+    [[ "$output" == "bursts"*"top shelf ("* ]]
+}
+
+@test "the look line says which features a run had, and whether several runs were alike" {
+    log="$BATS_TEST_TMPDIR/look.log"
+    {
+        echo '[1792800000.000] look: hero off, dither off, tilt off, light off, parallax off; art full size'
+        echo '[1792800000.001] look: "sparkle" is not a feature; left out'
+        echo '[1792800000.002] look: "3" is not a feature; left out'
+        echo '[1792800000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 18.00 ms, 52 quads); idle'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 0 ]
+    expected='top shelf (look, hero, crossfade, textures and art-owner lines):
+  look             hero off, dither off, tilt off, light off, parallax off; art full size
+  look words       2 left out, not features'
+    [[ "$output" == *"$expected" ]]
+    # A second run, the same look, then another.
+    echo '[1792800100.000] look: hero off, dither off, tilt off, light off, parallax off; art full size' >> "$log"
+    run "$STATS" "$log"
+    [[ "$output" == *"  look             hero off, dither off, tilt off, light off, parallax off; art full size; the first of 2 runs, all alike"$'\n'* ]]
+    echo '[1792800200.000] look: hero on, dither off, tilt on, light on, parallax on; art half size' >> "$log"
+    run "$STATS" "$log"
+    [[ "$output" == *"; the first of 3 runs, not all alike"$'\n'* ]]
+    # A line that does not read right is no look.
+    printf '%s\n' '[1792800000.000] look: hero off, dither off; art full size' \
+        '[1792800000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 18.00 ms, 52 quads); idle' > "$log"
+    run "$STATS" "$log"
+    [[ "$output" != *"top shelf"* ]]
+}
+
+@test "a hero over the budget is counted and the budget says OVER" {
+    log="$BATS_TEST_TMPDIR/over.log"
+    {
+        echo '[1792800000.000] hero hero-plex: 4800 KB more would take the textures to 25000 KB, over 23437 KB; not uploaded'
+        echo '[1792800001.000] crossfade hero-ambient to hero-plex: 41 frames; textures 24000 KB at most'
+        echo '[1792800002.000] textures: 12992 KB in all (atlas 8192 KB, heroes 4800 KB); 24100 KB at most so far'
+        echo '[1792800003.000] textures: 12992 KB in all (atlas 8192 KB, heroes 4800 KB); 12992 KB at most so far'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"  over budget      1 not uploaded"$'\n'* ]]
+    [[ "$output" == *"  textures         12992 KB in all at the first idle (atlas 8192 KB, heroes 4800 KB), the first of 2 lines"$'\n'* ]]
+    [[ "$output" == *"  budget           24100 KB at most of 23437 KB: OVER"$'\n'* ]]
+    [[ "$output" != *"heroes   "* ]]
+}
+
+@test "top shelf lines that do not read right are skipped" {
+    log="$BATS_TEST_TMPDIR/bad-shelf.log"
+    {
+        echo '[1792800000.000] hero hero-plex: 1 layer, 4800 KB; decoded in soon ms, uploaded in 11.0 ms'
+        echo '[1792800000.100] hero hero-plex: 1 layer, 4800 KB; decoded in 92.4 ms, uploaded in 11.0 ms late'
+        echo '[1792800000.200] hero hero-plex 1 layer, 4800 KB; decoded in 92.4 ms, uploaded in 11.0 ms'
+        echo '[1792800000.300] hero hero-plex: decoded in 60.0 ms; dropped, focus moved'
+        echo '[1792800000.400] hero hero-plex: not a PNG the shelf shows its gradient'
+        echo '[1792800000.500] crossfade hero-ambient to hero-plex: many frames; textures 22367 KB at most'
+        echo '[1792800000.600] crossfade hero-ambient hero-plex: 41 frames; textures 22367 KB at most'
+        echo '[1792800000.700] textures: 12992 KB in all (atlas 8192 KB, heroes 4800 KB); 22366 KB at most'
+        echo '[1792800000.800] art-owner: art for some apps: netflix'
+        echo 'hero hero-plex: 1 layer, 4800 KB; decoded in 92.4 ms, uploaded in 11.0 ms'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [ "$output" = "frame-stats.sh: no frame statistics in the log for that period" ]
+}

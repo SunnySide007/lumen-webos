@@ -62,6 +62,14 @@ ipk: build-tv
 	install -m 0755 packaging/shell/lumen-icons.sh $(STAGE)/
 	install -m 0644 packaging/shell/icon80.png packaging/shell/icon130.png $(STAGE)/
 	install -m 0644 shell/assets/fonts/Inter-LICENSE.txt $(STAGE)/
+	mkdir -p $(STAGE)/art
+	install -m 0644 shell/assets/art/hero-*.png shell/assets/art/CREDITS.md $(STAGE)/art/
+	# The owner's Top Shelf art, if any (git-ignored; shell/assets/README.md).
+	if [ -d shell/assets/art-owner ]; then \
+	    mkdir -p $(STAGE)/art-owner; \
+	    find shell/assets/art-owner -maxdepth 1 -type f -name '*.png' \
+	        -exec install -m 0644 {} $(STAGE)/art-owner/ \; ; \
+	fi
 	sed -e 's/@APP_ID@/$(APP_ID)/' -e 's/@VERSION@/$(VERSION)/' \
 	    packaging/shell/appinfo.json.in > $(STAGE)/appinfo.json
 	ares-package --no-minify --outdir dist $(STAGE)

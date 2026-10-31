@@ -942,6 +942,39 @@ mod tests {
     }
 
     #[test]
+    fn the_b9s_tiles_get_their_heroes() {
+        use lumen_core::art::{Hero, hero_for};
+        let owner = std::collections::HashSet::new();
+        let entries = b9_entries();
+        let heroes: Vec<(&str, Hero)> = entries
+            .iter()
+            .map(|e| (e.app.id.as_str(), hero_for(&e.app, &owner)))
+            .collect();
+        let named = |name| Hero::Named(name);
+        assert_eq!(
+            heroes,
+            [
+                ("com.beb.plxnative", named("hero-plex")),
+                // #7c20d5, violet.
+                ("com.webos.app.photovideo", Hero::Palette(6)),
+                // #ffffff: no hue.
+                ("netflix", Hero::Ambient),
+                ("cdp-30", named("hero-plex")),
+                // #d7156d, pink.
+                ("com.webos.app.discovery", Hero::Palette(7)),
+                // No colour.
+                ("com.open.hidden.menu", Hero::Ambient),
+                // listApps' #1ec15f, green.
+                (LG_HOME, Hero::Palette(3)),
+                ("com.webos.app.hdmi1", named("hero-hdmi1")),
+                ("com.webos.app.hdmi2", named("hero-hdmi2")),
+                ("com.webos.app.hdmi3", named("hero-hdmi3")),
+                ("com.webos.app.hdmi4", named("hero-hdmi4")),
+            ]
+        );
+    }
+
+    #[test]
     fn tiles_get_titles_colours_and_kinds() {
         let entries = b9_entries();
         let get = |id: &str| {

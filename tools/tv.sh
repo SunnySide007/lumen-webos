@@ -8,7 +8,10 @@
 #   tools/tv.sh script <file>       run a local shell script on the TV
 #   tools/tv.sh install <file.ipk>  install or update an app, staged in
 #                                   /var/lib/lumen/stage/ and checked first
-#   tools/tv.sh launch <app id>     start an app
+#   tools/tv.sh launch <app id> [json]
+#                                   start an app, with launch parameters if
+#                                   given, such as '{"look":"plain"}'; a
+#                                   running app gets them only if closed first
 #   tools/tv.sh close <app id>      stop an app
 #   tools/tv.sh remove <app id>     uninstall an app
 #   tools/tv.sh log                 print the Lumen shell's logs from its last run
@@ -162,10 +165,26 @@ echo installed
 EOF
 }
 
+# Launch parameters go into the same single-quoted JSON: one object, kept to
+# letters, digits, spaces and the JSON and look characters, with no quote,
+# backslash or anything else the TV's shell would read.
+check_params() {
+    case $1 in
+        *[!A-Za-z0-9\ \{\}\":,._+-]*) die "launch parameters have unsupported characters: $1" ;;
+        \{*\}) ;;
+        *) die "launch parameters must be one JSON object, such as '{\"look\":\"plain\"}': $1" ;;
+    esac
+}
+
 cmd_luna_app() {
     method=$1
     check_app_id "${2:-}"
-    tv_ssh "luna-send -n 1 -f luna://com.webos.applicationManager/$method '{\"id\":\"$2\"}' </dev/null"
+    if [ -n "${3:-}" ]; then
+        body="{\"id\":\"$2\",\"params\":$3}"
+    else
+        body="{\"id\":\"$2\"}"
+    fi
+    tv_ssh "luna-send -n 1 -f luna://com.webos.applicationManager/$method '$body' </dev/null"
 }
 
 cmd_remove() {
@@ -243,7 +262,8 @@ command=${1:-help}
 
 case $command in
     help | -h | --help) usage; exit 0 ;;
-    check | shell | run | script | install | launch | close | remove | log) ;;
+    check | shell | run | script | install | close | remove | log) ;;
+    launch) [ -z "${2:-}" ] || check_params "$2" ;;
     push) check_push_args "${1:-}" "${2:-}" ;;
     tunnel) port=${1:-8080}; check_port "$port" ;;
     *) usage >&2; die "unknown command: $command" ;;
@@ -256,7 +276,7 @@ case $command in
     run) need_arg "${1:-}"; tv_ssh "$1" ;;
     script) need_arg "${1:-}"; [ -f "$1" ] || die "no such file: $1"; cmd_script "$1" ;;
     install) cmd_install "${1:-}" ;;
-    launch) cmd_luna_app launch "${1:-}" ;;
+    launch) cmd_luna_app launch "${1:-}" "${2:-}" ;;
     close) cmd_luna_app closeByAppId "${1:-}" ;;
     remove) cmd_remove "${1:-}" ;;
     log) cmd_log ;;

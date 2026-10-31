@@ -8,10 +8,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lumen_core::apps::{Launcher, MockLauncher};
+use lumen_core::art::Look;
 use lumen_core::script::Script;
 
 use crate::draw;
 use crate::gl::{self, Gl};
+use crate::heroes::{Folders, Heroes};
 use crate::home_loop::{self, Start, SystemClock, WallClock};
 use crate::info;
 use crate::luna::{self, Ls2, LunaLauncher};
@@ -30,6 +32,9 @@ pub struct Options {
     pub windowed: bool,
     /// Save one frame as a PNG here, 1.5 s after the start.
     pub screenshot: Option<PathBuf>,
+    /// When, on the loop's clock, `screenshot` takes its frame instead: with
+    /// `--fixed-dt` and `--keys`, a frame mid-motion.
+    pub screenshot_at: Option<Duration>,
     /// On a PC, use a GLES2 context instead of desktop GL (always on the TV).
     pub gles: bool,
     /// Keys to play, through the same path as the remote's.
@@ -38,14 +43,23 @@ pub struct Options {
     pub fixed_dt: Option<Duration>,
     /// Once the keys are played and the screen settles, save it here and quit.
     pub screenshot_when_settled: Option<PathBuf>,
+    /// The look's features: all on unless the launch parameters say.
+    pub look: Look,
+    /// What the launch parameters' `"look"` said that names no feature:
+    /// left out, and logged.
+    pub look_unknown: Vec<String>,
 }
 
 impl Options {
     /// Reads `--exit-after <seconds>`, `--windowed`, `--gles`,
-    /// `--screenshot <path>`, `--keys <list>`, `--fixed-dt <seconds>` and
-    /// `--screenshot-when-settled <path>`. Anything else is ignored: webOS
-    /// passes the app's launch parameters as a JSON argument. A bad `--keys`
-    /// or `--fixed-dt` is an error, since only automation uses them.
+    /// `--screenshot <path>`, `--screenshot-at <seconds>`, `--keys <list>`,
+    /// `--fixed-dt <seconds>` and `--screenshot-when-settled <path>`, and
+    /// the launch parameters, which webOS passes as a JSON argument: their
+    /// `"look"`, such as `{"look":"plain"}` or `{"look":"-dither,-tilt"}`
+    /// (`Look::parse`). Anything else is ignored. A bad `--keys`,
+    /// `--fixed-dt` or `--screenshot-at` is an error, since only automation
+    /// uses them; a bad look is not, since it must never keep the TV's Home
+    /// from starting.
     pub fn from_args(args: &[String]) -> Result<Self, String> {
         let mut opts = Self {
             windowed: !on_tv(),
@@ -64,6 +78,14 @@ impl Options {
                         .and_then(|s| Duration::try_from_secs_f64(s).ok());
                 }
                 "--screenshot" => opts.screenshot = it.next().map(PathBuf::from),
+                "--screenshot-at" => {
+                    let at = it
+                        .next()
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .filter(|s| s.is_finite() && *s >= 0.0 && *s <= 600.0)
+                        .ok_or("--screenshot-at needs seconds on the loop's clock, such as 0.62")?;
+                    opts.screenshot_at = Some(Duration::from_secs_f64(at));
+                }
                 "--keys" => {
                     let list = it.next().ok_or("--keys needs a list, such as R,R,D,OK")?;
                     opts.keys = Some(Script::parse(list)?);
@@ -79,6 +101,21 @@ impl Options {
                 "--screenshot-when-settled" => {
                     let path = it.next().ok_or("--screenshot-when-settled needs a path")?;
                     opts.screenshot_when_settled = Some(PathBuf::from(path));
+                }
+                json if json.starts_with('{') => {
+                    let said = serde_json::from_str::<serde_json::Value>(json)
+                        .ok()
+                        .and_then(|params| params.get("look").cloned());
+                    match said {
+                        Some(serde_json::Value::String(text)) => {
+                            (opts.look, opts.look_unknown) = Look::parse(&text);
+                        }
+                        Some(other) => {
+                            opts.look = Look::FULL;
+                            opts.look_unknown = vec![other.to_string()];
+                        }
+                        None => {}
+                    }
                 }
                 _ => {}
             }
@@ -96,6 +133,10 @@ pub(crate) const fn on_tv() -> bool {
 /// line counts from.
 pub fn run(opts: Options, started: Instant) -> Result<(), String> {
     info!("options {opts:?}");
+    info!("look: {}", opts.look);
+    for word in &opts.look_unknown {
+        info!("look: {word:?} is not a feature; left out");
+    }
     let mut start = StartTimes::new(started);
     let sdl = Sdl::load()?;
     info!("SDL {}", sdl.version());
@@ -139,7 +180,8 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
         if vsync { "on" } else { "refused" }
     );
 
-    let renderer = Renderer::new(gl)?;
+    let mut renderer = Renderer::new(gl)?;
+    renderer.set_dither(opts.look.dither);
     start.mark(Phase::Renderer, Instant::now());
     // A fixed clock wants the same frames every run, so its icons load at once.
     let assets = if opts.fixed_dt.is_some() {
@@ -172,8 +214,20 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
         shared.set_last_input(listing.saturating_duration_since(zero));
         watch::start(Arc::clone(&shared), luna::SELF_ID, zero)
     });
+    // Under a fixed clock heroes load at once, like its icons.
+    let folders = art_folders();
+    info!(
+        "art from {}, the owner's from {}",
+        folders.art.display(),
+        folders.owner.display()
+    );
+    let heroes = if opts.fixed_dt.is_some() {
+        Heroes::at_once(folders, opts.look)
+    } else {
+        Heroes::threaded(folders, opts.look)
+    };
     // After the watch, so the window and its context go before it stops.
-    let mut screen = TvScreen::new(surface, renderer, assets);
+    let mut screen = TvScreen::new(surface, renderer, assets, heroes);
     let mut events = sdl;
     home_loop::run(
         &mut events,
@@ -205,6 +259,25 @@ fn launcher() -> Box<dyn Launcher> {
     }
 }
 
+/// Where the Top Shelf heroes are: `art` and `art-owner` beside the
+/// executable, as the IPK installs them, or `LUMEN_ART` and
+/// `LUMEN_ART_OWNER` (`tools/sim.ps1` sets both to the checkout's folders).
+fn art_folders() -> Folders {
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+        .unwrap_or_default();
+    let folder = |var: &str, name: &str| {
+        std::env::var_os(var)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| beside.join(name))
+    };
+    Folders {
+        art: folder("LUMEN_ART", "art"),
+        owner: folder("LUMEN_ART_OWNER", "art-owner"),
+    }
+}
+
 /// The simulator's apps and LG Home's tile, as the TV's launcher adds it,
 /// with its placeholder icons if `LUMEN_MOCK_ICONS` names their folder
 /// (`tools/sim.ps1` sets it). The folder is resolved first, since an icon is
@@ -214,7 +287,7 @@ fn mock_launcher() -> MockLauncher {
         .map(PathBuf::from)
         .map(|dir| std::fs::canonicalize(&dir).unwrap_or(dir));
     let mock = MockLauncher::default().with_lg_home();
-    match dir {
+    let mock = match dir {
         Some(dir) if dir.is_dir() => {
             info!("mock apps, icons from {}", dir.display());
             mock.with_icons_in(&dir)
@@ -227,7 +300,41 @@ fn mock_launcher() -> MockLauncher {
             info!("mock apps, letter tiles");
             mock
         }
+    };
+    arranged(
+        mock,
+        &std::env::var("LUMEN_MOCK_FIRST").unwrap_or_default(),
+        &std::env::var("LUMEN_MOCK_COLORS").unwrap_or_default(),
+    )
+}
+
+/// The simulator's knobs for screenshots of a given Top Shelf hero
+/// (`tools/sim.ps1 -First -Colors`): the apps `first` names (`id,id`) moved
+/// to the front, onto row 0, and the colours `colors` gives (`id=rrggbb,…`).
+fn arranged(mut mock: MockLauncher, first: &str, colors: &str) -> MockLauncher {
+    if first.is_empty() && colors.is_empty() {
+        return mock;
     }
+    let Ok(mut apps) = mock.list() else {
+        return mock;
+    };
+    for (id, hex) in colors.split(',').filter_map(|pair| pair.split_once('=')) {
+        let rgb = (hex.len() == 6)
+            .then(|| u32::from_str_radix(hex, 16).ok())
+            .flatten();
+        if let (Some(rgb), Some(app)) = (rgb, apps.iter_mut().find(|a| a.id.as_str() == id)) {
+            let [_, r, g, b] = rgb.to_be_bytes();
+            app.color = Some([r, g, b]);
+        }
+    }
+    for id in first.split(',').rev() {
+        if let Some(at) = apps.iter().position(|a| a.id.as_str() == id) {
+            let app = apps.remove(at);
+            apps.insert(0, app);
+        }
+    }
+    info!("mock apps arranged: first {first:?}, colours {colors:?}");
+    MockLauncher::with_apps(apps)
 }
 
 #[cfg(test)]
@@ -265,6 +372,41 @@ mod tests {
     }
 
     #[test]
+    fn the_launch_parameters_look_turns_features_off() {
+        // LG's own parameters, as a Home press gives them: the full look.
+        let home = parse(&[r#"{"@system_native_app": true, "launchType": "homeKey", "nid": "x"}"#]);
+        assert_eq!((home.look, home.look_unknown.len()), (Look::FULL, 0));
+        assert_eq!(parse(&[r#"{"look":"plain"}"#]).look, Look::PLAIN);
+        let some = parse(&["--windowed", r#"{"look":"-dither,-tilt"}"#]);
+        assert_eq!(
+            some.look,
+            Look {
+                dither: false,
+                tilt: false,
+                ..Look::FULL
+            }
+        );
+        // A word that names nothing is left out, and kept for the log.
+        let typo = parse(&[r#"{"look":"plain hero sparkle"}"#]);
+        assert_eq!(
+            typo.look,
+            Look {
+                hero: true,
+                ..Look::PLAIN
+            }
+        );
+        assert_eq!(typo.look_unknown, ["sparkle"]);
+        // A look that is not text, or parameters that are not JSON, change
+        // nothing and stop nothing.
+        let number = parse(&[r#"{"look":3}"#]);
+        assert_eq!(
+            (number.look, number.look_unknown),
+            (Look::FULL, vec!["3".to_owned()])
+        );
+        assert_eq!(parse(&[r#"{"look":"plain""#]).look, Look::FULL);
+    }
+
+    #[test]
     fn parses_the_automation_flags() {
         let opts = parse(&[
             "--keys",
@@ -273,13 +415,35 @@ mod tests {
             "0.02",
             "--screenshot-when-settled",
             "/tmp/settled.png",
+            "--screenshot-at",
+            "0.62",
         ]);
+        assert_eq!(opts.screenshot_at, Some(Duration::from_millis(620)));
         assert_eq!(opts.keys, Some(Script::parse("R,R,D,OK").unwrap()));
         assert_eq!(opts.fixed_dt, Some(Duration::from_millis(20)));
         assert_eq!(
             opts.screenshot_when_settled,
             Some(PathBuf::from("/tmp/settled.png"))
         );
+    }
+
+    #[test]
+    fn the_simulators_knobs_move_and_colour_mock_apps() {
+        let mut mock = arranged(
+            MockLauncher::default(),
+            "com.webos.app.hdmi1,nope,spotify-beehive",
+            "spotify-beehive=1db954,netflix=zz0000,amazon=12",
+        );
+        let apps = mock.list().unwrap();
+        let ids: Vec<&str> = apps.iter().take(3).map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["com.webos.app.hdmi1", "spotify-beehive", "netflix"]);
+        assert_eq!(apps[1].color, Some([0x1d, 0xb9, 0x54]));
+        assert!(
+            apps.iter()
+                .filter(|a| a.id.as_str() != "spotify-beehive")
+                .all(|a| a.color.is_none())
+        );
+        assert_eq!(apps.len(), MockLauncher::default().list().unwrap().len());
     }
 
     #[test]
@@ -291,6 +455,8 @@ mod tests {
             &["--fixed-dt", "fast"],
             &["--fixed-dt", "5"],
             &["--screenshot-when-settled"],
+            &["--screenshot-at", "-1"],
+            &["--screenshot-at"],
         ] {
             assert!(Options::from_args(&args(bad)).is_err(), "{bad:?}");
         }

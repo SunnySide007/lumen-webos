@@ -115,7 +115,7 @@ pub fn load(path: &Path) -> Result<Image, String> {
     if std::fs::canonicalize(path).map_err(|e| e.to_string())? != path {
         return Err("a link or `..` in its path".to_owned());
     }
-    let file = open_regular(path)?;
+    let file = open_regular(path, MAX_FILE)?;
     let mut bytes = Vec::new();
     // One byte more than allowed tells a file that grew from one that fits.
     file.take(MAX_FILE + 1)
@@ -127,10 +127,10 @@ pub fn load(path: &Path) -> Result<Image, String> {
     Ok(shrink(decode(&bytes)?, MAX_KEPT))
 }
 
-/// Opens `path` only if it is a regular file of at most `MAX_FILE` bytes. On
+/// Opens `path` only if it is a regular file of at most `max` bytes. On
 /// Linux the open itself cannot block: a FIFO or a device would otherwise
 /// hang the shell before its type could be checked.
-fn open_regular(path: &Path) -> Result<File, String> {
+pub(crate) fn open_regular(path: &Path, max: u64) -> Result<File, String> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(target_os = "linux")]
@@ -145,8 +145,8 @@ fn open_regular(path: &Path) -> Result<File, String> {
     if !meta.is_file() {
         return Err("not a regular file".to_owned());
     }
-    if meta.len() > MAX_FILE {
-        return Err(format!("larger than {MAX_FILE} bytes"));
+    if meta.len() > max {
+        return Err(format!("larger than {max} bytes"));
     }
     Ok(file)
 }

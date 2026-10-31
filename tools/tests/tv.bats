@@ -12,6 +12,7 @@ setup() {
     run "$TV" help
     [ "$status" -eq 0 ]
     [[ "$output" == *"install <file.ipk>"* ]]
+    [[ "$output" == *"launch <app id> [json]"* ]]
     [[ "$output" != *"set -eu"* ]]
 }
 
@@ -39,6 +40,16 @@ setup() {
     TV_HOST=192.0.2.1 TV_KEY="$key" run "$TV" launch 'x"; reboot; "'
     [ "$status" -ne 0 ]
     [[ "$output" == *"not an app id"* ]]
+}
+
+@test "launch refuses parameters that are not one plain JSON object, before connecting" {
+    for bad in look '"look"' '{"look":"plain"' 'x{"look":"plain"}' \
+        '{"a":"$(reboot)"}' "{\"a\":\"it's\"}" '{"a":"b\"}' '{"a":"`reboot`"}' \
+        '{"a":1};{}' '{"a":1} | reboot {}' '{"a":[1]}'; do
+        run "$TV" launch netflix "$bad"
+        [ "$status" -ne 0 ]
+        [[ "$output" == *"launch parameters"* ]]
+    done
 }
 
 @test "install refuses a file that does not exist" {
@@ -129,6 +140,31 @@ printf '%s\n' "\$*" >>"$BATS_TEST_TMPDIR/luna-calls"
 echo '{"returnValue": true, "details": {"state": "installed"}}'
 EOF
     chmod +x "$BATS_TEST_TMPDIR/bin/luna-send-pub"
+}
+
+# A fake luna-send: logs its call and answers.
+fake_luna() {
+    cat >"$BATS_TEST_TMPDIR/bin/luna-send" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>"$BATS_TEST_TMPDIR/luna-calls"
+echo '{"returnValue": true}'
+EOF
+    chmod +x "$BATS_TEST_TMPDIR/bin/luna-send"
+}
+
+@test "launch sends the app id alone, or with its launch parameters as params" {
+    fake_ssh
+    fake_luna
+    run "$TV" launch netflix
+    [ "$status" -eq 0 ]
+    run "$TV" launch io.github.sunnyside007.lumen.shell '{"look":"plain +hero, -dither"}'
+    [ "$status" -eq 0 ]
+    run "$TV" close io.github.sunnyside007.lumen.shell
+    [ "$status" -eq 0 ]
+    m=luna://com.webos.applicationManager
+    [ "$(cat "$BATS_TEST_TMPDIR/luna-calls")" = "-n 1 -f $m/launch {\"id\":\"netflix\"}
+-n 1 -f $m/launch {\"id\":\"io.github.sunnyside007.lumen.shell\",\"params\":{\"look\":\"plain +hero, -dither\"}}
+-n 1 -f $m/closeByAppId {\"id\":\"io.github.sunnyside007.lumen.shell\"}" ]
 }
 
 @test "push uploads into root's stage, made root's alone, and checks the size" {

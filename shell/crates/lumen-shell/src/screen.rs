@@ -7,15 +7,17 @@ use std::path::Path;
 use std::time::Instant;
 
 use lumen_core::apps::App;
+use lumen_core::art::Hero;
 use lumen_core::home::Home;
 
 use crate::app::{Options, on_tv};
 use crate::capture;
-use crate::draw;
+use crate::draw::{self, HeroLayer};
 use crate::faults;
-use crate::home_loop::{Frame, Screen};
+use crate::heroes::{Heroes, Layer};
+use crate::home_loop::{Frame, HeroNews, Screen, Uploaded};
 use crate::info;
-use crate::render::{Batch, Renderer, SCREEN_H, SCREEN_W, fit_viewport};
+use crate::render::{Batch, Renderer, SCREEN_H, SCREEN_W, Texture, fit_viewport};
 use crate::sdl::{self, GlContext, Refresh, Sdl, Window};
 use crate::timing::FrameSplit;
 
@@ -109,6 +111,8 @@ pub struct TvScreen<'a> {
     surface: Surface<'a>,
     renderer: Renderer,
     assets: draw::Assets,
+    /// The Top Shelf heroes' files, loading and decoded.
+    heroes: Heroes,
     batch: Batch,
     /// The drawable's size when the frame painted last was painted.
     drawable: (i32, i32),
@@ -128,13 +132,19 @@ struct Painted {
 }
 
 impl<'a> TvScreen<'a> {
-    pub fn new(surface: Surface<'a>, renderer: Renderer, assets: draw::Assets) -> Self {
+    pub fn new(
+        surface: Surface<'a>,
+        renderer: Renderer,
+        assets: draw::Assets,
+        heroes: Heroes,
+    ) -> Self {
         let at = Instant::now();
         Self {
             drawable: surface.drawable_size(),
             surface,
             renderer,
             assets,
+            heroes,
             batch: Batch::default(),
             painted: Painted {
                 batch_from: at,
@@ -234,5 +244,59 @@ impl Screen for TvScreen<'_> {
 
     fn gl_error(&mut self) -> u32 {
         self.renderer.gl().error()
+    }
+
+    fn load_hero(&mut self, hero: &Hero) {
+        self.heroes.load(hero);
+    }
+
+    fn hero_news(&mut self) -> Vec<HeroNews> {
+        self.heroes.news()
+    }
+
+    /// One texture a layer; the pixels go when the layer does, inside the
+    /// upload's time. A layer GL refuses frees the ones before it.
+    fn upload_hero(&mut self, hero: &Hero) -> Result<Uploaded, String> {
+        let layers = self.heroes.take(hero).ok_or("not decoded")?;
+        let from = Instant::now();
+        let bytes = layers.iter().map(Layer::texture_bytes).sum();
+        let mut made = Vec::with_capacity(layers.len());
+        for layer in layers {
+            match self
+                .renderer
+                .create_texture(layer.w, layer.h, layer.rgb, &layer.pixels)
+            {
+                Ok(name) => made.push(HeroLayer {
+                    texture: Texture::Own(name),
+                    rows: layer.rows,
+                }),
+                Err(e) => {
+                    for layer in &made {
+                        delete(&self.renderer, layer);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        let uploaded = Uploaded {
+            layers: made.len(),
+            bytes,
+            took: from.elapsed(),
+        };
+        self.assets.heroes.insert(hero.clone(), made);
+        Ok(uploaded)
+    }
+
+    fn free_hero(&mut self, hero: &Hero) {
+        match self.assets.heroes.remove(hero) {
+            Some(layers) => layers.iter().for_each(|l| delete(&self.renderer, l)),
+            None => self.heroes.forget(hero),
+        }
+    }
+}
+
+fn delete(renderer: &Renderer, layer: &HeroLayer) {
+    if let Texture::Own(name) = layer.texture {
+        renderer.delete_texture(name);
     }
 }

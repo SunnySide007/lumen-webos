@@ -7,6 +7,8 @@
 //! stays in `layout`; `layout` and `home` keep their old names for these
 //! values as aliases.
 
+use std::time::Duration;
+
 use crate::anim::Tuning;
 
 /// A colour, each channel 0 to 1, alpha straight (not premultiplied).
@@ -154,6 +156,63 @@ pub const BUMP: Tuning = Tuning {
 pub const BUMP_PEAK: f32 = 14.0;
 /// How far Select dips the focused tile's lift.
 pub const PRESS_DIP: f32 = 0.5;
+
+// The Top Shelf hero (docs/specs/look-and-feel.md, "Phase 4 features").
+
+/// A colour whose channels spread less than this (0 to 1) has no hue to
+/// pick a palette hero by, so its app takes the ambient hero, as black,
+/// white and greys do.
+pub const HERO_MIN_CHROMA: f32 = 0.12;
+/// How long focus rests, the screen settled, before the hero for the tile
+/// the shelf shows loads: a run along row 0 loads nothing for the tiles
+/// passed over.
+pub const HERO_REST: Duration = Duration::from_millis(200);
+/// The crossfade to a new hero, 0 to 1.
+pub const HERO_FADE: Tuning = Tuning {
+    omega: 12.0,
+    epsilon: 0.002,
+    rest_speed: 0.02,
+};
+
+// Focus light and tilt (docs/specs/look-and-feel.md, "Phase 4 features").
+
+/// How far a newly focused tile leans toward the move, at most, in degrees:
+/// the edge it moved toward goes back, and it springs upright.
+pub const TILT_DEGREES: f32 = 5.0;
+/// The lean's spring, in radians.
+pub const TILT: Tuning = Tuning {
+    omega: 14.0,
+    epsilon: 0.0005,
+    rest_speed: 0.005,
+};
+/// How far the eye is from the screen for the lean's perspective, in px: a
+/// 5 degree lean of the lifted tile makes its far edge about 3% shorter.
+pub const TILT_DISTANCE: f32 = 1200.0;
+/// How long the light takes to sweep once across a newly focused tile.
+pub const SWEEP_TIME: Duration = Duration::from_millis(450);
+/// The light's band, as a fraction of the tile it crosses.
+pub const SWEEP_WIDTH: f32 = 0.45;
+/// The light at its brightest: white at this alpha.
+pub const SWEEP_STRENGTH: f32 = 0.2;
+/// How far the ambient hero's layers drift against a move at most, in px:
+/// back (the sky) least, front (the ridge) most, so the shelf reads as
+/// depth. Each is drawn 1.9% larger than the shelf, so a drift never shows
+/// an edge.
+pub const PARALLAX_PX: [f32; 3] = [1.0, 3.0, 6.0];
+/// The drift's spring, 1 at its farthest: it moves and settles with the
+/// tile's lean.
+pub const PARALLAX: Tuning = Tuning {
+    omega: TILT.omega,
+    epsilon: 0.005,
+    rest_speed: 0.05,
+};
+
+// Dither.
+
+/// The ordered dither on gradients and shapes, peak to peak, as a fraction
+/// of full scale: one 8-bit step, so half a step either way, enough to break
+/// a band's edge and too little to see as grain.
+pub const DITHER: f32 = 1.0 / 255.0;
 
 #[cfg(test)]
 mod tests {

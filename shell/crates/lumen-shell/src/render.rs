@@ -7,14 +7,21 @@
 //! * flat: a colour, or a gradient from top to bottom;
 //! * shape: a rounded rectangle the fragment shader cuts out, with a one-pixel
 //!   soft edge, or a wide one for a shadow;
-//! * image: a region of the atlas (icons and glyphs), tinted.
+//! * image: a region of a texture, tinted: the atlas (icons and glyphs), or
+//!   a texture of its own (a Top Shelf hero's layer).
 //!
 //! Colours blend premultiplied, which keeps the edges of scaled icons and
 //! glyphs free of dark fringes.
+//!
+//! The batch is drawn in runs, one for each change of texture: the heroes'
+//! quads come first, under everything, so a frame has one run per hero layer
+//! on screen and one for the atlas. The shader keeps its one sampler, and the
+//! vertices go to GL in one upload.
 
 use std::ffi::c_void;
 
-use lumen_core::style::Color;
+use lumen_core::layout::Rect;
+use lumen_core::style::{self, Color};
 
 use crate::atlas::{ATLAS_H, ATLAS_W, Upload, Uv};
 use crate::gl::{self, Gl};
@@ -24,8 +31,9 @@ use crate::gl::{self, Gl};
 pub use lumen_core::layout::{SCREEN_H, SCREEN_W};
 
 /// x, y; u, v; r, g, b, a; the pixel's offset from the shape's centre; the
-/// shape's half width, half height, corner radius and edge softness; kind.
-const FLOATS_PER_VERTEX: usize = 15;
+/// shape's half width, half height, corner radius and edge softness; kind;
+/// w, the perspective divide, 1 unless the quad leans (`Tilt`).
+const FLOATS_PER_VERTEX: usize = 16;
 const VERTICES_PER_QUAD: usize = 6;
 
 const FLAT: f32 = 0.0;
@@ -94,6 +102,66 @@ const NO_UV: Uv = Uv {
     v1: 0.0,
 };
 
+/// The texture an image quad samples: the atlas, or a texture of its own by
+/// the GL name `Renderer::create_texture` gave it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Texture {
+    Atlas,
+    Own(u32),
+}
+
+/// A lean in perspective, which `Batch::set_tilt` projects the quads pushed
+/// after it by: their plane turns about its upright axis through (cx, cy) by
+/// `angles[0]` radians (positive sends its right side back) and about its
+/// level one by `angles[1]` (positive sends its lower side back), seen from
+/// `distance` px in front of the screen. Each vertex is drawn where it
+/// projects, with the w that has the GPU interpolate its texture place and
+/// shape offset in perspective, so a leaning tile's corners, icon and
+/// letter stay true; two triangles of one flat quad agree exactly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tilt {
+    cx: f32,
+    cy: f32,
+    sin: [f32; 2],
+    cos: [f32; 2],
+    distance: f32,
+}
+
+impl Tilt {
+    pub fn new(cx: f32, cy: f32, angles: [f32; 2], distance: f32) -> Self {
+        Self {
+            cx,
+            cy,
+            sin: angles.map(f32::sin),
+            cos: angles.map(f32::cos),
+            distance,
+        }
+    }
+
+    /// Where (x, y) on the leaning plane shows on the screen, and its w.
+    fn project(&self, x: f32, y: f32) -> (f32, f32, f32) {
+        let (dx, dy) = (x - self.cx, y - self.cy);
+        let z = dx * self.sin[0] + dy * self.sin[1];
+        let w = (self.distance + z) / self.distance;
+        (
+            self.cx + dx * self.cos[0] / w,
+            self.cy + dy * self.cos[1] / w,
+            w,
+        )
+    }
+}
+
+/// Vertices drawn with one texture bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Run {
+    pub texture: Texture,
+    pub first: usize,
+    pub count: usize,
+    /// Whether any of its quads samples the texture; flat and shape quads
+    /// draw the same with any texture bound, so they join any run.
+    sampled: bool,
+}
+
 /// A quad's corners, and what they carry besides position.
 struct Quad {
     x: f32,
@@ -101,20 +169,59 @@ struct Quad {
     w: f32,
     h: f32,
     uv: Uv,
-    top: Rgba,
-    bottom: Rgba,
+    /// Top left, top right, bottom left, bottom right.
+    colors: [Rgba; 4],
     shape: Shape,
     kind: f32,
+    /// What an image quad samples; `None` for flat and shape quads.
+    texture: Option<Texture>,
 }
 
 #[derive(Default)]
 pub struct Batch {
     verts: Vec<f32>,
+    runs: Vec<Run>,
+    /// The lean the quads pushed now take, if any.
+    tilt: Option<Tilt>,
 }
 
 impl Batch {
     pub fn clear(&mut self) {
         self.verts.clear();
+        self.runs.clear();
+        self.tilt = None;
+    }
+
+    /// Leans the quads pushed from now on, until set to `None`.
+    pub fn set_tilt(&mut self, tilt: Option<Tilt>) {
+        self.tilt = tilt;
+    }
+
+    /// The runs to draw, in order: each a texture and the vertices drawn
+    /// with it bound.
+    pub fn runs(&self) -> &[Run] {
+        &self.runs
+    }
+
+    /// Counts a quad's six vertices into a run: the last one if it can take
+    /// them, else a new one. `texture` is what the quad samples, `None` for
+    /// a flat or shape quad.
+    fn add_to_run(&mut self, texture: Option<Texture>) {
+        let first = self.vertex_count() - VERTICES_PER_QUAD;
+        match (self.runs.last_mut(), texture) {
+            (Some(run), None) => run.count += VERTICES_PER_QUAD,
+            (Some(run), Some(t)) if run.texture == t || !run.sampled => {
+                run.texture = t;
+                run.sampled = true;
+                run.count += VERTICES_PER_QUAD;
+            }
+            _ => self.runs.push(Run {
+                texture: texture.unwrap_or(Texture::Atlas),
+                first,
+                count: VERTICES_PER_QUAD,
+                sampled: texture.is_some(),
+            }),
+        }
     }
 
     pub fn vertex_count(&self) -> usize {
@@ -136,6 +243,31 @@ impl Batch {
             xs.copied().fold(f32::MIN, f32::max),
             ys.copied().fold(f32::MIN, f32::max),
         )
+    }
+
+    /// How many quads lean: their w is not 1.
+    #[cfg(test)]
+    pub fn leaning_quads(&self) -> usize {
+        self.verts
+            .chunks(FLOATS_PER_VERTEX * VERTICES_PER_QUAD)
+            .filter(|quad| quad.chunks(FLOATS_PER_VERTEX).any(|v| v[15] != 1.0))
+            .count()
+    }
+
+    /// Quad `n`'s box: left, top, right, bottom.
+    #[cfg(test)]
+    pub fn quad_bounds(&self, n: usize) -> (f32, f32, f32, f32) {
+        let quad = Self {
+            verts: self
+                .verts
+                .chunks(FLOATS_PER_VERTEX * VERTICES_PER_QUAD)
+                .nth(n)
+                .expect("quad n")
+                .to_vec(),
+            runs: Vec::new(),
+            tilt: None,
+        };
+        quad.bounds()
     }
 
     /// Each image quad's atlas region: u0, v0, u1, v1.
@@ -161,16 +293,17 @@ impl Batch {
         let (x1, y1) = (q.x + q.w, q.y + q.h);
         let s = q.shape;
         let corners = [
-            (q.x, q.y, q.uv.u0, q.uv.v0, q.top),
-            (x1, q.y, q.uv.u1, q.uv.v0, q.top),
-            (q.x, y1, q.uv.u0, q.uv.v1, q.bottom),
-            (x1, y1, q.uv.u1, q.uv.v1, q.bottom),
+            (q.x, q.y, q.uv.u0, q.uv.v0, q.colors[0]),
+            (x1, q.y, q.uv.u1, q.uv.v0, q.colors[1]),
+            (q.x, y1, q.uv.u0, q.uv.v1, q.colors[2]),
+            (x1, y1, q.uv.u1, q.uv.v1, q.colors[3]),
         ];
         for i in [0, 1, 2, 1, 3, 2] {
             let (x, y, u, v, c) = corners[i];
+            let (sx, sy, w) = self.tilt.map_or((x, y, 1.0), |t| t.project(x, y));
             self.verts.extend_from_slice(&[
-                x,
-                y,
+                sx,
+                sy,
                 u,
                 v,
                 c.0,
@@ -184,8 +317,10 @@ impl Batch {
                 s.radius,
                 s.soft,
                 q.kind,
+                w,
             ]);
         }
+        self.add_to_run(q.texture);
     }
 
     /// A rectangle shaded from `top` to `bottom`.
@@ -196,10 +331,10 @@ impl Batch {
             w,
             h,
             uv: NO_UV,
-            top,
-            bottom,
+            colors: [top, top, bottom, bottom],
             shape: NO_SHAPE,
             kind: FLAT,
+            texture: None,
         });
     }
 
@@ -253,14 +388,17 @@ impl Batch {
         (top, bottom): (Rgba, Rgba),
         margin: f32,
     ) {
+        let (top, bottom) = (
+            top.lerp(bottom, -margin / h),
+            top.lerp(bottom, 1.0 + margin / h),
+        );
         self.push(&Quad {
             x: x - margin,
             y: y - margin,
             w: w + 2.0 * margin,
             h: h + 2.0 * margin,
             uv: NO_UV,
-            top: top.lerp(bottom, -margin / h),
-            bottom: top.lerp(bottom, 1.0 + margin / h),
+            colors: [top, top, bottom, bottom],
             shape: Shape {
                 cx: x + w / 2.0,
                 cy: y + h / 2.0,
@@ -270,11 +408,58 @@ impl Batch {
                 soft,
             },
             kind: SHAPE,
+            texture: None,
+        });
+    }
+
+    /// The `part` of the rounded rectangle `rect` (radius `r`) that lies
+    /// inside it, cut by its corners, each corner of the part its own colour:
+    /// top left, top right, bottom left, bottom right. The light crossing a
+    /// tile is two of these.
+    pub fn rounded_part(&mut self, rect: Rect, r: f32, part: Rect, colors: [Rgba; 4]) {
+        if part.w <= 0.0 || part.h <= 0.0 {
+            return;
+        }
+        let r = r.min(rect.w / 2.0).min(rect.h / 2.0).max(0.0);
+        self.push(&Quad {
+            x: part.x,
+            y: part.y,
+            w: part.w,
+            h: part.h,
+            uv: NO_UV,
+            colors,
+            shape: Shape {
+                cx: rect.x + rect.w / 2.0,
+                cy: rect.y + rect.h / 2.0,
+                half_w: rect.w / 2.0,
+                half_h: rect.h / 2.0,
+                radius: r,
+                soft: 0.5,
+            },
+            kind: SHAPE,
+            texture: None,
         });
     }
 
     /// The atlas region `uv` drawn into the rectangle, its colour times `tint`.
     pub fn image(&mut self, x: f32, y: f32, w: f32, h: f32, uv: Uv, tint: Rgba) {
+        self.image_from(Texture::Atlas, x, y, w, h, uv, tint);
+    }
+
+    /// The region `uv` of `texture` drawn into the rectangle, its colour
+    /// times `tint`.
+    // `image`'s arguments, and the texture.
+    #[allow(clippy::too_many_arguments)]
+    pub fn image_from(
+        &mut self,
+        texture: Texture,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        uv: Uv,
+        tint: Rgba,
+    ) {
         if w <= 0.0 || h <= 0.0 || tint.3 <= 0.0 {
             return;
         }
@@ -284,10 +469,10 @@ impl Batch {
             w,
             h,
             uv,
-            top: tint,
-            bottom: tint,
+            colors: [tint; 4],
             shape: NO_SHAPE,
             kind: IMAGE,
+            texture: Some(texture),
         });
     }
 }
@@ -310,14 +495,18 @@ attribute vec4 a_color;
 attribute vec2 a_local;
 attribute vec4 a_shape;
 attribute float a_kind;
+attribute float a_w;
 uniform vec2 u_screen;
+varying vec3 v_pos;
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec2 v_local;
 varying vec4 v_shape;
 varying float v_kind;
 void main() {
-    gl_Position = vec4(a_pos.x / u_screen.x * 2.0 - 1.0, 1.0 - a_pos.y / u_screen.y * 2.0, 0.0, 1.0);
+    vec2 ndc = vec2(a_pos.x / u_screen.x * 2.0 - 1.0, 1.0 - a_pos.y / u_screen.y * 2.0);
+    gl_Position = vec4(ndc * a_w, 0.0, a_w);
+    v_pos = vec3(a_pos * a_w, a_w);
     v_uv = a_uv;
     v_color = a_color;
     v_local = a_local;
@@ -328,6 +517,21 @@ void main() {
 
 // Highp where the GPU has it: mediump is 16-bit on Mali, too coarse for
 // distances across a 300 px pill or texels in a 2048 px atlas.
+//
+// Flat and shape quads are dithered when `u_dither` is above 0: a 4x4 Bayer
+// threshold from the pixel's place, centred, times `u_dither` (peak to
+// peak) and the pixel's alpha, so the 8-bit framebuffer's rounding breaks a
+// gradient's bands into a pattern finer than the eye resolves. Images, the
+// heroes and the atlas, are left as they are.
+//
+// The place is `v_pos`, the design-space position, which on the TV is the
+// framebuffer's pixel: a varying takes the shader's highp, where GLSL ES
+// declares `gl_FragCoord` mediump. It goes as (x w, y w, w) and comes back
+// divided, which undoes the perspective interpolation a leaning quad gets,
+// so the pattern stays on the screen's pixels there too. In 16-bit floats a position past 1024
+// holds only even pixel centres, which would leave 8 levels in x and bias
+// the pattern in y; `tests` work the arithmetic both ways. Mod 4 is
+// p - 4 floor(p / 4), exact for whole numbers either way.
 const FRAGMENT_SHADER: &str = "
 #ifdef GL_ES
 #ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -337,15 +541,22 @@ precision mediump float;
 #endif
 #endif
 uniform sampler2D u_atlas;
+uniform float u_dither;
+varying vec3 v_pos;
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec2 v_local;
 varying vec4 v_shape;
 varying float v_kind;
+float bayer2(vec2 a) {
+    a = floor(a);
+    return fract(dot(a, vec2(0.5, a.y * 0.75)));
+}
 void main() {
     vec4 c = vec4(v_color.rgb * v_color.a, v_color.a);
     if (v_kind > 1.5) {
         gl_FragColor = texture2D(u_atlas, v_uv) * c;
+        return;
     } else if (v_kind > 0.5) {
         vec2 q = abs(v_local) - v_shape.xy + v_shape.z;
         float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - v_shape.z;
@@ -353,17 +564,24 @@ void main() {
     } else {
         gl_FragColor = c;
     }
+    if (u_dither > 0.0) {
+        vec2 p = floor(v_pos.xy / v_pos.z);
+        p -= 4.0 * floor(p * 0.25);
+        float t = bayer2(p * 0.5) * 0.25 + bayer2(p);
+        gl_FragColor.rgb += (t - 15.0 / 32.0) * u_dither * gl_FragColor.a;
+    }
 }
 ";
 
 /// Each attribute: its name and how many floats it takes, in vertex order.
-const ATTRIBUTES: [(&std::ffi::CStr, i32); 6] = [
+const ATTRIBUTES: [(&std::ffi::CStr, i32); 7] = [
     (c"a_pos", 2),
     (c"a_uv", 2),
     (c"a_color", 4),
     (c"a_local", 2),
     (c"a_shape", 4),
     (c"a_kind", 1),
+    (c"a_w", 1),
 ];
 
 pub struct Renderer {
@@ -373,6 +591,9 @@ pub struct Renderer {
     texture: u32,
     attributes: [u32; ATTRIBUTES.len()],
     u_screen: i32,
+    u_dither: i32,
+    /// The dither's peak to peak, 0 for none.
+    dither: f32,
 }
 
 impl Renderer {
@@ -388,14 +609,15 @@ impl Renderer {
                 .map_err(|_| format!("shader is missing {}", name.to_string_lossy()))?;
         }
         // SAFETY: as above.
-        let (u_screen, u_atlas) = unsafe {
+        let (u_screen, u_atlas, u_dither) = unsafe {
             (
                 (gl.get_uniform_location)(program, c"u_screen".as_ptr()),
                 (gl.get_uniform_location)(program, c"u_atlas".as_ptr()),
+                (gl.get_uniform_location)(program, c"u_dither".as_ptr()),
             )
         };
-        if u_screen < 0 || u_atlas < 0 {
-            return Err("shader is missing u_screen or u_atlas".to_owned());
+        if u_screen < 0 || u_atlas < 0 || u_dither < 0 {
+            return Err("shader is missing u_screen, u_atlas or u_dither".to_owned());
         }
         let (mut vbo, mut texture) = (0, 0);
         // SAFETY: `vbo` and `texture` are valid out-pointers for one name each;
@@ -433,11 +655,18 @@ impl Renderer {
             texture,
             attributes,
             u_screen,
+            u_dither,
+            dither: 0.0,
         })
     }
 
     pub fn gl(&self) -> &Gl {
         &self.gl
+    }
+
+    /// Dithers flat and shape quads by `style::DITHER` if `on`.
+    pub fn set_dither(&mut self, on: bool) {
+        self.dither = if on { style::DITHER } else { 0.0 };
     }
 
     /// Copies newly placed atlas pixels into the texture.
@@ -486,6 +715,7 @@ impl Renderer {
             (gl.viewport)(x, y, w, h);
             (gl.use_program)(self.program);
             (gl.uniform2f)(self.u_screen, SCREEN_W, SCREEN_H);
+            (gl.uniform1f)(self.u_dither, self.dither);
             (gl.active_texture)(gl::TEXTURE0);
             (gl.bind_texture)(gl::TEXTURE_2D, self.texture);
             (gl.bind_buffer)(gl::ARRAY_BUFFER, self.vbo);
@@ -508,8 +738,75 @@ impl Renderer {
                 );
                 offset += floats as usize;
             }
-            (gl.draw_arrays)(gl::TRIANGLES, 0, batch.vertex_count() as i32);
+            for run in batch.runs() {
+                let name = match run.texture {
+                    Texture::Atlas => self.texture,
+                    Texture::Own(name) => name,
+                };
+                (gl.bind_texture)(gl::TEXTURE_2D, name);
+                (gl.draw_arrays)(gl::TRIANGLES, run.first as i32, run.count as i32);
+            }
         }
+    }
+
+    /// A texture of its own for a `w` x `h` image, filtered linearly and
+    /// clamped at its edges: 3 bytes a pixel if `rgb`, else premultiplied
+    /// RGBA. Its GL name, or GL's error if it would not take the pixels (it
+    /// is deleted then).
+    pub fn create_texture(&self, w: u32, h: u32, rgb: bool, pixels: &[u8]) -> Result<u32, String> {
+        let (format, bytes) = if rgb { (gl::RGB, 3) } else { (gl::RGBA, 4) };
+        // GL reads w * h pixels: this holds in release too.
+        assert_eq!(pixels.len(), (w * h * bytes) as usize, "{w}x{h}");
+        let gl = &self.gl;
+        // An error from before is not this upload's: logged as the loop logs
+        // GL's flag, so it is not lost.
+        let before = gl.error();
+        if before != gl::NO_ERROR {
+            crate::info!("GL error {before:#x}");
+        }
+        let mut name = 0;
+        // SAFETY: `name` is a valid out-pointer for one name; `pixels` holds
+        // exactly w * h pixels of the format, tightly packed, which an
+        // alignment of 1 matches whatever the width; it outlives the call,
+        // and GL copies it.
+        unsafe {
+            (gl.gen_textures)(1, &mut name);
+            (gl.active_texture)(gl::TEXTURE0);
+            (gl.bind_texture)(gl::TEXTURE_2D, name);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE);
+            (gl.pixel_storei)(gl::UNPACK_ALIGNMENT, 1);
+            (gl.tex_image_2d)(
+                gl::TEXTURE_2D,
+                0,
+                format as i32,
+                w as i32,
+                h as i32,
+                0,
+                format,
+                gl::UNSIGNED_BYTE,
+                pixels.as_ptr().cast(),
+            );
+            (gl.pixel_storei)(gl::UNPACK_ALIGNMENT, 4);
+        }
+        match gl.error() {
+            gl::NO_ERROR => Ok(name),
+            err => {
+                self.delete_texture(name);
+                Err(format!("GL error {err:#x}"))
+            }
+        }
+    }
+
+    /// Deletes a texture `create_texture` made. GL keeps its pixels until
+    /// the frames already handed over are drawn.
+    pub fn delete_texture(&self, name: u32) {
+        let gl = &self.gl;
+        // SAFETY: `name` points at one texture name, which GL ignores if it
+        // is not a texture.
+        unsafe { (gl.delete_textures)(1, &name) };
     }
 }
 
@@ -608,6 +905,92 @@ mod tests {
         assert_eq!(batch.quad_count(), 1, "an empty image is skipped");
     }
 
+    /// Each run as its texture, first vertex and vertex count.
+    fn runs(batch: &Batch) -> Vec<(Texture, usize, usize)> {
+        batch
+            .runs()
+            .iter()
+            .map(|r| (r.texture, r.first, r.count))
+            .collect()
+    }
+
+    #[test]
+    fn a_batch_draws_in_one_run_per_change_of_texture() {
+        let mut batch = Batch::default();
+        let (c, uv) = (Rgba::rgb8(1, 2, 3), NO_UV);
+        batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        // A layer's quad takes over the run of the flat quad before it.
+        batch.image_from(Texture::Own(7), 0.0, 0.0, 10.0, 10.0, uv, c);
+        batch.rounded_rect(0.0, 0.0, 10.0, 10.0, 2.0, c, c);
+        batch.image_from(Texture::Own(9), 0.0, 0.0, 10.0, 10.0, uv, c);
+        batch.image(0.0, 0.0, 10.0, 10.0, uv, c);
+        batch.image(0.0, 0.0, 10.0, 10.0, uv, c);
+        batch.shadow(0.0, 0.0, 10.0, 10.0, 2.0, 4.0, c);
+        assert_eq!(
+            runs(&batch),
+            [
+                (Texture::Own(7), 0, 18),
+                (Texture::Own(9), 18, 6),
+                (Texture::Atlas, 24, 18)
+            ]
+        );
+        let total: usize = batch.runs().iter().map(|r| r.count).sum();
+        assert_eq!(total, batch.vertex_count());
+        batch.clear();
+        assert!(batch.runs().is_empty());
+    }
+
+    #[test]
+    fn a_batch_of_atlas_and_flat_quads_is_one_run() {
+        let mut batch = Batch::default();
+        let (c, uv) = (Rgba::rgb8(1, 2, 3), NO_UV);
+        batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        batch.image(0.0, 0.0, 10.0, 10.0, uv, c);
+        batch.rounded_rect(0.0, 0.0, 10.0, 10.0, 2.0, c, c);
+        batch.image(0.0, 0.0, 10.0, 10.0, uv, c);
+        assert_eq!(runs(&batch), [(Texture::Atlas, 0, 24)]);
+        let mut flat = Batch::default();
+        flat.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        assert_eq!(runs(&flat), [(Texture::Atlas, 0, 6)]);
+    }
+
+    #[test]
+    fn a_leaning_quad_is_drawn_in_perspective_and_keeps_its_own_place() {
+        let c = Rgba(1.0, 1.0, 1.0, 1.0);
+        let mut batch = Batch::default();
+        // Turned 0.1 rad about the upright axis through its middle, so its
+        // right side goes back.
+        batch.set_tilt(Some(Tilt::new(100.0, 50.0, [0.1, 0.0], 1000.0)));
+        batch.gradient_rect(0.0, 0.0, 200.0, 100.0, c, c);
+        batch.set_tilt(None);
+        batch.gradient_rect(0.0, 0.0, 200.0, 100.0, c, c);
+        let vs = vertices(&batch);
+        // Corners: top left, top right, bottom left, and bottom right fifth.
+        let (tl, tr, bl, br) = (vs[0], vs[1], vs[2], vs[4]);
+        assert!(tr[15] > 1.0 && tl[15] < 1.0, "w: {} {}", tl[15], tr[15]);
+        let (left, right) = (bl[1] - tl[1], br[1] - tr[1]);
+        assert!(
+            right < 100.0 && left > 100.0 && right < left,
+            "{left} {right}"
+        );
+        // Projected about the middle: the centre line stays put.
+        assert!((tl[1] + bl[1] - 100.0).abs() < 1e-3);
+        // The same plane seen from in front: x' = cx + dx cos / w.
+        let w = (1000.0 + 100.0 * 0.1f32.sin()) / 1000.0;
+        assert!((tr[0] - (100.0 + 100.0 * 0.1f32.cos() / w)).abs() < 1e-3);
+        // The shape offset is the quad's own, not the projection's.
+        assert_eq!((tr[8], tr[9]), (200.0, 0.0));
+        // Level again, w is 1 and nothing moves.
+        let level = &vs[6..12];
+        assert!(level.iter().all(|v| v[15] == 1.0));
+        assert_eq!((level[1][0], level[1][1]), (200.0, 0.0));
+        // A cleared batch starts level.
+        batch.set_tilt(Some(Tilt::new(0.0, 0.0, [0.1, 0.1], 1000.0)));
+        batch.clear();
+        batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        assert!(vertices(&batch).iter().all(|v| v[15] == 1.0));
+    }
+
     #[test]
     fn colour_helpers() {
         let a = Rgba(0.0, 0.2, 1.0, 0.0);
@@ -630,5 +1013,80 @@ mod tests {
     fn rgb8_maps_bytes_to_unit_range() {
         assert_eq!(Rgba::rgb8(255, 0, 51), Rgba(1.0, 0.0, 0.2, 1.0));
         assert_eq!(Rgba::rgb8(0, 0, 0).alpha(0.5).3, 0.5);
+    }
+
+    /// `v` as a 16-bit float holds it, rounded to nearest, ties to even:
+    /// Mali's mediump.
+    fn half(v: f32) -> f32 {
+        if v == 0.0 {
+            return 0.0;
+        }
+        let ulp = 2f32.powi(v.abs().log2().floor() as i32 - 10);
+        (v / ulp).round_ties_even() * ulp
+    }
+
+    /// The fragment shader's dither threshold at pixel (x, y), each step
+    /// rounded by `r`: `half` for mediump, nothing for highp.
+    fn threshold(x: u32, y: u32, r: fn(f32) -> f32) -> f32 {
+        let bayer2 = |ax: f32, ay: f32| {
+            let (ax, ay) = (ax.floor(), ay.floor());
+            r(r(ax * 0.5) + r(ay * r(ay * 0.75))).fract()
+        };
+        // `v_pos` at the pixel's centre.
+        let p = |v: u32| {
+            let p = r(v as f32 + 0.5).floor();
+            r(p - r(4.0 * r(p * 0.25).floor()))
+        };
+        let (px, py) = (p(x), p(y));
+        r(r(bayer2(r(px * 0.5), r(py * 0.5)) * 0.25) + bayer2(px, py))
+    }
+
+    #[test]
+    fn the_dither_is_a_4x4_bayer_pattern_at_highp_and_mediump() {
+        // The shader holds the arithmetic these tests work.
+        for line in [
+            "return fract(dot(a, vec2(0.5, a.y * 0.75)));",
+            "vec2 p = floor(v_pos.xy / v_pos.z);",
+            "p -= 4.0 * floor(p * 0.25);",
+            "float t = bayer2(p * 0.5) * 0.25 + bayer2(p);",
+            "gl_FragColor.rgb += (t - 15.0 / 32.0) * u_dither * gl_FragColor.a;",
+        ] {
+            assert!(FRAGMENT_SHADER.contains(line), "{line}");
+        }
+        let block = |x0: u32, y0: u32, r: fn(f32) -> f32| {
+            let mut ts: Vec<f32> = (0..16)
+                .map(|i| threshold(x0 + i % 4, y0 + i / 4, r))
+                .collect();
+            ts.sort_by(f32::total_cmp);
+            ts
+        };
+        let sixteen: Vec<f32> = (0..16).map(|i| i as f32 / 16.0).collect();
+        let exact = |v: f32| v;
+        let mean = |ts: &[f32]| ts.iter().sum::<f32>() / ts.len() as f32;
+        // Highp, as on the B9: each of the 16 levels once in every 4x4
+        // block, all over the screen, centred on 15/32, so the dither adds
+        // nothing on average.
+        for (x0, y0) in [(0, 0), (4, 8), (1024, 0), (1916, 1076)] {
+            assert_eq!(block(x0, y0, exact), sixteen, "({x0}, {y0})");
+        }
+        assert_eq!(mean(&sixteen), 15.0 / 32.0);
+        // Mediump, on a GPU without highp: the same up to 1024 px.
+        for (x0, y0) in [(0, 0), (4, 8), (1016, 1016)] {
+            assert_eq!(block(x0, y0, half), sixteen, "({x0}, {y0})");
+        }
+        // Past 1024 a 16-bit float holds only even pixel centres. In x that
+        // leaves 8 levels, still centred; in y, the bottom 56 rows, the
+        // pattern leans dark by an eighth of a step, by three eighths where
+        // both are past it. Why the varying is highp.
+        let x_past = block(1024, 0, half);
+        let mut levels = x_past.clone();
+        levels.dedup();
+        assert_eq!(levels.len(), 8, "{x_past:?}");
+        assert_eq!(mean(&x_past), 15.0 / 32.0);
+        assert_eq!(mean(&block(0, 1024, half)), 11.0 / 32.0);
+        assert_eq!(mean(&block(1024, 1024, half)), 3.0 / 32.0);
+        // Half an 8-bit step either way, at most.
+        let reach = (15.0 / 32.0) * style::DITHER * 255.0;
+        assert!(reach <= 0.5, "{reach}");
     }
 }

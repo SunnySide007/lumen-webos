@@ -1,16 +1,20 @@
 //! Draws the home screen from `lumen_core::home::View` into a `Batch`: tiles
 //! in their app's colour with its icon (or the first letter of its title), the
-//! focused app's title below its tile, the placeholder Top Shelf and the
-//! status pill, with all text in Inter.
+//! focused app's title below its tile, the Top Shelf (its hero, or the
+//! placeholder until one is in) and the status pill, with all text in Inter.
+
+use std::collections::HashMap;
 
 use lumen_core::apps::App;
-use lumen_core::home::{TileView, View};
-use lumen_core::layout::{self, SAFE, SCREEN_H, SCREEN_W};
+use lumen_core::art::Hero;
+use lumen_core::focus::Dir;
+use lumen_core::home::{SweepView, TileView, View};
+use lumen_core::layout::{self, Rect, SAFE, SCREEN_H, SCREEN_W};
 use lumen_core::style::{self, Color};
 
-use crate::atlas::Atlas;
+use crate::atlas::{Atlas, Uv};
 use crate::icons::Icons;
-use crate::render::{Batch, Rgba};
+use crate::render::{Batch, Rgba, Texture, Tilt};
 use crate::text::Text;
 
 pub mod warm;
@@ -42,12 +46,22 @@ fn app_color(app: &App, index: usize) -> Rgba {
     }
 }
 
-/// What drawing needs besides the view: the atlas, and the text and icons
-/// that fill it.
+/// A hero's layer in its texture: which texture, and the rows of the shelf
+/// it covers, top and bottom, as fractions of the shelf's height.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HeroLayer {
+    pub texture: Texture,
+    pub rows: (f32, f32),
+}
+
+/// What drawing needs besides the view: the atlas, the text and icons that
+/// fill it, and the heroes uploaded into textures of their own.
 pub struct Assets {
     pub atlas: Atlas,
     pub text: Text,
     pub icons: Icons,
+    /// Each uploaded hero's layers, back to front.
+    pub heroes: HashMap<Hero, Vec<HeroLayer>>,
 }
 
 impl Assets {
@@ -58,6 +72,7 @@ impl Assets {
             atlas: Atlas::default(),
             text: Text::new()?,
             icons: Icons::default(),
+            heroes: HashMap::new(),
         })
     }
 
@@ -86,7 +101,15 @@ pub fn home(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
 
 fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     batch.clear();
-    batch.gradient_rect(0.0, 0.0, SCREEN_W, SCREEN_H, BG_TOP, BG_BOTTOM);
+    // A hero is opaque: the background is drawn only below it.
+    let hidden = match view.shelf_art.base {
+        Some(hero) if assets.heroes.contains_key(hero) => view.shelf.bottom().clamp(0.0, SCREEN_H),
+        _ => 0.0,
+    };
+    if hidden < SCREEN_H {
+        let top = BG_TOP.lerp(BG_BOTTOM, hidden / SCREEN_H);
+        batch.gradient_rect(0.0, hidden, SCREEN_W, SCREEN_H - hidden, top, BG_BOTTOM);
+    }
     shelf(batch, view, assets);
     if view.empty {
         let px = layout::EMPTY_PX;
@@ -110,8 +133,19 @@ fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     for tile in &view.tiles {
         shadow(batch, tile);
     }
+    // A tile leans as one piece, its icon or letter and its light with it;
+    // its shadow and title stay level.
     for tile in &view.tiles {
+        if tile.tilt != [0.0; 2] {
+            let r = tile.rect;
+            let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+            batch.set_tilt(Some(Tilt::new(cx, cy, tile.tilt, style::TILT_DISTANCE)));
+        }
         draw_tile(batch, tile, assets);
+        if let Some(sweep) = tile.sweep {
+            light(batch, tile, sweep);
+        }
+        batch.set_tilt(None);
     }
     for tile in &view.tiles {
         title(batch, tile, assets);
@@ -121,12 +155,20 @@ fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     }
 }
 
+/// The Top Shelf: its art (a hero, the placeholder gradient, or a crossfade
+/// between them), then the focused row-0 app's title over the dark band at
+/// its bottom left. The "TOP SHELF" caption labels the placeholder, so it
+/// fades out with it.
 fn shelf(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     let r = view.shelf;
     if r.bottom() <= 0.0 {
         return;
     }
-    batch.gradient_rect(r.x, r.y, r.w, r.h, SHELF_TOP, SHELF_BOTTOM);
+    let art = view.shelf_art;
+    shelf_art(batch, r, art.base, 1.0, view.shelf_drift, assets);
+    if let Some((over, alpha)) = art.over {
+        shelf_art(batch, r, over, alpha, view.shelf_drift, assets);
+    }
     let Some(title) = view.shelf_title else {
         return;
     };
@@ -136,18 +178,109 @@ fn shelf(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     let caption_baseline = baseline - assets.text.cap_height(px) - caption;
     let text = &mut assets.text;
     let atlas = &mut assets.atlas;
-    text.draw(
-        batch,
-        atlas,
-        SAFE.x,
-        caption_baseline,
-        caption,
-        1.0,
-        "TOP SHELF",
-        TEXT_DIM,
-    );
+    if art.placeholder > 0.0 {
+        text.draw(
+            batch,
+            atlas,
+            SAFE.x,
+            caption_baseline,
+            caption,
+            1.0,
+            "TOP SHELF",
+            TEXT_DIM.alpha(art.placeholder),
+        );
+    }
     let title = text.fit(title, px, SAFE.w);
     text.draw(batch, atlas, SAFE.x, baseline, px, 1.0, &title, TEXT);
+}
+
+/// One of the shelf's pictures at `alpha`: `hero`'s layers, back to front,
+/// or the placeholder gradient for `None` (and for a hero with no textures,
+/// which the home loop never shows). A layered hero's layers drift by
+/// `drift` (`View::shelf_drift`).
+fn shelf_art(
+    batch: &mut Batch,
+    r: Rect,
+    hero: Option<&Hero>,
+    alpha: f32,
+    drift: [f32; 2],
+    assets: &Assets,
+) {
+    let Some(layers) = hero.and_then(|hero| assets.heroes.get(hero)) else {
+        batch.gradient_rect(
+            r.x,
+            r.y,
+            r.w,
+            r.h,
+            SHELF_TOP.alpha(alpha),
+            SHELF_BOTTOM.alpha(alpha),
+        );
+        return;
+    };
+    if layers.len() > 1 {
+        drifting_layers(batch, r, layers, alpha, drift);
+        return;
+    }
+    let whole = Uv {
+        u0: 0.0,
+        v0: 0.0,
+        u1: 1.0,
+        v1: 1.0,
+    };
+    for layer in layers {
+        let (top, bottom) = (r.y + layer.rows.0 * r.h, r.y + layer.rows.1 * r.h);
+        batch.image_from(
+            layer.texture,
+            r.x,
+            top,
+            r.w,
+            bottom - top,
+            whole,
+            WHITE.alpha(alpha),
+        );
+    }
+}
+
+/// A layered hero's layers, each moved `drift` times its own
+/// `style::PARALLAX_PX` against the last move. All are drawn alike a little
+/// larger than the shelf, about its middle, so the layers still line up at
+/// rest and none drifts far enough to show its edge: art at a fraction `a`
+/// of the shelf shows at `0.5 + (a - 0.5) k`, plus the layer's drift. Each
+/// quad is cut to the shelf, its texture window cut with it.
+fn drifting_layers(batch: &mut Batch, r: Rect, layers: &[HeroLayer], alpha: f32, drift: [f32; 2]) {
+    let most = style::PARALLAX_PX.iter().copied().fold(0.0, f32::max);
+    let k = r.h / (r.h - 2.0 * most);
+    // Along one side of the shelf (from `at`, `len` long): where art at a
+    // fraction shows, and which fraction shows at a place.
+    let place = |a: f32, at: f32, len: f32, off: f32| at + len * (0.5 + (a - 0.5) * k) + off;
+    let fraction = |p: f32, at: f32, len: f32, off: f32| 0.5 + ((p - at - off) / len - 0.5) / k;
+    for (layer, px) in layers.iter().zip(style::PARALLAX_PX) {
+        let (ox, oy) = (drift[0] * px, drift[1] * px);
+        let (rows0, rows1) = layer.rows;
+        let x0 = place(0.0, r.x, r.w, ox).max(r.x);
+        let x1 = place(1.0, r.x, r.w, ox).min(r.right());
+        let y0 = place(rows0, r.y, r.h, oy).max(r.y);
+        let y1 = place(rows1, r.y, r.h, oy).min(r.bottom());
+        if x1 <= x0 || y1 <= y0 {
+            continue;
+        }
+        let v = |y: f32| (fraction(y, r.y, r.h, oy) - rows0) / (rows1 - rows0);
+        let uv = Uv {
+            u0: fraction(x0, r.x, r.w, ox),
+            v0: v(y0),
+            u1: fraction(x1, r.x, r.w, ox),
+            v1: v(y1),
+        };
+        batch.image_from(
+            layer.texture,
+            x0,
+            y0,
+            x1 - x0,
+            y1 - y0,
+            uv,
+            WHITE.alpha(alpha),
+        );
+    }
 }
 
 /// A lifted tile's soft shadow, dropped below it, as dark as its lift.
@@ -216,6 +349,52 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
     );
 }
 
+/// The light crossing a newly focused tile: a soft band of white, brightest
+/// in its middle, that travels the way focus moved, cut by the tile's
+/// corners. Two quads, one each side of the band's middle, each clipped to
+/// the tile.
+fn light(batch: &mut Batch, tile: &TileView<'_>, sweep: SweepView) {
+    let r = tile.rect;
+    let radius = layout::TILE_RADIUS * r.w / layout::TILE_W;
+    let half = style::SWEEP_WIDTH / 2.0;
+    // Along the tile the way the band travels: 0 where it enters, 1 where
+    // it leaves.
+    let forward = matches!(sweep.dir, Dir::Right | Dir::Down);
+    let across = matches!(sweep.dir, Dir::Left | Dir::Right);
+    let glow = |at: f32| {
+        let a = style::SWEEP_STRENGTH * (1.0 - (at - sweep.at).abs() / half).max(0.0);
+        WHITE.alpha(a)
+    };
+    for (from, to) in [(sweep.at - half, sweep.at), (sweep.at, sweep.at + half)] {
+        let (from, to) = (from.clamp(0.0, 1.0), to.clamp(0.0, 1.0));
+        if to <= from {
+            continue;
+        }
+        // In the tile's own terms, left to right or top to bottom.
+        let (lo, hi, c_lo, c_hi) = if forward {
+            (from, to, glow(from), glow(to))
+        } else {
+            (1.0 - to, 1.0 - from, glow(to), glow(from))
+        };
+        let (part, colors) = if across {
+            let part = Rect {
+                x: r.x + lo * r.w,
+                w: (hi - lo) * r.w,
+                ..r
+            };
+            (part, [c_lo, c_hi, c_lo, c_hi])
+        } else {
+            let part = Rect {
+                y: r.y + lo * r.h,
+                h: (hi - lo) * r.h,
+                ..r
+            };
+            (part, [c_lo, c_lo, c_hi, c_hi])
+        };
+        batch.rounded_part(r, radius, part, colors);
+    }
+}
+
 /// The focused app's name below its tile, fading in as the tile lifts.
 fn title(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
     let lift = tile.lift.min(1.0);
@@ -272,6 +451,7 @@ mod tests {
     use std::time::Duration;
 
     use lumen_core::apps::{App, AppKind, Launcher, MockLauncher};
+    use lumen_core::art::Look;
     use lumen_core::focus::Dir;
     use lumen_core::home::{BackAtTop, Home};
     use lumen_core::input::{Action, Press};
@@ -336,6 +516,121 @@ mod tests {
             let n = quads(&home, &mut assets);
             assert!(n <= QUAD_BUDGET, "row {row}: {n} quads");
         }
+    }
+
+    #[test]
+    fn a_newly_focused_tile_leans_whole_with_its_light_and_fits_the_budget() {
+        let right = Press {
+            action: Action::Move(Dir::Right),
+            repeat: false,
+        };
+        let mut assets = assets();
+        let mut home = mock_home().with_look(Look::FULL);
+        assert_eq!(home.handle(right, Duration::ZERO), None);
+        // Halfway through the light, the lean on its way back.
+        home.advance_to(style::SWEEP_TIME / 2);
+        let tile = *home.view().tiles.last().unwrap();
+        assert!(tile.tilt[0] > 0.0 && tile.sweep.is_some());
+        let mut batch = Batch::default();
+        super::home(&mut batch, &home.view(), &mut assets);
+        // Prime Video's tile, its letter and the light's two quads lean;
+        // its shadow, title and every other tile stay level.
+        assert_eq!(batch.leaning_quads(), 4);
+        let mut plain = mock_home();
+        assert_eq!(plain.handle(right, Duration::ZERO), None);
+        plain.advance_to(style::SWEEP_TIME / 2);
+        let n = batch.quad_count();
+        assert_eq!(n, quads(&plain, &mut assets) + 2);
+        assert!(n <= QUAD_BUDGET, "{n} quads");
+        // Settled, it is the plain frame again.
+        home.settle_now();
+        plain.settle_now();
+        super::home(&mut batch, &home.view(), &mut assets);
+        assert_eq!(batch.leaning_quads(), 0);
+        assert_eq!(batch.quad_count(), quads(&plain, &mut assets));
+    }
+
+    #[test]
+    fn the_ambient_heros_layers_drift_each_its_own_way_and_never_show_an_edge() {
+        let mut assets = assets();
+        let mut home = mock_home().with_look(Look::FULL);
+        let layers = [(0.0, 1.0), (0.0, 0.66), (0.71, 1.0)];
+        let textures = layers.map(|rows| HeroLayer {
+            texture: Texture::Own(7),
+            rows,
+        });
+        assets.heroes.insert(Hero::Ambient, textures.into());
+        home.show_hero(Some(Hero::Ambient));
+        home.settle_now();
+        let windows = |home: &Home, assets: &mut Assets| {
+            let mut batch = Batch::default();
+            super::home(&mut batch, &home.view(), assets);
+            batch.image_uvs()[..3].to_vec()
+        };
+        // At rest the three line up: one window, a little inside the art.
+        let rest = windows(&home, &mut assets);
+        assert!(rest.iter().all(|w| (w.0, w.2) == (rest[0].0, rest[0].2)));
+        assert!(rest[0].0 > 0.0 && rest[0].2 < 1.0, "{rest:?}");
+        // Mid drift, after Right, each window has moved right (the art left)
+        // by its layer's share, still inside the art.
+        let right = Press {
+            action: Action::Move(Dir::Right),
+            repeat: false,
+        };
+        assert_eq!(home.handle(right, Duration::ZERO), None);
+        home.advance_to(Duration::from_millis(70));
+        let moved = windows(&home, &mut assets);
+        let shift: Vec<f32> = moved.iter().zip(&rest).map(|(m, r)| m.0 - r.0).collect();
+        assert!(shift[0] > 0.0, "{shift:?}");
+        for (i, px) in style::PARALLAX_PX.iter().enumerate() {
+            let share = shift[i] / shift[0];
+            assert!(
+                (share - px / style::PARALLAX_PX[0]).abs() < 0.01,
+                "{shift:?}"
+            );
+        }
+        for w in &moved {
+            assert!(
+                w.0 >= 0.0 && w.1 >= 0.0 && w.2 <= 1.0 && w.3 <= 1.0,
+                "{moved:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn under_a_hero_the_background_starts_below_the_shelf() {
+        let mut home = mock_home().with_look(Look::FULL);
+        let mut assets = assets();
+        let plain = quads(&home, &mut assets);
+        // Netflix's ambient hero, its three layers in textures as the loop
+        // leaves them.
+        let hero = home.wanted_hero().cloned().expect("a hero");
+        let layers = [(0.0, 1.0), (0.0, 0.66), (0.71, 1.0)].map(|rows| HeroLayer {
+            texture: Texture::Own(7),
+            rows,
+        });
+        assets.heroes.insert(hero.clone(), layers.into());
+        home.show_hero(Some(hero));
+        // Mid crossfade the layered hero is drawn whole under the fading
+        // placeholder, caption and all, so the background already starts
+        // at the shelf's bottom, where the hero ends.
+        home.advance_to(Duration::from_millis(50));
+        let mut batch = Batch::default();
+        super::home(&mut batch, &home.view(), &mut assets);
+        assert!(batch.quad_count() <= QUAD_BUDGET);
+        assert_eq!(batch.quad_count(), plain + 3);
+        let shelf = home.view().shelf;
+        assert_eq!(batch.quad_bounds(0).1, shelf.bottom());
+        assert_eq!(batch.quad_bounds(1).1, shelf.y);
+        // Settled, the caption is gone too.
+        home.settle_now();
+        super::home(&mut batch, &home.view(), &mut assets);
+        assert_eq!(batch.quad_bounds(0).1, shelf.bottom());
+        // Three layers for the gradient, and a quad a letter less.
+        assert_eq!(batch.quad_count(), plain + 2 - "TOPSHELF".len());
+        // One run for the hero's texture, then the atlas's.
+        let textures: Vec<_> = batch.runs().iter().map(|r| r.texture).collect();
+        assert_eq!(textures, [Texture::Own(7), Texture::Atlas]);
     }
 
     #[test]

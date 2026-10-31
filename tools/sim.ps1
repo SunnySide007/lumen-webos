@@ -10,19 +10,37 @@
   For automated checks, -Keys plays remote keys (U, D, L, R, OK, BACK),
   -FixedDt makes the clock deterministic, and -ScreenshotWhenSettled saves
   the frame once the keys are done and nothing moves, then quits.
+  -ScreenshotAt moves -Screenshot's frame from 1.5 s to the given time on
+  the loop's clock: the first key goes down at 0.5 s, so with -FixedDt
+  -Screenshot frame.png -ScreenshotAt 0.62 -Keys R catches a tile leaning.
+
+  The Top Shelf heroes come from shell/assets/art, the owner's from
+  shell/assets/art-owner. For screenshots of a given hero, -First moves the
+  mock apps it names to the front, onto row 0, and -Colors gives mock apps a
+  webOS icon colour, as "id=rrggbb,id=rrggbb".
+
+  -Look passes the look as the TV's launch parameters would, as
+  {"look":"<look>"}: "plain" is the home screen without Phase 4's features,
+  "-dither,-tilt" every feature but those. All are on without it.
 
 .EXAMPLE
   pwsh tools/sim.ps1
   pwsh tools/sim.ps1 -ExitAfter 5      # smoke test: run five seconds, then quit
   pwsh tools/sim.ps1 -ExitAfter 3 -Screenshot frame.png
   pwsh tools/sim.ps1 -Keys "R,R,D" -FixedDt 0.016667 -ScreenshotWhenSettled row1.png
+  pwsh tools/sim.ps1 -First com.webos.app.hdmi1 -Colors "spotify-beehive=1db954"
+  pwsh tools/sim.ps1 -Look plain
 #>
 param(
     [double]$ExitAfter = 0,
     [string]$Screenshot = '',
+    [double]$ScreenshotAt = -1,
     [string]$Keys = '',
     [double]$FixedDt = 0,
     [string]$ScreenshotWhenSettled = '',
+    [string]$First = '',
+    [string]$Colors = '',
+    [string]$Look = '',
     [switch]$Release
 )
 
@@ -53,6 +71,11 @@ if (-not (Test-Path $sdlDll)) {
 $env:LUMEN_SDL2 = $sdlDll
 $env:LUMEN_LOG = Join-Path $root 'shell/target-host/lumen-shell.log'
 $env:LUMEN_MOCK_ICONS = Join-Path $root 'shell/assets/mock-icons'
+$env:LUMEN_ART = Join-Path $root 'shell/assets/art'
+$env:LUMEN_ART_OWNER = Join-Path $root 'shell/assets/art-owner'
+# Empty clears them: the session keeps what an earlier run set.
+$env:LUMEN_MOCK_FIRST = $First
+$env:LUMEN_MOCK_COLORS = $Colors
 $env:CARGO_TARGET_DIR = Join-Path $root 'shell/target-host'
 
 $cargoArgs = @('run', '--manifest-path', (Join-Path $root 'shell/Cargo.toml'))
@@ -62,10 +85,17 @@ $cargoArgs += @('--', '--windowed')
 if ($ScreenshotWhenSettled -and $ExitAfter -le 0) { $ExitAfter = 30 }
 if ($ExitAfter -gt 0) { $cargoArgs += @('--exit-after', "$ExitAfter") }
 if ($Screenshot) { $cargoArgs += @('--screenshot', [System.IO.Path]::GetFullPath($Screenshot)) }
+if ($ScreenshotAt -ge 0) { $cargoArgs += @('--screenshot-at', "$ScreenshotAt") }
 if ($Keys) { $cargoArgs += @('--keys', $Keys) }
 if ($FixedDt -gt 0) { $cargoArgs += @('--fixed-dt', "$FixedDt") }
 if ($ScreenshotWhenSettled) {
     $cargoArgs += @('--screenshot-when-settled', [System.IO.Path]::GetFullPath($ScreenshotWhenSettled))
+}
+if ($Look) {
+    if ($Look -notmatch '^[A-Za-z0-9 ,+-]+$') { throw "-Look takes feature names, such as plain or -dither,-tilt" }
+    # Quotes reach the shell as typed, as webOS passes its JSON argument.
+    $PSNativeCommandArgumentPassing = 'Standard'
+    $cargoArgs += '{"look":"' + $Look + '"}'
 }
 
 & cargo @cargoArgs

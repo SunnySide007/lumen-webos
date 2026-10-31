@@ -12,6 +12,29 @@ tools/studio.sh python3 -I tools/art/heroes.py --all
 tools/studio.sh python3 -I tools/art/pictograms.py
 ```
 
+`make ipk` puts every hero, full size and half (`-half`), in the app's
+`art/` folder, with `CREDITS.md`; the shell reads them from there, and the
+simulator from this folder (`tools/sim.ps1` sets `LUMEN_ART`). The full set
+is about 13 MB, the halves 3.4 MB: both go, so the TV can show either with
+the `half` look switch (docs/specs/look-and-feel.md).
+
+## art-owner/
+
+Your own Top Shelf art: a PNG named for the app it is for,
+`art-owner/<app id>.png` (`com.webos.app.hdmi1.png`, `netflix.png`), shown
+over that app's tile in place of Lumen's hero. The folder is git-ignored, so
+the art stays yours; `make ipk` packs it into the app's `art-owner/` folder
+if it is there, and Lumen never fetches art from anywhere.
+
+- 1920x640, or 960x320, scaled up when drawn. Any other size is left out,
+  with a line in the log saying so.
+- Opaque: any transparency is laid over black. At most 8 MB a file.
+- The app ID is the one the shell's log names when it launches the app
+  (`launch <app id>: answered in …`). A file whose name is not an app ID is
+  left out, with a line in the log.
+
+The simulator reads this folder too (`LUMEN_ART_OWNER`).
+
 ## fonts/
 
 `Inter-SemiBold.ttf` is Inter 4.1 by Rasmus Andersson and the Inter Project

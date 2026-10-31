@@ -429,7 +429,7 @@ impl Idle {
         self.next = now + IDLE_BEAT;
     }
 
-    #[cfg(test)]
+    /// When the last input came: the hero plan tells a burst input began by it.
     pub fn last_input(&self) -> Duration {
         self.last_input
     }

@@ -129,6 +129,29 @@
 # a reading follows: of the focus losses, how many had a "power Screen Saver"
 # or "front app com.webos.app.screensaver" line within 2 s before or after.
 #
+# Top Shelf hero lines, only from a shell with the look's hero on
+# (docs/specs/look-and-feel.md, "The Top Shelf hero's lines"), and the look
+# lines, from any shell since lane J ("The look's lines"):
+#   look: hero on, dither off, tilt on, light on, parallax on; art full size
+#   look: "sparkle" is not a feature; left out
+#   art-owner: art for 2 apps: com.webos.app.hdmi1, netflix
+#   art-owner/"hulu.png": 1920x1080; the owner's art is 1920x640 or 960x320; not used
+#   hero hero-plex: 1 layer, 4800 KB; decoded in 92.4 ms, uploaded in 11.0 ms
+#   hero hero-plex: decoded in 92.4 ms; dropped, focus moved on
+#   hero hero-plex: hero-plex.png: not a PNG; the shelf shows its gradient
+#   hero hero-plex: 4800 KB more would take the textures to 25000 KB, over 23437 KB; not uploaded
+#   crossfade hero-ambient to hero-plex: 42 frames; textures 22366 KB at most
+#   textures: 12992 KB in all (atlas 8192 KB, heroes 4800 KB); 22366 KB at most so far
+# The top shelf section follows the warm section, when the period holds such
+# lines: the look the run had (the first look line, and with several runs
+# how many and whether they were alike) and the words it left out, the
+# owner's art (apps with art and files left out), the heroes
+# uploaded with the p50 and max of their decode and upload times and the most
+# KB one took, the heroes dropped, each one that failed (20 at most), those
+# over budget, the crossfades with the p50 and max of their frames and the most
+# their textures held, the first textures line, and the most KB any line saw
+# against the budget of 24,000,000 bytes (23437 KB), within or OVER.
+#
 # Exit status: 0 with a summary; 1 when the log holds no frame statistics in
 # the period (any slow-frame and timing sections are still printed first); 2
 # for a bad argument.
@@ -367,6 +390,31 @@ function report_warm() {
     printf "  %-16s %d glyphs, %d uploads, %d KB\n", "made ahead", warm_glyphs, warm_uploads, warm_kb
     printf "  %-16s %s ms\n", "took", warm_ms
 }
+# The Top Shelf hero: the art, each hero put into textures, the crossfades
+# and the texture total, against the 24,000,000-byte budget (23437 KB).
+function report_shelf(   i, d, u, f, most) {
+    if (nlook + nlookout + nhero + nhdrop + nhfail + nhover + nfade + ntex + noa + noaout == 0) return
+    print "top shelf (look, hero, crossfade, textures and art-owner lines):"
+    if (nlook > 0) printf "  %-16s %s%s\n", "look", look_first, (nlook > 1) ? sprintf("; the first of %d runs, %s", nlook, look_differ ? "not all alike" : "all alike") : ""
+    if (nlookout > 0) printf "  %-16s %d left out, not features\n", "look words", nlookout
+    if (noa + noaout > 0) printf "  %-16s %d apps with art, %d files left out\n", "owner art", oa_apps, noaout
+    if (nhero > 0) {
+        isort(hdec, nhero, d)
+        isort(hup, nhero, u)
+        printf "  %-16s %d; decode p50 %.1f, max %.1f ms; upload p50 %.1f, max %.1f ms\n", "heroes", nhero, pct(d, nhero, 50), d[nhero], pct(u, nhero, 50), u[nhero]
+        printf "  %-16s %d KB the most for one hero\n", "hero textures", hkb_max
+    }
+    if (nhdrop > 0) printf "  %-16s %d decoded after focus moved on\n", "dropped", nhdrop
+    listed("failed", hfail, nhfail)
+    if (nhover > 0) printf "  %-16s %d not uploaded\n", "over budget", nhover
+    if (nfade > 0) {
+        isort(ffr, nfade, f)
+        printf "  %-16s %d; frames p50 %d, max %d; textures %d KB at most\n", "crossfades", nfade, pct(f, nfade, 50), f[nfade], fkb_max
+    }
+    if (ntex > 0) printf "  %-16s %d KB in all at the first idle (atlas %d KB, heroes %d KB)%s\n", "textures", tex_all, tex_atlas, tex_heroes, (ntex > 1) ? sprintf(", the first of %d lines", ntex) : ""
+    most = (fkb_max > tex_peak) ? fkb_max : tex_peak
+    if (nfade + ntex > 0) printf "  %-16s %d KB at most of 23437 KB: %s\n", "budget", most, (most <= 23437) ? "within" : "OVER"
+}
 function report_focus() {
     if (nfl == 0) return
     printf "focus losses (window focus lost lines): %d\n", nfl
@@ -523,6 +571,59 @@ $2 == "warm:" && whole($3) && $4 == "glyphs," && whole($5) && $6 == "uploads," &
     }
     next
 }
+
+# The look (look-and-feel.md, the look lines), once at each start-up.
+# look: hero on, dither off, tilt on, light on, parallax on; art full size
+$2 == "look:" && $3 == "hero" && $5 == "dither" && $7 == "tilt" && $9 == "light" && $11 == "parallax" &&
+    $13 == "art" && $NF == "size" && NF == 15 {
+    s = rest(3)
+    if (++nlook == 1) look_first = s
+    else if (s != look_first) look_differ = 1
+    next
+}
+# look: "sparkle" is not a feature; left out
+$2 == "look:" && NF >= 9 && rest(NF - 5) == "is not a feature; left out" { nlookout++; next }
+
+# The Top Shelf hero (look-and-feel.md, the Top Shelf hero lines). Hero
+# names hold no spaces: hero-plex, art-owner/netflix, gradient.
+# hero hero-plex: 1 layer, 4800 KB; decoded in 92.4 ms, uploaded in 11.0 ms
+$2 == "hero" && $3 ~ /:$/ && whole($4) && ($5 == "layer," || $5 == "layers,") && whole($6) && $7 == "KB;" &&
+    $8 == "decoded" && $9 == "in" && decimal($10) && $11 == "ms," && $12 == "uploaded" && $13 == "in" &&
+    decimal($14) && $15 == "ms" && NF == 15 {
+    nhero++
+    hdec[nhero] = $10 + 0; hup[nhero] = $14 + 0
+    if ($6 + 0 > hkb_max) hkb_max = $6 + 0
+    next
+}
+# hero hero-plex: decoded in 92.4 ms; dropped, focus moved on
+$2 == "hero" && $3 ~ /:$/ && $4 == "decoded" && $5 == "in" && decimal($6) && $7 == "ms;" &&
+    $8 == "dropped," && rest(9) == "focus moved on" { nhdrop++; next }
+# hero hero-plex: hero-plex.png: not a PNG; the shelf shows its gradient  (and "upload failed: ...")
+$2 == "hero" && $3 ~ /:$/ && NF >= 9 && $(NF - 5) ~ /;$/ && rest(NF - 4) == "the shelf shows its gradient" {
+    s = fields(3, NF - 5)
+    hfail[++nhfail] = substr(s, 1, length(s) - 1)
+    next
+}
+# hero hero-plex: 4800 KB more would take the textures to 25000 KB, over 23437 KB; not uploaded
+$2 == "hero" && $3 ~ /:$/ && whole($4) && $5 == "KB" && $6 == "more" && $(NF - 1) == "not" && $NF == "uploaded" { nhover++; next }
+# crossfade hero-ambient to hero-plex: 42 frames; textures 22366 KB at most
+$2 == "crossfade" && $4 == "to" && $5 ~ /:$/ && whole($6) && $7 == "frames;" && $8 == "textures" &&
+    whole($9) && $10 == "KB" && $11 == "at" && $12 == "most" && NF == 12 {
+    ffr[++nfade] = $6 + 0
+    if ($9 + 0 > fkb_max) fkb_max = $9 + 0
+    next
+}
+# textures: 12992 KB in all (atlas 8192 KB, heroes 4800 KB); 22366 KB at most so far
+$2 == "textures:" && whole($3) && $4 == "KB" && $5 == "in" && $6 == "all" && $7 == "(atlas" && whole($8) &&
+    $9 == "KB," && $10 == "heroes" && whole($11) && $12 == "KB);" && whole($13) && rest(14) == "KB at most so far" {
+    if (++ntex == 1) { tex_all = $3; tex_atlas = $8; tex_heroes = $11 }
+    if ($13 + 0 > tex_peak) tex_peak = $13 + 0
+    next
+}
+# art-owner: art for 2 apps: com.webos.app.hdmi1, netflix
+$2 == "art-owner:" && $3 == "art" && $4 == "for" && whole($5) && $6 == "apps:" { noa++; oa_apps = $5 + 0; next }
+# art-owner/"hulu.png": 1920x1080; [the size it should be]; not used
+$2 ~ /^art-owner\// && $(NF - 1) == "not" && $NF == "used" { noaout++; next }
 
 # The slow-frame lines are matched on fixed fields like the timing lines below,
 # and a line that has the fields but not the numbers is skipped.
@@ -842,6 +943,7 @@ END {
     report_first()
     report_paced()
     report_warm()
+    report_shelf()
     report_keys()
     report_starts()
     report_foreground()
