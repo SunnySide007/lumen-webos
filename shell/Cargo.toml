@@ -1,10 +1,15 @@
 [workspace]
 resolver = "3"
-members = ["crates/lumen-shell", "crates/lumen-guard", "crates/lumen-ctl"]
+members = [
+    "crates/lumen-core",
+    "crates/lumen-shell",
+    "crates/lumen-guard",
+    "crates/lumen-ctl",
+]
 # lumen-guard and lumen-ctl build for Linux only, so a plain `cargo run` or
-# `cargo build` on the PC (tools/sim.ps1) means the shell; make passes
-# --workspace.
-default-members = ["crates/lumen-shell"]
+# `cargo build` on the PC (tools/sim.ps1) means the shell and its core; make
+# passes --workspace.
+default-members = ["crates/lumen-core", "crates/lumen-shell"]
 
 [workspace.package]
 version = "0.0.1"
@@ -13,10 +18,20 @@ license = "GPL-3.0-or-later"
 rust-version = "1.99"
 
 [workspace.dependencies]
+fontdue = { version = "0.9.4", default-features = false, features = ["std"] }
 libc = "0.2"
 libloading = "0.9"
-# As claude/shell-timing has it, so the two merge into one line.
+lumen-core = { path = "crates/lumen-core" }
+png = "0.18.1"
 serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
+
+# lumen-core and lumen-shell take these; lumen-guard and lumen-ctl set their
+# own, stricter ones.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
 
 [profile.release]
 opt-level = 3

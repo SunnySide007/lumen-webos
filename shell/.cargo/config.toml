@@ -1,4 +1,10 @@
-# The TV target: ARMv7, soft-float, glibc. The linker comes from webosbrew's
+# The TV target: ARMv7, soft-float ABI, glibc. The linker comes from webosbrew's
 # buildroot SDK, which docker/Dockerfile puts on PATH.
+#
+# The target's default (+soft-float) does every float operation in libgcc's
+# integer code. The B9's Cortex-A53 has VFPv4 and NEON, so use them. Floats
+# still pass in core registers (softfp), so calls into LG's libraries and the
+# prebuilt std stay as they are. rustc warns that these features are unstable.
 [target.armv7-unknown-linux-gnueabi]
 linker = "arm-webos-linux-gnueabi-gcc"
+rustflags = ["-Ctarget-feature=-soft-float,+vfp4,+neon"]

@@ -1,0 +1,56 @@
+{
+  "returnValue": true,
+  "totalCount": 5,
+  "devices": [
+    {
+      "id": "AV_1",
+      "appId": "com.webos.app.externalinput.av1",
+      "label": "AV",
+      "connected": false,
+      "activate": false,
+      "icon": "av.png",
+      "iconPrefix": "/usr/palm/plugins/inputapps/assets/small/",
+      "port": 1
+    },
+    {
+      "id": "HDMI_1",
+      "appId": "com.webos.app.hdmi1",
+      "label": "Game console",
+      "connected": true,
+      "activate": false,
+      "icon": "pc.png",
+      "iconPrefix": "/usr/palm/plugins/inputapps/assets/small/",
+      "port": 1
+    },
+    {
+      "id": "HDMI_2",
+      "appId": "com.webos.app.hdmi2",
+      "label": "Soundbar",
+      "connected": true,
+      "activate": true,
+      "icon": "hometheater.png",
+      "iconPrefix": "/usr/palm/plugins/inputapps/assets/small/",
+      "port": 2
+    },
+    {
+      "id": "HDMI_3",
+      "appId": "com.webos.app.hdmi3",
+      "label": "Streamer ",
+      "connected": true,
+      "activate": true,
+      "icon": "streamingbox.png",
+      "iconPrefix": "/usr/palm/plugins/inputapps/assets/small/",
+      "port": 3
+    },
+    {
+      "id": "HDMI_4",
+      "appId": "com.webos.app.hdmi4",
+      "label": "HDMI 4",
+      "connected": true,
+      "activate": false,
+      "icon": "HDMI_4.png",
+      "iconPrefix": "/usr/palm/plugins/inputapps/assets/small/",
+      "port": 4
+    }
+  ]
+}

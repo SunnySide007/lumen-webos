@@ -1,19 +1,28 @@
 //! Lumen shell: a native home screen for rooted LG webOS TVs.
 //!
-//! Phase 0 ships `hello-gles`: it proves the toolchain, SDL2 loading, a GLES2
-//! context and the frame budget on the real set before any UI is built on top.
+//! The tvOS-style home grid of docs/specs/shell-mvp.md: SDL2 and GL here, the
+//! logic (keys, focus, layout, motion, apps) in `lumen-core`.
 
 mod app;
+mod atlas;
 mod capture;
 mod compat;
-mod font;
+mod draw;
+mod faults;
 mod frame_stats;
 mod gl;
+mod icons;
 mod log;
+mod luna;
 mod render;
 mod sdl;
+mod text;
+mod timing;
+mod watch;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Instant;
 
 /// Where the log goes when `LUMEN_LOG` is not set. A native app on the TV has
 /// no console, so the file is the only record of a run there.
@@ -25,9 +34,19 @@ fn default_log_path() -> &'static str {
     }
 }
 
+/// The log, then a fallback beside it for when the log will not open (a file
+/// left by another user, say); `tools/tv.sh log` on main shows both.
+fn log_paths() -> [PathBuf; 2] {
+    let log =
+        PathBuf::from(std::env::var("LUMEN_LOG").unwrap_or_else(|_| default_log_path().to_owned()));
+    let fallback = log.with_file_name("lumen-shell.fallback.log");
+    [log, fallback]
+}
+
 fn main() -> ExitCode {
-    let log_path = std::env::var("LUMEN_LOG").unwrap_or_else(|_| default_log_path().to_owned());
-    log::init(&log_path);
+    // Start-up phases count from here (the `start:` log line).
+    let started = Instant::now();
+    log::init(&log_paths());
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     info!(
@@ -36,7 +55,14 @@ fn main() -> ExitCode {
         args
     );
 
-    match app::run(app::Options::from_args(&args)) {
+    let opts = match app::Options::from_args(&args) {
+        Ok(opts) => opts,
+        Err(err) => {
+            info!("bad arguments: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match app::run(opts, started) {
         Ok(()) => {
             info!("clean exit");
             ExitCode::SUCCESS

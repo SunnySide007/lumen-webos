@@ -1,0 +1,135 @@
+{
+  "returnValue": true,
+  "apps": [
+    {
+      "id": "cdp-30",
+      "title": "Plex",
+      "type": "web",
+      "visible": true,
+      "systemApp": false,
+      "folderPath": "/media/cryptofs/apps/usr/palm/applications/cdp-30",
+      "icon": "Plex_80x80.png",
+      "largeIcon": "Plex_130x130.png",
+      "iconColor": "#000000",
+      "removable": true
+    },
+    {
+      "id": "com.beb.plxnative",
+      "title": "PlxNative",
+      "type": "native",
+      "visible": true,
+      "systemApp": false,
+      "folderPath": "/media/developer/apps/usr/palm/applications/com.beb.plxnative",
+      "icon": "icon.png",
+      "largeIcon": "largeIcon.png",
+      "iconColor": "#060606",
+      "removable": true
+    },
+    {
+      "id": "com.open.hidden.menu",
+      "title": "Open Service Menu",
+      "type": "web",
+      "visible": true,
+      "systemApp": false,
+      "folderPath": "/media/developer/apps/usr/palm/applications/com.open.hidden.menu",
+      "icon": "icon.png",
+      "removable": true
+    },
+    {
+      "id": "com.webos.app.discovery",
+      "title": "LG Content Store",
+      "type": "web",
+      "visible": true,
+      "systemApp": true,
+      "folderPath": "/mnt/otncabi/usr/palm/applications/com.webos.app.discovery",
+      "icon": "asset/hd1080/lgstore.png",
+      "largeIcon": "asset/hd1080/lgstore_130x130.png",
+      "iconColor": "#d7156d",
+      "removable": false
+    },
+    {
+      "id": "com.webos.app.hdmi1",
+      "title": "HDMI1",
+      "type": "native",
+      "visible": false,
+      "systemApp": true,
+      "folderPath": "/usr/palm/applications/com.webos.app.hdmi1",
+      "icon": "icon.png",
+      "largeIcon": "assets/icon_HDMI_1_130.png",
+      "iconColor": "#4b4b4b",
+      "removable": false
+    },
+    {
+      "id": "com.webos.app.hdmi2",
+      "title": "HDMI2",
+      "type": "native",
+      "visible": false,
+      "systemApp": true,
+      "folderPath": "/usr/palm/applications/com.webos.app.hdmi2",
+      "icon": "icon.png",
+      "largeIcon": "assets/icon_HDMI_2_130.png",
+      "iconColor": "#4b4b4b",
+      "removable": false
+    },
+    {
+      "id": "com.webos.app.hdmi3",
+      "title": "HDMI3",
+      "type": "native",
+      "visible": false,
+      "systemApp": true,
+      "folderPath": "/usr/palm/applications/com.webos.app.hdmi3",
+      "icon": "icon.png",
+      "largeIcon": "assets/icon_HDMI_3_130.png",
+      "iconColor": "#4b4b4b",
+      "removable": false
+    },
+    {
+      "id": "com.webos.app.hdmi4",
+      "title": "HDMI4",
+      "type": "native",
+      "visible": false,
+      "systemApp": true,
+      "folderPath": "/usr/palm/applications/com.webos.app.hdmi4",
+      "icon": "icon.png",
+      "largeIcon": "assets/icon_HDMI_4_130.png",
+      "iconColor": "#4b4b4b",
+      "removable": false
+    },
+    {
+      "id": "com.webos.app.photovideo",
+      "title": "Photo & Video",
+      "type": "web",
+      "visible": true,
+      "systemApp": true,
+      "folderPath": "/usr/palm/applications/com.webos.app.photovideo",
+      "icon": "icon.png",
+      "largeIcon": "icon_photovideo.png",
+      "iconColor": "#7c20d5",
+      "removable": false
+    },
+    {
+      "id": "io.github.sunnyside007.lumen.shell",
+      "title": "Lumen",
+      "type": "native",
+      "visible": true,
+      "systemApp": false,
+      "folderPath": "/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell",
+      "icon": "icon80.png",
+      "largeIcon": "icon130.png",
+      "iconColor": "#0b0f1c",
+      "removable": true
+    },
+    {
+      "id": "netflix",
+      "title": "Netflix",
+      "type": "native",
+      "visible": true,
+      "systemApp": false,
+      "folderPath": "/media/cryptofs/apps/usr/palm/applications/netflix",
+      "icon": "SMALL_APP_ICON.png",
+      "largeIcon": "LARGE_APP_ICON.png",
+      "iconColor": "#ffffff",
+      "removable": true
+    }
+  ]
+}
