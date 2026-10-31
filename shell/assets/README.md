@@ -1,5 +1,17 @@
 # Shell assets
 
+## art/
+
+The Top Shelf heroes (`hero-*.png`) and the input pictograms (`icon-*.svg`,
+`icon-*.png`), original work for Lumen under CC BY-SA 4.0, drawn by code with
+`tools/art/` (its README says how). `art/CREDITS.md` lists each file with the
+script and seed that made it. Regenerate them with:
+
+```sh
+tools/studio.sh python3 -I tools/art/heroes.py --all
+tools/studio.sh python3 -I tools/art/pictograms.py
+```
+
 ## fonts/
 
 `Inter-SemiBold.ttf` is Inter 4.1 by Rasmus Andersson and the Inter Project
