@@ -221,7 +221,8 @@ Each verb's time from the PC to the TV acting is recorded.
 * Keys may have no clean route (risk 1).
 
 **Built on 2026-10-31** (`shell/crates/lumen-ctl`, `tools/remote.sh`,
-`profiles/remote/`, `tools/remote/ctl.py`); not yet run on the TV.
+`profiles/remote/`, `tools/remote/ctl.py`); run on the TV the same day
+(below).
 * **The binary:** `lumen-ctl serve [--bus library|command] [--keys
   none|keymanager] [--log FILE]`, plus `probe` and `probe-keys` for the first
   TV step. The forced command passes no flags, so
@@ -257,6 +258,40 @@ Each verb's time from the PC to the TV acting is recorded.
 * **Undo:** `tools/remote.sh remove` takes that line out and leaves every
   other. It refuses if no key would be left, then deletes the folder.
   `tools/uninstall-all.sh` runs it.
+
+**On the B9, 2026-10-31** (OLED55B9PUA, webOS 4.10.2-31, firmware
+05.50.00; b9.md, "Remote", item 5; raw output in `tools/out/remote/`):
+* **Installed** at 18:01 UTC after a backup
+  (`Lumen-backups/20261031T175935Z`): `lumen-ctl` `ae8cc9e5…`, and the
+  key's line second in a two-line `authorized_keys`.
+* **The door:** all four of `ctl.py check-door` pass. `sh` gets `lumen-ctl`,
+  the client's `LD_PRELOAD` stays out, and a local forward is refused. A
+  remote forward is never granted: dropbear doesn't answer it, and no port
+  listened on the TV meanwhile. `check-door` reads `ssh -v` since then
+  (5f0851d): a granted forward fails it, silence or a refusal passes it.
+* **The bus:** `command`. The library route is refused to root over SSH
+  ("Invalid permissions", -1027), so it is not offered.
+* **The verbs**, each with its round trip from the PC (SSH both ways):
+
+  | Verb | Round trip | On the TV |
+  |---|---|---|
+  | `apps.list` | 78 ms | 32 apps |
+  | `privacy.state` | 94 ms | Guard's counts, S1's hook log and jobs, port 11111 |
+  | `settings.get` | 63 ms | the four settings |
+  | `volume.set` (3, as it was) | 63 ms | no change, so no event |
+  | `volume.up`, `volume.down` | 31, 78 ms | 4, then 3, each as an event |
+  | `mute.set` true, false | 32, 47 ms | each as an event |
+  | `toast` | 16 ms | shown over Netflix (the owner) |
+  | `screen.off`, `screen.on` | 94, 93 ms | LG's `Screen Off`, then `Active`; seen by the owner |
+  | `settings.set` OLED light 80, 100 | 63, 47 ms | dimmed and back (the owner); 80 read back by the next session |
+  | `lumen.open`, `launch` Netflix | 62, 110 ms | Lumen in front, then Netflix where it was (the owner) |
+
+  Every change came back as an event right after its reply.
+* **Left for "done when":** `text.insert`, `text.delete` and `text.enter`
+  (with a text field open), `power.off` (and the `reason` LG wants), a
+  volume change on the Magic Remote arriving as an event, and an unknown
+  verb and an out-of-range value refused on the TV. `probe` cuts LG's
+  replies at 300 characters, so OLED light's range is still unread.
 
 ### R3: Lumen Remote for Windows
 
