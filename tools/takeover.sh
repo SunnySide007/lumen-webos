@@ -44,6 +44,7 @@ HOOK=$ROOT/takeover/lumen-home
 FILTER=$ROOT/takeover/filters/lumen-home.js
 DIR=/var/lib/lumen/takeover
 DEST=/var/lib/webosbrew/init.d/lumen-home
+LOG=/var/lib/lumen/log/lumen-home.log
 # Ends the here-document a generated script carries its file in.
 END_MARK=LUMEN_STAGED_FILE_END
 
@@ -183,7 +184,8 @@ cmd_hook_install() {
 cmd_hook_status() {
     echo "this checkout: hook $(sha "$HOOK")"
     "$TV" run "for f in $DEST $DIR/boot-hook; do if [ -f \$f ]; then echo \"\$f: \$(sha256sum < \$f | cut -d' ' -f1)\"; else echo \"\$f: none\"; fi; done
-        tail -n 30 /tmp/lumen-home.log 2>/dev/null || echo 'no hook log since the last boot'" </dev/null
+        if [ -f $LOG ]; then echo '$LOG, the latest run:'; tail -n 30 $LOG; else echo 'no log: the hook has not run, or its log folder failed its check:'; ls -ld /var/lib/lumen /var/lib/lumen/log 2>&1; fi
+        if [ -f $LOG.1 ]; then echo '$LOG.1, the run before:'; tail -n 5 $LOG.1; fi" </dev/null
 }
 
 cmd_hook_remove() {

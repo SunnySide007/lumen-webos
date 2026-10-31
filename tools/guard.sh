@@ -106,7 +106,7 @@ cmd_status() {
     fi
     # Single quotes on purpose: this runs on the TV.
     # shellcheck disable=SC2016
-    "$TV" run 'hook=/var/lib/webosbrew/init.d/lumen-guard dir=/var/lib/lumen/guard
+    "$TV" run 'hook=/var/lib/webosbrew/init.d/lumen-guard dir=/var/lib/lumen/guard log=/var/lib/lumen/log/lumen-guard.log
         if [ -f $hook ]; then echo "on the TV:    hook $(sha256sum < $hook | cut -d" " -f1)"; else echo "on the TV:    hook not installed"; fi
         if [ -f $dir/lumen-guard ]; then echo "on the TV:    binary $(sha256sum < $dir/lumen-guard | cut -d" " -f1)"; else echo "on the TV:    no binary"; fi
         pid=$(cat $dir/lumen-guard.pid 2>/dev/null)
@@ -116,7 +116,8 @@ cmd_status() {
         iptables -t nat -L OUTPUT -n -v | grep "to:127.0.0.2:53" || echo "no nat rules to 127.0.0.2:53"
         cat $dir/status 2>/dev/null || echo "no status file"
         ls -l $dir/lookups.log* 2>/dev/null || echo "no lookup log"
-        tail -n 20 /tmp/lumen-guard.log 2>/dev/null || echo "no hook log since the last boot"' </dev/null
+        if [ -f $log ]; then echo "$log, the latest run:"; tail -n 20 $log; else echo "no log: the hook has not run, or its log folder failed its check:"; ls -ld /var/lib/lumen /var/lib/lumen/log 2>&1; fi
+        if [ -f $log.1 ]; then echo "$log.1, the run before:"; tail -n 5 $log.1; fi' </dev/null
 }
 
 cmd_remove() {
