@@ -15,7 +15,8 @@
 # running list 10 s later, which shows whether keep-alive brought it back.
 #
 # docs/safety.md: it does nothing while the kill switch exists, returns at
-# once, and its background work ends by itself within five minutes. It
+# once, and its background work ends by itself within five minutes; without
+# a working timeout command for its luna calls it does nothing at all. It
 # writes only its log. Nothing it does outlasts the next boot: LG's Home
 # starts again then. Not persistent until installed: tools/takeover.sh hook
 # push leaves an inert copy that takeover/home-apply.sh runs by hand, and
@@ -43,16 +44,6 @@ DEADLINE=260
         read -r up _ </proc/uptime
         echo "${up%%.*}"
     }
-
-    # busybox before 1.30 wants `timeout -t SECS`; coreutils wants
-    # `timeout SECS`.
-    if timeout -t 1 true >/dev/null 2>&1; then
-        TIMEOUT="timeout -t 5"
-    elif timeout 1 true >/dev/null 2>&1; then
-        TIMEOUT="timeout 5"
-    else
-        TIMEOUT=""
-    fi
 
     # ask METHOD PAYLOAD: luna's answer on one line, empty when none.
     ask() {
@@ -88,6 +79,19 @@ DEADLINE=260
 
     start=$(uptime_s)
     say "lumen-home: start"
+
+    # Every luna call is time-boxed, or the hook could hang (safety rule 4).
+    # busybox before 1.30 wants `timeout -t SECS`; coreutils wants
+    # `timeout SECS`.
+    if timeout -t 1 true >/dev/null 2>&1; then
+        TIMEOUT="timeout -t 5"
+    elif timeout 1 true >/dev/null 2>&1; then
+        TIMEOUT="timeout 5"
+    else
+        say "no timeout command; nothing done"
+        say "lumen-home: done"
+        exit 0
+    fi
 
     tries=0
     until ok "$(ask "$AM/running" '{}')"; do
