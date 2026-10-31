@@ -11,6 +11,7 @@ setup() {
 printf '%s|%s\n' "$1" "$2" >>"$CALLS"
 case "$1 $2" in "remove ${FAKE_FAIL_REMOVE:-none}") exit 1 ;; esac
 case "$1 $2" in "run "*"${FAKE_FAIL_RUN:-no such step}"*) exit 1 ;; esac
+case "$1 $2" in "script "*"${FAKE_FAIL_SCRIPT:-no such script}") exit 1 ;; esac
 exit 0
 EOF
     chmod +x "$BATS_TEST_TMPDIR/tv.sh"
@@ -25,6 +26,9 @@ EOF
     [[ "$output" == *"rm -rf /var/lib/lumen"* ]]
     [[ "$output" == *"rm -f /var/lib/webosbrew/init.d/lumen-*"* ]]
     [[ "$output" == *"tools/tv.sh script profiles/privacy/guard-undo.sh"* ]]
+    [[ "$output" == *"tools/tv.sh script takeover/filter-undo.sh"* ]]
+    [[ "$output" == *"tools/tv.sh script takeover/undo.sh"* ]]
+    [[ "$output" == *"tools/tv.sh remove io.github.sunnyside007.lumen.shell   (only if the default home was set back)"* ]]
     [[ "$output" == *"lumen-capture"* ]]
     [[ "$output" == *"Glasshouse is kept"* ]]
     [[ "$output" != *"tvwebctl"* ]]
@@ -59,7 +63,7 @@ EOF
     grep -qx 'remove|io.github.sunnyside007.lumen.shell' "$CALLS"
     grep -qx 'run|rm -rf /var/lib/lumen' "$CALLS"
     grep -qx 'remove|com.beb.plxnative' "$CALLS"
-    [ "$(wc -l <"$CALLS")" -eq 8 ]
+    [ "$(wc -l <"$CALLS")" -eq 10 ]
     [[ "$output" == *"Cold boot"* ]]
 }
 
@@ -73,13 +77,43 @@ EOF
     [ "$hooks" -lt "$guard" ]
     [ "$guard" -lt "$files" ]
     # The script is this checkout's, and exists.
-    [ -f "$(sed -n 's/^script|//p' "$CALLS")" ]
+    [ -f "$(sed -n 's/^script|\(.*guard-undo\.sh\)$/\1/p' "$CALLS")" ]
+}
+
+@test "route D is undone first: the key filter, then the default home, then Lumen's app and files" {
+    run "$UNINSTALL" --yes
+    [ "$status" -eq 0 ]
+    filter=$(grep -nx 'script|.*/takeover/filter-undo.sh' "$CALLS" | cut -d: -f1)
+    home=$(grep -nx 'script|.*/takeover/undo.sh' "$CALLS" | cut -d: -f1)
+    app=$(grep -nx 'remove|io.github.sunnyside007.lumen.shell' "$CALLS" | cut -d: -f1)
+    files=$(grep -nx 'run|rm -rf /var/lib/lumen' "$CALLS" | cut -d: -f1)
+    [ -n "$filter" ] && [ -n "$home" ] && [ -n "$app" ] && [ -n "$files" ]
+    [ "$filter" -lt "$home" ]
+    [ "$home" -lt "$app" ]
+    [ "$app" -lt "$files" ]
+    # The scripts are this checkout's, and exist.
+    run sed -n 's|^script\|\(.*/takeover/.*\)$|\1|p' "$CALLS"
+    [ "${#lines[@]}" -eq 2 ]
+    for f in "${lines[@]}"; do
+        [ -f "$f" ]
+    done
+}
+
+@test "when the default home can't be set back, Lumen's app is kept and the rest still runs" {
+    FAKE_FAIL_SCRIPT=/takeover/undo.sh run "$UNINSTALL" --yes
+    [ "$status" -eq 1 ]
+    [ "$(grep -c 'remove|io.github.sunnyside007.lumen.shell' "$CALLS")" -eq 0 ]
+    grep -qxF 'run|rm -f /tmp/lumen-*' "$CALLS"
+    [[ "$output" == *"skipped (the default home was not set back)"* ]]
+    [[ "$output" == *"Lumen's app was kept"* ]]
 }
 
 @test "a script step that names Homebrew Channel's settings stops everything" {
     root="$BATS_TEST_TMPDIR/root"
-    mkdir -p "$root/tools" "$root/profiles/privacy"
+    mkdir -p "$root/tools" "$root/profiles/privacy" "$root/takeover"
     cp "$UNINSTALL" "$root/tools/"
+    : >"$root/takeover/filter-undo.sh"
+    : >"$root/takeover/undo.sh"
     printf 'rm -f /var/luna/preferences/webosbrew_failsafe\n' >"$root/profiles/privacy/guard-undo.sh"
     run "$root/tools/uninstall-all.sh" --yes
     [ "$status" -eq 2 ]
