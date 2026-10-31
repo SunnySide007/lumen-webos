@@ -13,7 +13,7 @@ TV through `tools/tv.sh script`, from [tools/takeover.sh](../tools/takeover.sh);
 |---|---|---|
 | The setting | `apply.sh`, `undo.sh`, `status.sh` | Ready; the TV already has it on, set by hand |
 | The boot hook | `lumen-home`, `home-apply.sh` | Installed on the B9 on 2026-10-31 at 17:42 UTC, after its by-hand run and the owner's yes; it closed LG's Home at the next power-on ([b9.md, "Home"](../docs/device/b9.md#home)) |
-| The LG Home tile | in the shell | Not built yet; the shell it goes in is on `main` since 2026-10-31 |
+| The LG Home tile | in the shell, and its icon in `packaging/shell/lumen-icons.sh` | Built and tested on the PC; not yet on the TV |
 | The long-Home filter | `filters/lumen-home.js`, `filter-*.sh` | Built and tested on the PC, delivered inert: the owner's decision |
 
 ## The setting
@@ -87,13 +87,35 @@ is it copied into place (`boot-hook`, init.d, the filter's path), each copy
 moved in whole. The staged copy is removed on every exit, and the PC checks
 the SHA-256 the TV prints for each copy.
 
-## The LG Home tile (once the shell is on `main`)
+## The LG Home tile
 
 Lumen's tiles come from `listLaunchPoints`, which leaves LG's Home out (its
-`appinfo.json` has `visible: false`). The shell will add `com.webos.app.home`
-as "LG Home", last among the apps, launched like any other, with its icon
-through the root icon copy. That is the escape hatch that needs neither SSH
-nor the filter.
+`appinfo.json` has `visible: false`). So the shell adds `com.webos.app.home`
+as "LG Home", last among the apps and ahead of the inputs, unless a launch
+point is LG's Home (`shell/crates/lumen-shell/src/luna.rs`). It is there
+even when `listApps` fails, and it launches like any other tile:
+`applicationManager/launch` with no parameters. Its colour and icon come
+from its `listApps` entry; the jail can't read LG Home's folder, so
+`packaging/shell/lumen-icons.sh` copies the icon from its fixed path,
+`/usr/palm/applications/com.webos.app.home/assets/icon.png`
+([icons.md](../docs/specs/icons.md)). That is the escape hatch that needs
+neither SSH nor the filter. The boot hook leaves LG's Home alone while it is
+in front, so the tile works in the hook's first minutes after a boot too.
+How the way back from LG's Home looks is still to be seen on the TV: LG's
+handler skips its launch while LG's home window shows, so a Home press there
+goes to LG's Home itself.
+
+**A Home press with Lumen in front** does not yet bring focus back to the
+first tile. The compositor launches Lumen again with `{"launchType":
+"homeKey"}`, but Lumen sees launch parameters only when it starts, as its
+argument: that is how the trial logged them on 2026-10-31, with Netflix in
+front. Nothing in the shell hears a relaunch while it runs. LG's Home, which
+does, says `nativeLifeCycleInterfaceVersion: 2` in its appinfo and is
+started with `"interfaceMethod": "registerApp"`: SAM's lifecycle
+registration, which Lumen's appinfo doesn't ask for and its anonymous luna
+client doesn't make. What SAM does with Lumen in front, start it again or
+nothing, is a TV observation; if it starts it again, the new process opens
+on the first tile already.
 
 ## The long-Home filter (inert)
 
@@ -213,7 +235,7 @@ trial checks every key live first.
 
 * `tools/takeover.sh undo` over SSH: a short Home press opens LG's Home again
   at once.
-* The LG Home tile in Lumen, once the shell has it.
+* The LG Home tile in Lumen, last among the apps.
 * Held Home, once the filter is on.
 * `tools/uninstall-all.sh` takes the filter out of the chain, then sets the
   default home back, and removes Lumen's app only if that worked, so the TV
