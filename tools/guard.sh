@@ -33,7 +33,9 @@ PROFILE=$ROOT/profiles/glasshouse
 RULES="allowlist.txt required-blocks.txt b9-aggressive.hosts"
 DIR=/var/lib/lumen/guard
 DEST=/var/lib/webosbrew/init.d/lumen-guard
-STAGE=/tmp/lumen-guard.new
+# Uploads land where only root can write: the app jails share /tmp.
+STAGE_ROOT=/var/lib/lumen/stage
+STAGE=$STAGE_ROOT/guard
 
 usage() {
     sed -n '2,/^set -eu$/{/^set -eu$/d;s/^# \{0,1\}//;p;}' "$0"
@@ -48,10 +50,17 @@ sha() {
     sha256sum <"$1" | cut -d' ' -f1
 }
 
-# The binary, the three rule files and the hook's inert copy, each checked,
-# then moved into place whole so Guard never reads half a file.
+make_stage() {
+    "$TV" run "umask 077; mkdir -p $STAGE_ROOT && [ ! -L $STAGE_ROOT ] && rm -rf $STAGE $STAGE.hook" </dev/null ||
+        die "could not make $STAGE_ROOT on the TV"
+}
+
+# The binary, the three rule files and the hook's inert copy: checked against
+# this checkout while staged, moved into place whole so Guard never reads half
+# a file, and checked again where they land.
 cmd_push() {
     [ -f "$BIN" ] || die "no $BIN: build it with tools/dev.sh make guard"
+    make_stage
     "$TV" push "$BIN" "$STAGE/lumen-guard"
     want=$(sha "$BIN")
     for f in $RULES; do
@@ -60,7 +69,10 @@ cmd_push() {
     done
     "$TV" push "$HOOK" "$STAGE/boot-hook"
     want="$want $(sha "$HOOK")"
-    got=$("$TV" run "set -e; mkdir -p $DIR/rules
+    got=$("$TV" run "set -e
+        staged=\$(cd $STAGE && for f in lumen-guard $RULES boot-hook; do sha256sum <\$f | cut -d' ' -f1; done | tr '\n' ' ')
+        [ \"\$staged\" = '$want ' ] || { rm -rf $STAGE; exit 1; }
+        mkdir -p $DIR/rules
         sh -n $STAGE/boot-hook
         cp $STAGE/lumen-guard $DIR/lumen-guard.tmp && chmod 755 $DIR/lumen-guard.tmp && mv $DIR/lumen-guard.tmp $DIR/lumen-guard
         for f in $RULES; do cp $STAGE/\$f $DIR/rules/\$f.tmp && mv $DIR/rules/\$f.tmp $DIR/rules/\$f; done
@@ -74,10 +86,11 @@ cmd_push() {
 
 cmd_install() {
     cmd_push
-    "$TV" push "$HOOK" "$STAGE.hook"
-    # Checked, then moved into place whole, so a boot never meets half a file.
-    remote=$("$TV" run "sh -n $STAGE.hook && cp $STAGE.hook $DEST.tmp && chmod 755 $DEST.tmp && mv $DEST.tmp $DEST && rm -f $STAGE.hook && sha256sum < $DEST | cut -d' ' -f1" </dev/null)
     want=$(sha "$HOOK")
+    "$TV" push "$HOOK" "$STAGE.hook"
+    # Checked against this checkout while staged, then moved into place whole,
+    # so a boot never meets half a file or another one.
+    remote=$("$TV" run "sh -n $STAGE.hook && [ \"\$(sha256sum < $STAGE.hook | cut -d' ' -f1)\" = $want ] && cp $STAGE.hook $DEST.tmp && chmod 755 $DEST.tmp && mv $DEST.tmp $DEST && sha256sum < $DEST | cut -d' ' -f1; rm -f $STAGE.hook" </dev/null)
     [ "$remote" = "$want" ] || die "the installed hook's SHA-256 ($remote) is not this checkout's ($want)"
     echo "installed $DEST ($want)"
     "$TV" run "$DEST" </dev/null

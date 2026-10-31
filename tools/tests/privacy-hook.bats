@@ -117,9 +117,14 @@ wait_done() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"installed /var/lib/webosbrew/init.d/lumen-privacy"* ]]
     run cat "$CALLS"
-    [[ "${lines[0]}" == "push|"*"/profiles/privacy/lumen-privacy|/tmp/lumen-privacy.new" ]]
-    [[ "${lines[1]}" == "run|sh -n /tmp/lumen-privacy.new && cp "*"&& mv /var/lib/webosbrew/init.d/lumen-privacy.tmp /var/lib/webosbrew/init.d/lumen-privacy"* ]]
-    [ "${lines[2]}" = "run|/var/lib/webosbrew/init.d/lumen-privacy|" ]
+    # Staged where only root can write, never /tmp, which the app jails share.
+    [[ "${lines[0]}" == "run|umask 077; mkdir -p /var/lib/lumen/stage && [ ! -L /var/lib/lumen/stage ]|" ]]
+    [[ "${lines[1]}" == "push|"*"/profiles/privacy/lumen-privacy|/var/lib/lumen/stage/lumen-privacy" ]]
+    [[ "${lines[2]}" == "run|sh -n /var/lib/lumen/stage/lumen-privacy && "*"&& mv /var/lib/webosbrew/init.d/lumen-privacy.tmp /var/lib/webosbrew/init.d/lumen-privacy"* ]]
+    [ "${lines[3]}" = "run|/var/lib/webosbrew/init.d/lumen-privacy|" ]
+    # The staged copy is checked against this checkout before it is copied.
+    sha=$(sha256sum <"$BATS_TEST_DIRNAME/../../profiles/privacy/lumen-privacy" | cut -d' ' -f1)
+    grep -qF "| cut -d' ' -f1)\" = $sha ] && cp /var/lib/lumen/stage/lumen-privacy /var/lib/webosbrew/init.d/lumen-privacy.tmp" "$CALLS"
 }
 
 @test "privacy-hook.sh install stops if the TV's copy differs, and doesn't run it" {

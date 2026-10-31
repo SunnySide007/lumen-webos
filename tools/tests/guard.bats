@@ -670,7 +670,10 @@ on_tv() {
         -e "s|/etc/resolv.conf|$R/etc/resolv.conf|g" -e "s|/proc/mounts|$T/mounts|g"
 }
 case $1 in
-    push) mkdir -p "$(dirname "$R$3")" && cp "$2" "$R$3" ;;
+    push)
+        mkdir -p "$(dirname "$R$3")" && cp "$2" "$R$3"
+        # Something else on the TV rewrites the staged copy.
+        case $3 in *"${FAKE_TAMPER:-no such file}") echo tampered >>"$R$3" ;; esac ;;
     run)
         [ "$2" = /var/lib/webosbrew/init.d/lumen-guard ] && exit 0
         cmd=$(printf '%s\n' "$2" | on_tv)
@@ -711,10 +714,22 @@ guardctl() {
         cmp "$BATS_TEST_DIRNAME/../../profiles/glasshouse/$f" "$d/rules/$f"
     done
     cmp "$PROFILES/lumen-guard" "$d/boot-hook"
-    [ ! -e "$R/tmp/lumen-guard.new" ]
-    # Uploads go only to /tmp, and nothing goes into init.d.
-    [ -z "$(grep '^push|' "$CALLS" | grep -v '|/tmp/lumen-guard.new/')" ]
+    [ ! -e "$R/var/lib/lumen/stage/guard" ]
+    # Uploads go only to the root-only stage, never /tmp, and nothing goes
+    # into init.d.
+    [ -z "$(grep '^push|' "$CALLS" | grep -v '|/var/lib/lumen/stage/guard/')" ]
     [ -z "$(ls "$R/var/lib/webosbrew/init.d")" ]
+}
+
+@test "guard.sh push moves nothing into place when a staged copy changes on the TV" {
+    fake_tv
+    FAKE_TAMPER=stage/guard/boot-hook guardctl push
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"are not this checkout's"* ]]
+    for f in lumen-guard boot-hook rules/allowlist.txt; do
+        [ ! -e "$R/var/lib/lumen/guard/$f" ]
+    done
+    [ ! -e "$R/var/lib/lumen/stage/guard" ]
 }
 
 @test "guard.sh push stops when a file on the TV differs, or nothing is built" {
@@ -736,7 +751,19 @@ guardctl() {
     [ -x "$R/var/lib/webosbrew/init.d/lumen-guard" ]
     [ -f "$R/var/lib/lumen/guard/lumen-guard" ]
     [ "$(tail -n 1 "$CALLS")" = "run|/var/lib/webosbrew/init.d/lumen-guard|" ]
-    grep -q '^run|sh -n /tmp/lumen-guard.new.hook && cp .*&& mv /var/lib/webosbrew/init.d/lumen-guard.tmp /var/lib/webosbrew/init.d/lumen-guard' "$CALLS"
+    grep -q '^run|sh -n /var/lib/lumen/stage/guard.hook && \[ .* \] && cp .*&& mv /var/lib/webosbrew/init.d/lumen-guard.tmp /var/lib/webosbrew/init.d/lumen-guard' "$CALLS"
+    [ ! -e "$R/var/lib/lumen/stage/guard.hook" ]
+}
+
+@test "guard.sh install installs nothing when the staged hook changes on the TV" {
+    fake_tv
+    FAKE_TAMPER=stage/guard.hook guardctl install
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"is not this checkout's"* ]]
+    [ ! -e "$R/var/lib/webosbrew/init.d/lumen-guard" ]
+    [ ! -e "$R/var/lib/webosbrew/init.d/lumen-guard.tmp" ]
+    [ ! -e "$R/var/lib/lumen/stage/guard.hook" ]
+    not grep -qx 'run|/var/lib/webosbrew/init.d/lumen-guard|' "$CALLS"
 }
 
 @test "guard.sh install stops if the TV's copy of the hook differs, and doesn't run it" {

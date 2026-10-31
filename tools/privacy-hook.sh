@@ -16,7 +16,9 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TV=${LUMEN_TV_SH:-$ROOT/tools/tv.sh}
 HOOK=$ROOT/profiles/privacy/lumen-privacy
 DEST=/var/lib/webosbrew/init.d/lumen-privacy
-NEW=/tmp/lumen-privacy.new
+# Uploads land where only root can write: the app jails share /tmp.
+STAGE=/var/lib/lumen/stage
+NEW=$STAGE/lumen-privacy
 
 usage() {
     sed -n '2,/^set -eu$/{/^set -eu$/d;s/^# \{0,1\}//;p;}' "$0"
@@ -38,9 +40,11 @@ case ${1:-} in
             tail -n 20 /tmp/lumen-privacy.log 2>/dev/null || echo 'no log since the last boot'"
         ;;
     install)
+        "$TV" run "umask 077; mkdir -p $STAGE && [ ! -L $STAGE ]" || die "could not make $STAGE on the TV"
         "$TV" push "$HOOK" "$NEW"
-        # Checked, then moved into place whole, so a boot never meets half a file.
-        remote_sha=$("$TV" run "sh -n $NEW && cp $NEW $DEST.tmp && chmod 755 $DEST.tmp && mv $DEST.tmp $DEST && rm -f $NEW && sha256sum < $DEST | cut -d' ' -f1")
+        # Checked against this checkout while staged, then moved into place
+        # whole, so a boot never meets half a file or another one.
+        remote_sha=$("$TV" run "sh -n $NEW && [ \"\$(sha256sum < $NEW | cut -d' ' -f1)\" = $local_sha ] && cp $NEW $DEST.tmp && chmod 755 $DEST.tmp && mv $DEST.tmp $DEST && sha256sum < $DEST | cut -d' ' -f1; rm -f $NEW")
         [ "$remote_sha" = "$local_sha" ] || die "the installed hook's SHA-256 ($remote_sha) is not this checkout's ($local_sha)"
         echo "installed $DEST ($local_sha)"
         "$TV" run "$DEST"
