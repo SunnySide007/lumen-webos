@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lumen_core::apps::{App, AppId, LaunchError, Launcher};
+use lumen_core::art::Look;
 use lumen_core::home::{BackAtTop, Effect, Home, LIFT};
 use lumen_core::input::{Action, Input, Press, action_for, scancode};
 
@@ -62,10 +63,12 @@ pub(super) struct Shell<L: Launcher> {
 
 impl<L: Launcher> Shell<L> {
     /// The shell at `now`, with what listing `launcher`'s apps gave (logged
-    /// by start-up) and the state it shares with the luna watch.
+    /// by start-up), the Phase 4 features `look` turns on, and the state it
+    /// shares with the luna watch.
     pub(super) fn new(
         launcher: L,
         listed: Result<Vec<App>, LaunchError>,
+        look: Look,
         shared: Arc<watch::Shared>,
         now: Duration,
     ) -> Self {
@@ -73,7 +76,7 @@ impl<L: Launcher> Shell<L> {
             Ok(apps) => (apps, None),
             Err(e) => (Vec::new(), Some(e)),
         };
-        let mut home = Home::new(apps, BackAtTop::Exit);
+        let mut home = Home::new(apps, BackAtTop::Exit).with_look(look);
         if let Some(e) = failed {
             home.show_status(format!("Could not list apps: {e}"), now);
         }
@@ -459,7 +462,7 @@ mod tests {
     /// them.
     fn listed<L: Launcher>(mut launcher: L, now: Duration) -> Shell<L> {
         let apps = launcher.list();
-        Shell::new(launcher, apps, watch::Shared::new(), now)
+        Shell::new(launcher, apps, Look::PLAIN, watch::Shared::new(), now)
     }
 
     fn shell() -> Shell<MockLauncher> {

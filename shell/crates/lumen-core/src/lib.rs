@@ -16,4 +16,5 @@ pub mod input;
 pub mod layout;
 pub mod pace;
 pub mod script;
+pub mod shelf;
 pub mod style;

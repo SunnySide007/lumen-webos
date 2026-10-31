@@ -4,13 +4,16 @@
 //! here draws or reads a clock: every call that can change the screen takes
 //! the current time.
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::anim::{Spring, Tuning, kick_for_peak};
 use crate::apps::{App, AppId, LaunchError};
+use crate::art::{Hero, Look, hero_for};
 use crate::focus::{Dir, GridFocus, Move};
 use crate::input::{Action, Press};
 use crate::layout::{self, Rect};
+use crate::shelf::{Faded, Shelf, ShelfView};
 use crate::style;
 
 // The springs' values live in `style`.
@@ -54,6 +57,8 @@ pub struct View<'a> {
     /// The Top Shelf band, on screen.
     pub shelf: Rect,
     pub shelf_title: Option<&'a str>,
+    /// The shelf's art: its hero, or the placeholder, and any crossfade.
+    pub shelf_art: ShelfView<'a>,
     /// Tiles on screen, back to front: the focused tile comes last.
     pub tiles: Vec<TileView<'a>>,
     pub status: Option<&'a str>,
@@ -74,6 +79,14 @@ pub struct Home {
     bump_owner: usize,
     /// The row-0 tile the Top Shelf shows, kept while focus is lower down.
     shelf_index: usize,
+    /// Which Phase 4 features are on.
+    look: Look,
+    /// The apps the owner made Top Shelf art for.
+    owner_art: HashSet<AppId>,
+    /// The hero for the tile the shelf shows, if the look has heroes.
+    wanted: Option<Hero>,
+    /// The shelf's art and its crossfade.
+    shelf: Shelf,
     back_at_top: BackAtTop,
     status: Option<(String, Duration)>,
     now: Duration,
@@ -96,6 +109,10 @@ impl Home {
             bump_y: Spring::new(0.0, BUMP),
             bump_owner: 0,
             shelf_index: 0,
+            look: Look::PLAIN,
+            owner_art: HashSet::new(),
+            wanted: None,
+            shelf: Shelf::default(),
             back_at_top,
             status: None,
             now: Duration::ZERO,
@@ -103,8 +120,64 @@ impl Home {
         }
     }
 
+    /// The same home screen with the Phase 4 features `look` turns on;
+    /// `new` has none of them, as the shell MVP drew it.
+    pub fn with_look(mut self, look: Look) -> Self {
+        self.look = look;
+        self.update_wanted();
+        self
+    }
+
+    pub fn look(&self) -> &Look {
+        &self.look
+    }
+
     pub fn apps(&self) -> &[App] {
         &self.apps
+    }
+
+    /// The apps the owner made Top Shelf art for, once the shell has listed
+    /// them.
+    pub fn set_owner_art(&mut self, apps: HashSet<AppId>) {
+        self.owner_art = apps;
+        self.update_wanted();
+    }
+
+    fn update_wanted(&mut self) {
+        self.wanted = match self.apps.get(self.shelf_index) {
+            Some(app) if self.look.hero => Some(hero_for(app, &self.owner_art)),
+            _ => None,
+        };
+    }
+
+    /// The hero for the tile the shelf shows: what it should show once its
+    /// textures are in. `None` without heroes in the look, or apps.
+    pub fn wanted_hero(&self) -> Option<&Hero> {
+        self.wanted.as_ref()
+    }
+
+    /// What the shelf shows, or is fading to; `None` is the placeholder.
+    pub fn shelf_target(&self) -> Option<&Hero> {
+        self.shelf.target()
+    }
+
+    /// `hero`'s textures are in (`None`: the shelf is to show its
+    /// placeholder): the shelf fades to it.
+    pub fn show_hero(&mut self, hero: Option<Hero>) {
+        if self.shelf.show(hero) {
+            self.dirty = true;
+        }
+    }
+
+    /// The oldest crossfade that finished since the last call, so its old
+    /// hero's textures can go.
+    pub fn take_faded(&mut self) -> Option<Faded> {
+        self.shelf.take_faded()
+    }
+
+    /// Whether the shelf's art is fading from one to another.
+    pub fn is_fading(&self) -> bool {
+        self.shelf.is_animating()
     }
 
     pub fn focused(&self) -> Option<usize> {
@@ -146,8 +219,9 @@ impl Home {
         self.lifts[to].set_target(1.0);
         let row = self.focus.row();
         self.scroll.set_target(layout::scroll_for_row(row));
-        if row == 0 {
+        if row == 0 && self.shelf_index != to {
             self.shelf_index = to;
+            self.update_wanted();
         }
         self.dirty = true;
     }
@@ -228,6 +302,7 @@ impl Home {
             for spring in self.springs_mut() {
                 spring.step(dt);
             }
+            self.shelf.step(dt);
             self.dirty = true;
         }
         if let Some((_, until)) = &self.status
@@ -245,11 +320,12 @@ impl Home {
     }
 
     pub fn is_animating(&self) -> bool {
-        !self
-            .lifts
-            .iter()
-            .chain([&self.scroll, &self.bump_x, &self.bump_y])
-            .all(Spring::is_settled)
+        self.shelf.is_animating()
+            || !self
+                .lifts
+                .iter()
+                .chain([&self.scroll, &self.bump_x, &self.bump_y])
+                .all(Spring::is_settled)
     }
 
     /// Nothing moves and the last frame drawn is still right: stop drawing.
@@ -280,6 +356,7 @@ impl Home {
         for spring in self.springs_mut() {
             spring.snap();
         }
+        self.shelf.settle_now();
     }
 
     pub fn view(&self) -> View<'_> {
@@ -314,6 +391,7 @@ impl Home {
         View {
             shelf: layout::TOP_SHELF.offset(0.0, -scroll),
             shelf_title: self.apps.get(self.shelf_index).map(|a| a.title.as_str()),
+            shelf_art: self.shelf.view(&self.look),
             tiles,
             status: self.status.as_ref().map(|(text, _)| text.as_str()),
             empty: self.apps.is_empty(),
@@ -675,6 +753,106 @@ mod tests {
         let lift = sim.focused_view().lift;
         sim.home.advance_to(Duration::from_millis(50));
         assert_eq!(sim.focused_view().lift, lift);
+    }
+
+    const PLEX: Hero = Hero::Named("hero-plex");
+
+    /// A `Sim` with every Phase 4 feature on.
+    fn full(apps: Vec<App>) -> Sim {
+        let mut sim = Sim {
+            home: Home::new(apps, BackAtTop::Exit).with_look(Look::FULL),
+            now: Duration::ZERO,
+            drawn_shelf_y: None,
+        };
+        sim.draw_if_needed();
+        sim
+    }
+
+    #[test]
+    fn the_plain_home_wants_no_hero_and_shows_the_placeholder() {
+        let mut sim = Sim::mock();
+        assert_eq!(sim.home.look(), &Look::PLAIN);
+        assert_eq!(sim.home.wanted_hero(), None);
+        for _ in 0..3 {
+            sim.press(RIGHT);
+        }
+        assert_eq!(sim.home.wanted_hero(), None);
+        assert_eq!(sim.home.view().shelf_art, ShelfView::PLACEHOLDER);
+    }
+
+    #[test]
+    fn the_wanted_hero_follows_the_tile_the_shelf_shows() {
+        let mut sim = full(mock_apps());
+        // Netflix has no colour in the mock: the ambient hero.
+        assert_eq!(sim.home.wanted_hero(), Some(&Hero::Ambient));
+        for _ in 0..3 {
+            sim.press(RIGHT);
+        }
+        assert_eq!(sim.home.wanted_hero(), Some(&PLEX));
+        // Lower rows keep the shelf's tile, and so its hero.
+        sim.press(DOWN);
+        assert_eq!(sim.home.focused(), Some(8));
+        assert_eq!(sim.home.wanted_hero(), Some(&PLEX));
+        // Nothing is shown until the shell says the textures are in.
+        assert_eq!(sim.home.shelf_target(), None);
+        assert_eq!(sim.home.view().shelf_art, ShelfView::PLACEHOLDER);
+    }
+
+    #[test]
+    fn the_owners_art_changes_the_wanted_hero() {
+        let mut sim = full(mock_apps());
+        let owner: HashSet<AppId> = [AppId::new("netflix")].into_iter().collect();
+        sim.home.set_owner_art(owner);
+        assert_eq!(
+            sim.home.wanted_hero(),
+            Some(&Hero::Owner(AppId::new("netflix")))
+        );
+    }
+
+    #[test]
+    fn the_view_carries_the_crossfade_and_the_screen_settles_after_it() {
+        let mut sim = full(mock_apps());
+        sim.settle();
+        sim.home.show_hero(Some(Hero::Ambient));
+        assert!(!sim.home.is_settled(), "the crossfade owes frames");
+        assert!(sim.home.is_fading());
+        sim.frame();
+        sim.frame();
+        let art = sim.home.view().shelf_art;
+        // The layered hero is the base; the placeholder fades out over it.
+        assert_eq!(art.base, Some(&Hero::Ambient));
+        let (over, alpha) = art.over.expect("mid crossfade");
+        assert_eq!(over, None);
+        assert!(alpha > 0.0 && alpha < 1.0, "{alpha}");
+        let frames = sim.settle();
+        assert!((25..50).contains(&frames), "{frames} frames");
+        assert!(sim.home.is_settled());
+        let art = sim.home.view().shelf_art;
+        assert_eq!(
+            (art.base, art.over, art.placeholder),
+            (Some(&Hero::Ambient), None, 0.0)
+        );
+        assert_eq!(
+            sim.home.take_faded(),
+            Some(Faded {
+                from: None,
+                to: Some(Hero::Ambient)
+            })
+        );
+        // The same hero again changes nothing.
+        sim.home.show_hero(Some(Hero::Ambient));
+        assert!(sim.home.is_settled());
+    }
+
+    #[test]
+    fn settle_now_ends_a_crossfade() {
+        let mut sim = full(mock_apps());
+        sim.home.show_hero(Some(PLEX));
+        sim.frame();
+        sim.home.settle_now();
+        assert!(!sim.home.is_fading());
+        assert_eq!(sim.home.shelf_target(), Some(&PLEX));
+        assert_eq!(sim.home.view().shelf_art.base, Some(&PLEX));
     }
 
     /// A fixed-seed random walk over keys, repeat flags, frame lengths and

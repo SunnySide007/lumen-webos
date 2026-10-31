@@ -7,10 +7,16 @@
 //! * flat: a colour, or a gradient from top to bottom;
 //! * shape: a rounded rectangle the fragment shader cuts out, with a one-pixel
 //!   soft edge, or a wide one for a shadow;
-//! * image: a region of the atlas (icons and glyphs), tinted.
+//! * image: a region of a texture, tinted: the atlas (icons and glyphs), or
+//!   a texture of its own (a Top Shelf hero's layer).
 //!
 //! Colours blend premultiplied, which keeps the edges of scaled icons and
 //! glyphs free of dark fringes.
+//!
+//! The batch is drawn in runs, one for each change of texture: the heroes'
+//! quads come first, under everything, so a frame has one run per hero layer
+//! on screen and one for the atlas. The shader keeps its one sampler, and the
+//! vertices go to GL in one upload.
 
 use std::ffi::c_void;
 
@@ -94,6 +100,25 @@ const NO_UV: Uv = Uv {
     v1: 0.0,
 };
 
+/// The texture an image quad samples: the atlas, or a texture of its own by
+/// the GL name `Renderer::create_texture` gave it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Texture {
+    Atlas,
+    Own(u32),
+}
+
+/// Vertices drawn with one texture bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Run {
+    pub texture: Texture,
+    pub first: usize,
+    pub count: usize,
+    /// Whether any of its quads samples the texture; flat and shape quads
+    /// draw the same with any texture bound, so they join any run.
+    sampled: bool,
+}
+
 /// A quad's corners, and what they carry besides position.
 struct Quad {
     x: f32,
@@ -105,16 +130,47 @@ struct Quad {
     bottom: Rgba,
     shape: Shape,
     kind: f32,
+    /// What an image quad samples; `None` for flat and shape quads.
+    texture: Option<Texture>,
 }
 
 #[derive(Default)]
 pub struct Batch {
     verts: Vec<f32>,
+    runs: Vec<Run>,
 }
 
 impl Batch {
     pub fn clear(&mut self) {
         self.verts.clear();
+        self.runs.clear();
+    }
+
+    /// The runs to draw, in order: each a texture and the vertices drawn
+    /// with it bound.
+    pub fn runs(&self) -> &[Run] {
+        &self.runs
+    }
+
+    /// Counts a quad's six vertices into a run: the last one if it can take
+    /// them, else a new one. `texture` is what the quad samples, `None` for
+    /// a flat or shape quad.
+    fn add_to_run(&mut self, texture: Option<Texture>) {
+        let first = self.vertex_count() - VERTICES_PER_QUAD;
+        match (self.runs.last_mut(), texture) {
+            (Some(run), None) => run.count += VERTICES_PER_QUAD,
+            (Some(run), Some(t)) if run.texture == t || !run.sampled => {
+                run.texture = t;
+                run.sampled = true;
+                run.count += VERTICES_PER_QUAD;
+            }
+            _ => self.runs.push(Run {
+                texture: texture.unwrap_or(Texture::Atlas),
+                first,
+                count: VERTICES_PER_QUAD,
+                sampled: texture.is_some(),
+            }),
+        }
     }
 
     pub fn vertex_count(&self) -> usize {
@@ -136,6 +192,21 @@ impl Batch {
             xs.copied().fold(f32::MIN, f32::max),
             ys.copied().fold(f32::MIN, f32::max),
         )
+    }
+
+    /// Quad `n`'s box: left, top, right, bottom.
+    #[cfg(test)]
+    pub fn quad_bounds(&self, n: usize) -> (f32, f32, f32, f32) {
+        let quad = Self {
+            verts: self
+                .verts
+                .chunks(FLOATS_PER_VERTEX * VERTICES_PER_QUAD)
+                .nth(n)
+                .expect("quad n")
+                .to_vec(),
+            runs: Vec::new(),
+        };
+        quad.bounds()
     }
 
     /// Each image quad's atlas region: u0, v0, u1, v1.
@@ -186,6 +257,7 @@ impl Batch {
                 q.kind,
             ]);
         }
+        self.add_to_run(q.texture);
     }
 
     /// A rectangle shaded from `top` to `bottom`.
@@ -200,6 +272,7 @@ impl Batch {
             bottom,
             shape: NO_SHAPE,
             kind: FLAT,
+            texture: None,
         });
     }
 
@@ -270,11 +343,29 @@ impl Batch {
                 soft,
             },
             kind: SHAPE,
+            texture: None,
         });
     }
 
     /// The atlas region `uv` drawn into the rectangle, its colour times `tint`.
     pub fn image(&mut self, x: f32, y: f32, w: f32, h: f32, uv: Uv, tint: Rgba) {
+        self.image_from(Texture::Atlas, x, y, w, h, uv, tint);
+    }
+
+    /// The region `uv` of `texture` drawn into the rectangle, its colour
+    /// times `tint`.
+    // `image`'s arguments, and the texture.
+    #[allow(clippy::too_many_arguments)]
+    pub fn image_from(
+        &mut self,
+        texture: Texture,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        uv: Uv,
+        tint: Rgba,
+    ) {
         if w <= 0.0 || h <= 0.0 || tint.3 <= 0.0 {
             return;
         }
@@ -288,6 +379,7 @@ impl Batch {
             bottom: tint,
             shape: NO_SHAPE,
             kind: IMAGE,
+            texture: Some(texture),
         });
     }
 }
@@ -508,8 +600,75 @@ impl Renderer {
                 );
                 offset += floats as usize;
             }
-            (gl.draw_arrays)(gl::TRIANGLES, 0, batch.vertex_count() as i32);
+            for run in batch.runs() {
+                let name = match run.texture {
+                    Texture::Atlas => self.texture,
+                    Texture::Own(name) => name,
+                };
+                (gl.bind_texture)(gl::TEXTURE_2D, name);
+                (gl.draw_arrays)(gl::TRIANGLES, run.first as i32, run.count as i32);
+            }
         }
+    }
+
+    /// A texture of its own for a `w` x `h` image, filtered linearly and
+    /// clamped at its edges: 3 bytes a pixel if `rgb`, else premultiplied
+    /// RGBA. Its GL name, or GL's error if it would not take the pixels (it
+    /// is deleted then).
+    pub fn create_texture(&self, w: u32, h: u32, rgb: bool, pixels: &[u8]) -> Result<u32, String> {
+        let (format, bytes) = if rgb { (gl::RGB, 3) } else { (gl::RGBA, 4) };
+        // GL reads w * h pixels: this holds in release too.
+        assert_eq!(pixels.len(), (w * h * bytes) as usize, "{w}x{h}");
+        let gl = &self.gl;
+        // An error from before is not this upload's: logged as the loop logs
+        // GL's flag, so it is not lost.
+        let before = gl.error();
+        if before != gl::NO_ERROR {
+            crate::info!("GL error {before:#x}");
+        }
+        let mut name = 0;
+        // SAFETY: `name` is a valid out-pointer for one name; `pixels` holds
+        // exactly w * h pixels of the format, tightly packed, which an
+        // alignment of 1 matches whatever the width; it outlives the call,
+        // and GL copies it.
+        unsafe {
+            (gl.gen_textures)(1, &mut name);
+            (gl.active_texture)(gl::TEXTURE0);
+            (gl.bind_texture)(gl::TEXTURE_2D, name);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE);
+            (gl.pixel_storei)(gl::UNPACK_ALIGNMENT, 1);
+            (gl.tex_image_2d)(
+                gl::TEXTURE_2D,
+                0,
+                format as i32,
+                w as i32,
+                h as i32,
+                0,
+                format,
+                gl::UNSIGNED_BYTE,
+                pixels.as_ptr().cast(),
+            );
+            (gl.pixel_storei)(gl::UNPACK_ALIGNMENT, 4);
+        }
+        match gl.error() {
+            gl::NO_ERROR => Ok(name),
+            err => {
+                self.delete_texture(name);
+                Err(format!("GL error {err:#x}"))
+            }
+        }
+    }
+
+    /// Deletes a texture `create_texture` made. GL keeps its pixels until
+    /// the frames already handed over are drawn.
+    pub fn delete_texture(&self, name: u32) {
+        let gl = &self.gl;
+        // SAFETY: `name` points at one texture name, which GL ignores if it
+        // is not a texture.
+        unsafe { (gl.delete_textures)(1, &name) };
     }
 }
 
@@ -606,6 +765,55 @@ mod tests {
         assert!(corners.contains(&(74.0, 42.0, 0.75, 1.0)));
         batch.image(0.0, 0.0, 0.0, 10.0, uv, Rgba(1.0, 1.0, 1.0, 1.0));
         assert_eq!(batch.quad_count(), 1, "an empty image is skipped");
+    }
+
+    /// Each run as its texture, first vertex and vertex count.
+    fn runs(batch: &Batch) -> Vec<(Texture, usize, usize)> {
+        batch
+            .runs()
+            .iter()
+            .map(|r| (r.texture, r.first, r.count))
+            .collect()
+    }
+
+    #[test]
+    fn a_batch_draws_in_one_run_per_change_of_texture() {
+        let mut batch = Batch::default();
+        let (c, uv) = (Rgba::rgb8(1, 2, 3), NO_UV);
+        batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        // A layer's quad takes over the run of the flat quad before it.
+        batch.image_from(Texture::Own(7), 0.0, 0.0, 10.0, 10.0, uv, c);
+        batch.rounded_rect(0.0, 0.0, 10.0, 10.0, 2.0, c, c);
+        batch.image_from(Texture::Own(9), 0.0, 0.0, 10.0, 10.0, uv, c);
+        batch.image(0.0, 0.0, 10.0, 10.0, uv, c);
+        batch.image(0.0, 0.0, 10.0, 10.0, uv, c);
+        batch.shadow(0.0, 0.0, 10.0, 10.0, 2.0, 4.0, c);
+        assert_eq!(
+            runs(&batch),
+            [
+                (Texture::Own(7), 0, 18),
+                (Texture::Own(9), 18, 6),
+                (Texture::Atlas, 24, 18)
+            ]
+        );
+        let total: usize = batch.runs().iter().map(|r| r.count).sum();
+        assert_eq!(total, batch.vertex_count());
+        batch.clear();
+        assert!(batch.runs().is_empty());
+    }
+
+    #[test]
+    fn a_batch_of_atlas_and_flat_quads_is_one_run() {
+        let mut batch = Batch::default();
+        let (c, uv) = (Rgba::rgb8(1, 2, 3), NO_UV);
+        batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        batch.image(0.0, 0.0, 10.0, 10.0, uv, c);
+        batch.rounded_rect(0.0, 0.0, 10.0, 10.0, 2.0, c, c);
+        batch.image(0.0, 0.0, 10.0, 10.0, uv, c);
+        assert_eq!(runs(&batch), [(Texture::Atlas, 0, 24)]);
+        let mut flat = Batch::default();
+        flat.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        assert_eq!(runs(&flat), [(Texture::Atlas, 0, 6)]);
     }
 
     #[test]

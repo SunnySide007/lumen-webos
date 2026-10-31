@@ -12,6 +12,9 @@
 # Raw, unredacted recon output; only redacted copies go in docs/device/
 /tools/out/
 
+# The owner's own Top Shelf art (shell/assets/README.md), packed if present
+/shell/assets/art-owner/
+
 # Python bytecode from the tool tests
 __pycache__/
 

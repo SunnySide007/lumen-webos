@@ -13,6 +13,7 @@ use std::time::Duration;
 use lumen_core::apps::App;
 use lumen_core::home::{TileView, View};
 use lumen_core::layout;
+use lumen_core::shelf::ShelfView;
 
 use crate::atlas::Upload;
 use crate::render::Batch;
@@ -48,6 +49,7 @@ fn paint_all(apps: &[App], assets: &mut Assets) {
             let view = View {
                 shelf: layout::TOP_SHELF,
                 shelf_title: Some(&app.title),
+                shelf_art: ShelfView::PLACEHOLDER,
                 tiles: vec![TileView {
                     app: &plain,
                     rect: layout::lifted(layout::tile_rect(0), 1.0),

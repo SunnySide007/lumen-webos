@@ -8,10 +8,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lumen_core::apps::{Launcher, MockLauncher};
+use lumen_core::art::Look;
 use lumen_core::script::Script;
 
 use crate::draw;
 use crate::gl::{self, Gl};
+use crate::heroes::{Folders, Heroes};
 use crate::home_loop::{self, Start, SystemClock, WallClock};
 use crate::info;
 use crate::luna::{self, Ls2, LunaLauncher};
@@ -38,6 +40,8 @@ pub struct Options {
     pub fixed_dt: Option<Duration>,
     /// Once the keys are played and the screen settles, save it here and quit.
     pub screenshot_when_settled: Option<PathBuf>,
+    /// The look's features: all on unless the launch parameters say.
+    pub look: Look,
 }
 
 impl Options {
@@ -172,8 +176,20 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
         shared.set_last_input(listing.saturating_duration_since(zero));
         watch::start(Arc::clone(&shared), luna::SELF_ID, zero)
     });
+    // Under a fixed clock heroes load at once, like its icons.
+    let folders = art_folders();
+    info!(
+        "art from {}, the owner's from {}",
+        folders.art.display(),
+        folders.owner.display()
+    );
+    let heroes = if opts.fixed_dt.is_some() {
+        Heroes::at_once(folders, opts.look)
+    } else {
+        Heroes::threaded(folders, opts.look)
+    };
     // After the watch, so the window and its context go before it stops.
-    let mut screen = TvScreen::new(surface, renderer, assets);
+    let mut screen = TvScreen::new(surface, renderer, assets, heroes);
     let mut events = sdl;
     home_loop::run(
         &mut events,
@@ -205,6 +221,25 @@ fn launcher() -> Box<dyn Launcher> {
     }
 }
 
+/// Where the Top Shelf heroes are: `art` and `art-owner` beside the
+/// executable, as the IPK installs them, or `LUMEN_ART` and
+/// `LUMEN_ART_OWNER` (`tools/sim.ps1` sets both to the checkout's folders).
+fn art_folders() -> Folders {
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+        .unwrap_or_default();
+    let folder = |var: &str, name: &str| {
+        std::env::var_os(var)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| beside.join(name))
+    };
+    Folders {
+        art: folder("LUMEN_ART", "art"),
+        owner: folder("LUMEN_ART_OWNER", "art-owner"),
+    }
+}
+
 /// The simulator's apps and LG Home's tile, as the TV's launcher adds it,
 /// with its placeholder icons if `LUMEN_MOCK_ICONS` names their folder
 /// (`tools/sim.ps1` sets it). The folder is resolved first, since an icon is
@@ -214,7 +249,7 @@ fn mock_launcher() -> MockLauncher {
         .map(PathBuf::from)
         .map(|dir| std::fs::canonicalize(&dir).unwrap_or(dir));
     let mock = MockLauncher::default().with_lg_home();
-    match dir {
+    let mock = match dir {
         Some(dir) if dir.is_dir() => {
             info!("mock apps, icons from {}", dir.display());
             mock.with_icons_in(&dir)
@@ -227,7 +262,41 @@ fn mock_launcher() -> MockLauncher {
             info!("mock apps, letter tiles");
             mock
         }
+    };
+    arranged(
+        mock,
+        &std::env::var("LUMEN_MOCK_FIRST").unwrap_or_default(),
+        &std::env::var("LUMEN_MOCK_COLORS").unwrap_or_default(),
+    )
+}
+
+/// The simulator's knobs for screenshots of a given Top Shelf hero
+/// (`tools/sim.ps1 -First -Colors`): the apps `first` names (`id,id`) moved
+/// to the front, onto row 0, and the colours `colors` gives (`id=rrggbb,…`).
+fn arranged(mut mock: MockLauncher, first: &str, colors: &str) -> MockLauncher {
+    if first.is_empty() && colors.is_empty() {
+        return mock;
     }
+    let Ok(mut apps) = mock.list() else {
+        return mock;
+    };
+    for (id, hex) in colors.split(',').filter_map(|pair| pair.split_once('=')) {
+        let rgb = (hex.len() == 6)
+            .then(|| u32::from_str_radix(hex, 16).ok())
+            .flatten();
+        if let (Some(rgb), Some(app)) = (rgb, apps.iter_mut().find(|a| a.id.as_str() == id)) {
+            let [_, r, g, b] = rgb.to_be_bytes();
+            app.color = Some([r, g, b]);
+        }
+    }
+    for id in first.split(',').rev() {
+        if let Some(at) = apps.iter().position(|a| a.id.as_str() == id) {
+            let app = apps.remove(at);
+            apps.insert(0, app);
+        }
+    }
+    info!("mock apps arranged: first {first:?}, colours {colors:?}");
+    MockLauncher::with_apps(apps)
 }
 
 #[cfg(test)]
@@ -280,6 +349,25 @@ mod tests {
             opts.screenshot_when_settled,
             Some(PathBuf::from("/tmp/settled.png"))
         );
+    }
+
+    #[test]
+    fn the_simulators_knobs_move_and_colour_mock_apps() {
+        let mut mock = arranged(
+            MockLauncher::default(),
+            "com.webos.app.hdmi1,nope,spotify-beehive",
+            "spotify-beehive=1db954,netflix=zz0000,amazon=12",
+        );
+        let apps = mock.list().unwrap();
+        let ids: Vec<&str> = apps.iter().take(3).map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["com.webos.app.hdmi1", "spotify-beehive", "netflix"]);
+        assert_eq!(apps[1].color, Some([0x1d, 0xb9, 0x54]));
+        assert!(
+            apps.iter()
+                .filter(|a| a.id.as_str() != "spotify-beehive")
+                .all(|a| a.color.is_none())
+        );
+        assert_eq!(apps.len(), MockLauncher::default().list().unwrap().len());
     }
 
     #[test]

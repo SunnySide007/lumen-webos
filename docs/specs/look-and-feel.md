@@ -234,6 +234,45 @@ the last input the shell saw, which matches LG's screensaver (research note
 `missing-keys.md`, not in the repo). The run of 6e28bb9 confirmed it, and its
 evdev recording of the remote answered the rest (below).
 
+#### The Top Shelf hero's lines
+
+Proposed by lane J (the look, part 1, `claude/look`), for the owner to
+approve. Each line starts with `[<unix seconds>] ` like the others. KB are
+1,024 bytes; times are milliseconds to a tenth. `<name>` is the hero's
+(`hero-plex`, `hero-palette-3`, `hero-ambient`, `art-owner/<app id>`), or
+`gradient` for the placeholder.
+
+```text
+art from <folder>, the owner's from <folder>
+art-owner: art for <N> apps: <app id>, <app id>, …
+art-owner/"<file>": <why>; not used
+hero <name>: <L> layer(s), <KB> KB; decoded in <ms> ms, uploaded in <ms> ms
+hero <name>: decoded in <ms> ms; dropped, focus moved on
+hero <name>: <file>: <why>; the shelf shows its gradient
+hero <name>: upload failed: <error>; the shelf shows its gradient
+hero <name>: <KB> KB more would take the textures to <T> KB, over <B> KB; not uploaded
+crossfade <name> to <name>: <N> frames; textures <KB> KB at most
+textures: <T> KB in all (atlas <A> KB, heroes <H> KB); <P> KB at most so far
+no hero thread (<error>): heroes load at once
+the hero thread stopped: heroes load at once
+```
+
+* `art from`: once at start-up, where the heroes are read from.
+* `art-owner`: once, when the owner's folder has been listed: the apps with
+  art, then a line for each file left out (wrong size, not a PNG, not named
+  for an app ID). No folder, or an empty one, gives neither.
+* `hero` (target 9): each hero put into textures, with its decode time (on
+  the loader thread) and its upload time (on the main thread, at an idle
+  wait). `dropped` is a hero decoded after focus had moved on; it never
+  reaches a texture. A hero that fails says so once and is never asked for
+  again; the shelf keeps its gradient.
+* `crossfade`: each crossfade, once settled: the frames it took, up to and
+  including the one that showed it settled, and the most the textures held
+  meanwhile (the atlas, the hero it left and the one it came to).
+* `textures`: once, at the first idle wait with a hero on the shelf and
+  nothing fading. The budget is 24,000,000 bytes, 23,437 KB.
+* `tools/frame-stats.sh` summarises them in its "top shelf" section.
+
 ### What blocks measuring now
 
 * **Keys are explained** (6e28bb9, 2026-10-22; shell-mvp.md, "Measured on

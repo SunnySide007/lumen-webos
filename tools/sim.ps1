@@ -11,11 +11,17 @@
   -FixedDt makes the clock deterministic, and -ScreenshotWhenSettled saves
   the frame once the keys are done and nothing moves, then quits.
 
+  The Top Shelf heroes come from shell/assets/art, the owner's from
+  shell/assets/art-owner. For screenshots of a given hero, -First moves the
+  mock apps it names to the front, onto row 0, and -Colors gives mock apps a
+  webOS icon colour, as "id=rrggbb,id=rrggbb".
+
 .EXAMPLE
   pwsh tools/sim.ps1
   pwsh tools/sim.ps1 -ExitAfter 5      # smoke test: run five seconds, then quit
   pwsh tools/sim.ps1 -ExitAfter 3 -Screenshot frame.png
   pwsh tools/sim.ps1 -Keys "R,R,D" -FixedDt 0.016667 -ScreenshotWhenSettled row1.png
+  pwsh tools/sim.ps1 -First com.webos.app.hdmi1 -Colors "spotify-beehive=1db954"
 #>
 param(
     [double]$ExitAfter = 0,
@@ -23,6 +29,8 @@ param(
     [string]$Keys = '',
     [double]$FixedDt = 0,
     [string]$ScreenshotWhenSettled = '',
+    [string]$First = '',
+    [string]$Colors = '',
     [switch]$Release
 )
 
@@ -53,6 +61,11 @@ if (-not (Test-Path $sdlDll)) {
 $env:LUMEN_SDL2 = $sdlDll
 $env:LUMEN_LOG = Join-Path $root 'shell/target-host/lumen-shell.log'
 $env:LUMEN_MOCK_ICONS = Join-Path $root 'shell/assets/mock-icons'
+$env:LUMEN_ART = Join-Path $root 'shell/assets/art'
+$env:LUMEN_ART_OWNER = Join-Path $root 'shell/assets/art-owner'
+# Empty clears them: the session keeps what an earlier run set.
+$env:LUMEN_MOCK_FIRST = $First
+$env:LUMEN_MOCK_COLORS = $Colors
 $env:CARGO_TARGET_DIR = Join-Path $root 'shell/target-host'
 
 $cargoArgs = @('run', '--manifest-path', (Join-Path $root 'shell/Cargo.toml'))

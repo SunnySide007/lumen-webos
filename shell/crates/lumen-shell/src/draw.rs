@@ -1,16 +1,19 @@
 //! Draws the home screen from `lumen_core::home::View` into a `Batch`: tiles
 //! in their app's colour with its icon (or the first letter of its title), the
-//! focused app's title below its tile, the placeholder Top Shelf and the
-//! status pill, with all text in Inter.
+//! focused app's title below its tile, the Top Shelf (its hero, or the
+//! placeholder until one is in) and the status pill, with all text in Inter.
+
+use std::collections::HashMap;
 
 use lumen_core::apps::App;
+use lumen_core::art::Hero;
 use lumen_core::home::{TileView, View};
-use lumen_core::layout::{self, SAFE, SCREEN_H, SCREEN_W};
+use lumen_core::layout::{self, Rect, SAFE, SCREEN_H, SCREEN_W};
 use lumen_core::style::{self, Color};
 
-use crate::atlas::Atlas;
+use crate::atlas::{Atlas, Uv};
 use crate::icons::Icons;
-use crate::render::{Batch, Rgba};
+use crate::render::{Batch, Rgba, Texture};
 use crate::text::Text;
 
 pub mod warm;
@@ -42,12 +45,22 @@ fn app_color(app: &App, index: usize) -> Rgba {
     }
 }
 
-/// What drawing needs besides the view: the atlas, and the text and icons
-/// that fill it.
+/// A hero's layer in its texture: which texture, and the rows of the shelf
+/// it covers, top and bottom, as fractions of the shelf's height.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HeroLayer {
+    pub texture: Texture,
+    pub rows: (f32, f32),
+}
+
+/// What drawing needs besides the view: the atlas, the text and icons that
+/// fill it, and the heroes uploaded into textures of their own.
 pub struct Assets {
     pub atlas: Atlas,
     pub text: Text,
     pub icons: Icons,
+    /// Each uploaded hero's layers, back to front.
+    pub heroes: HashMap<Hero, Vec<HeroLayer>>,
 }
 
 impl Assets {
@@ -58,6 +71,7 @@ impl Assets {
             atlas: Atlas::default(),
             text: Text::new()?,
             icons: Icons::default(),
+            heroes: HashMap::new(),
         })
     }
 
@@ -86,7 +100,15 @@ pub fn home(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
 
 fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     batch.clear();
-    batch.gradient_rect(0.0, 0.0, SCREEN_W, SCREEN_H, BG_TOP, BG_BOTTOM);
+    // A hero is opaque: the background is drawn only below it.
+    let hidden = match view.shelf_art.base {
+        Some(hero) if assets.heroes.contains_key(hero) => view.shelf.bottom().clamp(0.0, SCREEN_H),
+        _ => 0.0,
+    };
+    if hidden < SCREEN_H {
+        let top = BG_TOP.lerp(BG_BOTTOM, hidden / SCREEN_H);
+        batch.gradient_rect(0.0, hidden, SCREEN_W, SCREEN_H - hidden, top, BG_BOTTOM);
+    }
     shelf(batch, view, assets);
     if view.empty {
         let px = layout::EMPTY_PX;
@@ -121,12 +143,20 @@ fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     }
 }
 
+/// The Top Shelf: its art (a hero, the placeholder gradient, or a crossfade
+/// between them), then the focused row-0 app's title over the dark band at
+/// its bottom left. The "TOP SHELF" caption labels the placeholder, so it
+/// fades out with it.
 fn shelf(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     let r = view.shelf;
     if r.bottom() <= 0.0 {
         return;
     }
-    batch.gradient_rect(r.x, r.y, r.w, r.h, SHELF_TOP, SHELF_BOTTOM);
+    let art = view.shelf_art;
+    shelf_art(batch, r, art.base, 1.0, assets);
+    if let Some((over, alpha)) = art.over {
+        shelf_art(batch, r, over, alpha, assets);
+    }
     let Some(title) = view.shelf_title else {
         return;
     };
@@ -136,18 +166,55 @@ fn shelf(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     let caption_baseline = baseline - assets.text.cap_height(px) - caption;
     let text = &mut assets.text;
     let atlas = &mut assets.atlas;
-    text.draw(
-        batch,
-        atlas,
-        SAFE.x,
-        caption_baseline,
-        caption,
-        1.0,
-        "TOP SHELF",
-        TEXT_DIM,
-    );
+    if art.placeholder > 0.0 {
+        text.draw(
+            batch,
+            atlas,
+            SAFE.x,
+            caption_baseline,
+            caption,
+            1.0,
+            "TOP SHELF",
+            TEXT_DIM.alpha(art.placeholder),
+        );
+    }
     let title = text.fit(title, px, SAFE.w);
     text.draw(batch, atlas, SAFE.x, baseline, px, 1.0, &title, TEXT);
+}
+
+/// One of the shelf's pictures at `alpha`: `hero`'s layers, back to front,
+/// or the placeholder gradient for `None` (and for a hero with no textures,
+/// which the home loop never shows).
+fn shelf_art(batch: &mut Batch, r: Rect, hero: Option<&Hero>, alpha: f32, assets: &Assets) {
+    let Some(layers) = hero.and_then(|hero| assets.heroes.get(hero)) else {
+        batch.gradient_rect(
+            r.x,
+            r.y,
+            r.w,
+            r.h,
+            SHELF_TOP.alpha(alpha),
+            SHELF_BOTTOM.alpha(alpha),
+        );
+        return;
+    };
+    let whole = Uv {
+        u0: 0.0,
+        v0: 0.0,
+        u1: 1.0,
+        v1: 1.0,
+    };
+    for layer in layers {
+        let (top, bottom) = (r.y + layer.rows.0 * r.h, r.y + layer.rows.1 * r.h);
+        batch.image_from(
+            layer.texture,
+            r.x,
+            top,
+            r.w,
+            bottom - top,
+            whole,
+            WHITE.alpha(alpha),
+        );
+    }
 }
 
 /// A lifted tile's soft shadow, dropped below it, as dark as its lift.
@@ -272,6 +339,7 @@ mod tests {
     use std::time::Duration;
 
     use lumen_core::apps::{App, AppKind, Launcher, MockLauncher};
+    use lumen_core::art::Look;
     use lumen_core::focus::Dir;
     use lumen_core::home::{BackAtTop, Home};
     use lumen_core::input::{Action, Press};
@@ -336,6 +404,42 @@ mod tests {
             let n = quads(&home, &mut assets);
             assert!(n <= QUAD_BUDGET, "row {row}: {n} quads");
         }
+    }
+
+    #[test]
+    fn under_a_hero_the_background_starts_below_the_shelf() {
+        let mut home = mock_home().with_look(Look::FULL);
+        let mut assets = assets();
+        let plain = quads(&home, &mut assets);
+        // Netflix's ambient hero, its three layers in textures as the loop
+        // leaves them.
+        let hero = home.wanted_hero().cloned().expect("a hero");
+        let layers = [(0.0, 1.0), (0.0, 0.66), (0.71, 1.0)].map(|rows| HeroLayer {
+            texture: Texture::Own(7),
+            rows,
+        });
+        assets.heroes.insert(hero.clone(), layers.into());
+        home.show_hero(Some(hero));
+        // Mid crossfade the layered hero is drawn whole under the fading
+        // placeholder, caption and all, so the background already starts
+        // at the shelf's bottom, where the hero ends.
+        home.advance_to(Duration::from_millis(50));
+        let mut batch = Batch::default();
+        super::home(&mut batch, &home.view(), &mut assets);
+        assert!(batch.quad_count() <= QUAD_BUDGET);
+        assert_eq!(batch.quad_count(), plain + 3);
+        let shelf = home.view().shelf;
+        assert_eq!(batch.quad_bounds(0).1, shelf.bottom());
+        assert_eq!(batch.quad_bounds(1).1, shelf.y);
+        // Settled, the caption is gone too.
+        home.settle_now();
+        super::home(&mut batch, &home.view(), &mut assets);
+        assert_eq!(batch.quad_bounds(0).1, shelf.bottom());
+        // Three layers for the gradient, and a quad a letter less.
+        assert_eq!(batch.quad_count(), plain + 2 - "TOPSHELF".len());
+        // One run for the hero's texture, then the atlas's.
+        let textures: Vec<_> = batch.runs().iter().map(|r| r.texture).collect();
+        assert_eq!(textures, [Texture::Own(7), Texture::Atlas]);
     }
 
     #[test]
