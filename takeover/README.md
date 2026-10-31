@@ -52,8 +52,12 @@ closes the home it doesn't use: `applicationManager/closeByAppId` with
   list 10 s later, which shows whether keep-alive brings it back.
 * It never sets the home: with any other default it says so and stops. It
   does nothing while the kill switch exists, returns at once, writes only
-  `/tmp/lumen-home.log`, and is over within five minutes, timed by
-  `/proc/uptime` because the wall clock jumps when the TV sets it.
+  its log, and is over within five minutes, timed by `/proc/uptime` because
+  the wall clock jumps when the TV sets it.
+* Its log is `/var/lib/lumen/log/lumen-home.log`, with the run before in
+  `lumen-home.log.1`, never `/tmp`. When that folder or `/var/lib/lumen` is a
+  link, or writable or owned by anyone but root, it works unlogged and
+  `hook status` says "no log".
 * Every luna call it makes is time-boxed (`timeout -t 5`, busybox's, or
   `timeout 5`). With neither working it logs `no timeout command; nothing
   done` and stops: a boot hook that could hang is not run at all.
