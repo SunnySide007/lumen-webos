@@ -37,6 +37,9 @@
 # 0.0.0.0	tkacrv4.alphonso.tv
 
 # --- Diagnostics and telemetry (confirm with capture) ---
+# lgtvonline.lge.com is connman's online check on the B9 (Ipv4StatusUrl in
+# /etc/connman/main.conf, privacy survey 2026-10-28): blocking it may make
+# the TV think it is offline. Trial only (docs/specs/privacy.md, P7).
 # 0.0.0.0	lgtvonline.lge.com
 # 0.0.0.0	ngfts.lge.com
 # 0.0.0.0	aic-ngfts.lge.com
