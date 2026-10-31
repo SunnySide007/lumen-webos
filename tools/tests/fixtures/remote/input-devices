@@ -1,0 +1,26 @@
+I: Bus=0003 Vendor=0001 Product=0001 Version=0004
+N: Name="LGE RCU"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input1
+U: Uniq=
+H: Handlers=kbd event1
+B: PROP=0
+B: EV=3
+
+I: Bus=0005 Vendor=045e Product=0b13 Version=0903
+N: Name="Controller"
+P: Phys=a4:b1:c2:d3:e4:f5
+S: Sysfs=/devices/virtual/misc/uhid/0005:045E:0B13.0001/input/input5
+U: Uniq=a4:b1:c2:d3:e4:f5
+H: Handlers=js0 event5
+B: PROP=0
+B: EV=1b
+
+I: Bus=0005 Vendor=0001 Product=0001 Version=0001
+N: Name="Keyboard"
+P: Phys=bluetooth-A4B1C2D3E4F5
+S: Sysfs=/devices/virtual/misc/uhid/0005:0001:0001.0002/input/input6
+U: Uniq=a4b1c2d3e4f5
+H: Handlers=sysrq kbd event6
+B: PROP=0
+B: EV=120013
