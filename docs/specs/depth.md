@@ -116,7 +116,7 @@ git-ignored), **here** means this session off the TV.
 | 1 | Commit the privacy work on `main` (Gate 2) after the owner's Netflix and casting check | TV, then here | The owner's word | `make check` green; one commit series on `main` |
 | 2 | **Lumen Guard G1**: the Rust forwarder, log only, with its hook and tooling, off the TV | lane A (Codex, GPT-6 Astra) | 1 | Unit and bats tests; a PC run forwards and logs real lookups; `tools/dev.sh make check` green |
 | 3 | `tools/frame-stats.sh` summarises the stage 3 lines (`vsyncs skipped`, `motion paced`, `warm`, `dropped`) | lane B (Codex, GPT-6.1 Sol) | Nothing | bats cases on real fixtures from `tools/out/archive/tv-check-20261023T024724Z` |
-| 4 | **Remote R0** as a read-only survey script, like `--privacy` | lane C (Codex, GPT-6.1 Sol) | Nothing | `tools/recon.sh --remote` with read-only guards in `recon.bats`; the run itself is a TV step |
+| 4 | **Remote R0** as a read-only survey script, like `--privacy` | lane C (done 2026-10-31, merged ff81bfe) | Nothing | Done: `tools/recon.sh --remote` ran on the B9 on 2026-10-31; answers in b9.md, "Remote" |
 | 5 | The Home look (done 2026-10-31: route D), route D proven by hand, YouTube AdFree, the owed post-boot check, the loop-pass TV check | TV | The owner | b9.md "Home" section; the route chosen; YouTube plays without ads or the IPK is removed; decision 8 accepted or not |
 | 6 | Guard G1 on the TV by hand, then as a hook; a week of log | TV | 2, 5 | privacy.md G1's "done when" |
 | 7 | `--no-ff` merge of `claude/shell-timing` (and `refactor/loop-pass` once checked) into `main`; the pull requests; the push | here | 5, the owner's call | CI green; `v0.3.0` waits for the takeover |

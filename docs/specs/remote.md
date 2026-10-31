@@ -162,6 +162,8 @@ Wake-on-LAN results.
 
 **Undo:** nothing changes.
 
+**Run on 2026-10-31** (`tools/recon.sh --remote`, report `docs/device/remote-20261031-060938.txt`): the answers are in [b9.md, "Remote"](../device/b9.md#remote). Dropbear 2022.83 honours `restrict` and `command=`; every verb has a luna method, and LG's `com.webos.service.tv.keymanager/createKeyEvent` is a key route to try before `uinput`; the firmware is from August 2025, after LG's 2024 SSAP fix. Wake-on-LAN (item 5) is still the owner's test.
+
 ### R1: Google Home through the Streamer
 
 **Brief.** No code. The owner, in LG's settings, the Streamer's settings and

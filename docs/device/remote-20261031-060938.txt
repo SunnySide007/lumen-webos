@@ -1,0 +1,2508 @@
+
+===== identity =====
+$ date -u
+Sat Oct 31 06:09:38 UTC 2026
+$ id
+uid=0(root) gid=0(root) groups=0(root),10(wheel),506(pulse-access),509(se),777(crashd)
+$ uname -r
+4.4.84-169.gld4tv.5
+
+===== ssh =====
+$ dropbear processes: pid, binary, arguments
+25971: /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear: /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear -R -2 9 
+4979: /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear: /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear -R 
+command -v dropbear: /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear
+--- /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear
+$ /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear -V
+Dropbear v2022.83
+$ authorized_keys option names found in the binary (up to 3 strings each)
+command=: found
+    command="
+    Badly formatted command= authorized_keys option
+restrict: found
+    Logins are restricted to the group %s but user '%s' is not a member
+    restrict
+    Cannot restrict logins to group '%s' as the group does not exist
+no-pty: found
+    no-pty
+no-port-forwarding: found
+    no-port-forwarding
+no-agent-forwarding: found
+    no-agent-forwarding
+no-X11-forwarding: found
+    no-X11-forwarding
+$ installed keys: how many, then the option names and key type of each
+--- /home/root/.ssh/authorized_keys
+-rw-------    1 root     root            90 Oct 20 03:14 /home/root/.ssh/authorized_keys
+1 key line(s)
+  key 1: options: none; type: ssh-ed25519
+--- /var/lib/webosbrew/sshd/authorized_keys
+(absent)
+$ ls -ld /home/root /home/root/.ssh
+drwxr-xr-x    5 root     root          4096 Oct 20 03:14 /home/root
+drwx------    2 root     root          4096 Oct 20 03:14 /home/root/.ssh
+
+===== luna-methods =====
+$ ls-monitor -l
+HUB CLIENTS:
+PID       	SERVICE NAME                  	EXE                                	TYPE                	UNIQUE NAME         
+1578      	com.webos.launcher            	/usr/bin/surface-manager-starfish  	static              	CbELi2BI            
+3187      	com.webos.media.powermgr      	/usr/sbin/umediaserver             	unknown/client only 	TBscTAxP            
+1555      	com.webos.service.config      	/usr/sbin/configd                  	static              	Nz0khlO3            
+3484      	com.webos.service.ime         	/usr/sbin/MaliitServer             	static              	tt7J2xfM            
+1583      	com.webos.service.tvrmclient.tv	/mnt/lg/tvservice/lgapp/tvservice  	static              	ege5tF8v            
+3157      	com.webos.service.contentminer	/usr/sbin/contentminer             	static              	EtxVc0ba            
+2209      	com.webos.service.utp.program 	/usr/sbin/utp                      	static              	KyNlTHnK            
+3061      	com.webos.service.faultmanager.client5171	/usr/sbin/iepg                     	unknown/client only 	SSJkjIla            
+2767      	com.webos.service.ics.adapter 	/usr/sbin/iconnectivity            	unknown/client only 	PjZY0PbB            
+3197      	com.webos.epgdb               	/usr/sbin/mojodb-luna              	static              	sgQVb3sx            
+1583      	com.webos.service.tvservice.noti	/mnt/lg/tvservice/lgapp/tvservice  	unknown/client only 	b13v4NIZ            
+26302     	com.webos.monitor26302        	/usr/sbin/ls-monitor               	unknown/client only 	XhhdGfNW            
+3211      	com.webos.service.systemservice	/usr/sbin/LunaSysService           	static              	DfeCDKSY            
+3441      	com.webos.service.eventmonitor	/usr/sbin/event-monitor            	static              	R8sHIi3u            
+2701      	com.webos.service.bluetooth2  	/usr/sbin/webos-bluetooth-service  	static              	Ar7BAJr5            
+3294      	com.webos.notification        	/usr/sbin/notificationmgr          	static              	Qu4s4Mno            
+1583      	com.webos.service.tv.frontend 	/mnt/lg/tvservice/lgapp/tvservice  	static              	BJoSETIu            
+2989      	com.webos.service.attachedstoragemanager	/usr/sbin/asm                      	dynamic             	bL3VcW1C            
+4596      	com.webos.service.usercontextmanager.req	/usr/sbin/user-context-manager     	unknown/client only 	SI4BFcy4            
+4492      	com.webos.app.browser.service 	/media/system/apps/usr/palm/services/com.webos.app.browser.service/usr/sbin/browser-service	dynamic             	AtumfViE            
+1583      	com.webos.service.tv.subtitle 	/mnt/lg/tvservice/lgapp/tvservice  	static              	WfwUv4I0            
+3484      	com.webos.service.ime.stt     	/usr/sbin/MaliitServer             	static              	uc5oTs9y            
+5056      	com.webos.dmc4226             	/usr/sbin/cbox                     	unknown/client only 	ajxdBvNT            
+2989      	com.webos.dmc3463             	/usr/sbin/asm                      	unknown/client only 	6pVenLPd            
+1578      	com.webos.surfacemanager.systemui	/usr/bin/surface-manager-starfish  	static              	8YhGFL7j            
+2209      	com.webos.service.utp.channel 	/usr/sbin/utp                      	static              	KSjNTXt3            
+1583      	com.webos.service.tv.swupdate 	/mnt/lg/tvservice/lgapp/tvservice  	static              	PtJIQOxu            
+2257      	com.webos.service.qbd         	/usr/sbin/tvpowerd                 	static              	Q6UK3jde            
+2532      	com.webos.service.acb         	/usr/sbin/AcbService               	static              	oruq2W1U            
+2972      	secondscreen.client           	/usr/bin/node                      	dynamic             	IG11WnZC            
+5228      	com.webos.service.videothumbnailer	/usr/sbin/videothumbnailer         	dynamic             	u7g01zYg            
+1692      	com.webos.service.systemmanager	/usr/sbin/sam                      	static              	H2rGcgW8            
+1583      	com.webos.service.tv.audiod   	/mnt/lg/tvservice/lgapp/tvservice  	static              	sI3L4kx9            
+3797      	com.webos.appInstallService   	/usr/sbin/appinstalld              	static              	5tZfFu7V            
+1583      	com.webos.tv.reservation      	/mnt/lg/tvservice/lgapp/tvservice  	unknown/client only 	o8jiL3JN            
+5003      	com.webos.service.tnm         	/usr/sbin/tnm                      	dynamic             	kr01v8C5            
+1578      	com.webos.service.systemUIManager	/usr/bin/surface-manager-starfish  	static              	hoPmwPft            
+3803      	com.webos.service.downloadmanager	/usr/bin/LunaDownloadMgr           	static              	LtmhKQjZ            
+2209      	com.webos.service.utp.dvr     	/usr/sbin/utp                      	static              	0pWlkuH2            
+3165      	com.webos.service.voiceconductor	/usr/sbin/voiceconductor           	static              	iQm7aBky            
+1583      	com.webos.service.tv.power    	/mnt/lg/tvservice/lgapp/tvservice  	static              	PrB9Purs            
+1692      	com.webos.applicationManager  	/usr/sbin/sam                      	static              	yfVYaPYD            
+2248      	com.webos.service.broadcast-conf-downloader	/usr/sbin/broadcast-conf-downloader	dynamic             	kP4D53qY            
+4609      	com.webos.service.admanager   	/usr/sbin/admanager                	dynamic             	Sh8plzYn            
+4529      	com.webos.service.oledepl     	/usr/sbin/oled-epl                 	static              	P2wP1G5W            
+1583      	com.webos.service.tv.sysservice	/mnt/lg/tvservice/lgapp/tvservice  	static              	i8C75mvT            
+4564      	com.webos.service.dpp         	/usr/sbin/dpp                      	static              	71unUazx            
+1583      	com.webos.service.tv.program  	/mnt/lg/tvservice/lgapp/tvservice  	static              	FQYMiYP5            
+3792      	com.webos.service.activitymanager	/usr/sbin/activitymanager          	static              	7sDUbOLU            
+1545      	com.webos.rm.client._uterLJZNxUuJuD	/usr/sbin/tvrm                     	static              	wT9sslIR            
+1583      	com.webos.service.tv.systemproperty	/mnt/lg/tvservice/lgapp/tvservice  	static              	ESFAlYji            
+3199      	com.webos.settingsservice     	/usr/sbin/SettingsService          	static              	YV10fxPk            
+2972      	com.webos.service.magicnum    	/usr/bin/node                      	dynamic             	KIVMF10X            
+1583      	com.webos.service.tv.preference	/mnt/lg/tvservice/lgapp/tvservice  	static              	1E6Pc3Kd            
+2202      	com.webos.service.reclistmgr.thumbnail	/usr/sbin/rec-listmgr              	static              	bfra2UBR            
+3187      	com.webos.media.tvpowermgr    	/usr/sbin/umediaserver             	unknown/client only 	6TVKRCHx            
+1583      	com.webos.service.tv.pdm      	/mnt/lg/tvservice/lgapp/tvservice  	unknown/client only 	c6svTkW6            
+2202      	com.webos.service.reclistmgr.thumbnailadap	/usr/sbin/rec-listmgr              	static              	3jAZhQkE            
+1583      	com.webos.service.tv.cecp     	/mnt/lg/tvservice/lgapp/tvservice  	static              	FlKmEf8o            
+4575      	com.webos.service.dmost       	/usr/sbin/dmost                    	static              	HTgIjmm4            
+2209      	com.webos.service.utp.teletext	/usr/sbin/utp                      	static              	ram88woh            
+1578      	com.webos.app.quickinputpicker	/usr/bin/surface-manager-starfish  	static              	fbhihMZc            
+3437      	com.webos.service.sdx         	/usr/sbin/sdx                      	dynamic             	VGcB0ge6            
+1583      	com.webos.service.tv.cas      	/mnt/lg/tvservice/lgapp/tvservice  	static              	vhYoMSwL            
+4546      	com.webos.service.tts.init    	/usr/sbin/tts                      	unknown/client only 	QhZmuHWJ            
+4598      	com.webos.service.miracast    	/usr/sbin/miracast                 	static              	L0yFBWEM            
+3275      	com.webos.rm.client._NnLjM7v3gnIZNM	/usr/sbin/starfish-media-pipeline  	static              	geXlyIX8            
+1583      	com.webos.service.tv.audiorecorder	/mnt/lg/tvservice/lgapp/tvservice  	static              	kybGyFAq            
+1583      	com.webos.service.tv.time     	/mnt/lg/tvservice/lgapp/tvservice  	static              	WHkZLN1N            
+4601      	com.webos.service.emmcd       	/usr/sbin/emmcd                    	static              	JPhOjzpB            
+1578      	com.webos.coverUI             	/usr/bin/surface-manager-starfish  	static              	1yznjTno            
+3199      	com.lge.settingsservice       	/usr/sbin/SettingsService          	static              	78T4zYiH            
+3156      	com.webos.service.sm          	/usr/sbin/securitymanager          	static              	bPtpdxcP            
+1583      	com.webos.service.tv.twin     	/mnt/lg/tvservice/lgapp/tvservice  	static              	N0rh36dR            
+4596      	com.webos.service.usercontextmanager	/usr/sbin/user-context-manager     	static              	4pxFL9ZH            
+2194      	com.webos.service.faultmanager	/usr/sbin/faultmanager             	static              	SgMvv7Dk            
+1583      	com.webos.service.tvservice.db	/mnt/lg/tvservice/lgapp/tvservice  	unknown/client only 	CgqFSmge            
+4650      	airplay.homekit               	/usr/sbin/homekit                  	dynamic             	oT27bbMg            
+2683      	com.webos.service.irdbmanager 	/usr/sbin/irdbmanager              	dynamic             	7kBxfB1B            
+3795      	com.webos.service.ssdplgtv    	/usr/sbin/ssdp-discovery-lgtv      	dynamic             	gs6Dbi8V            
+1583      	com.webos.service.tv.databroadcast	/mnt/lg/tvservice/lgapp/tvservice  	static              	7A3o2AlK            
+1583      	com.webos.service.tv.appmgr   	/mnt/lg/tvservice/lgapp/tvservice  	static              	gbijdESq            
+2517      	com.webos.service.audio       	/usr/sbin/audiod                   	static              	vCX1qx06            
+1583      	com.webos.service.tv.reservation	/mnt/lg/tvservice/lgapp/tvservice  	static              	IdJy9i1f            
+23832     	airplay.service               	/usr/sbin/airplay                  	dynamic             	aD2CCRdo            
+25062     	(null)                        	/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-shell	unknown/client only 	Ra05n8iC            
+1464      	com.webos.pmlogd              	/usr/sbin/PmLogDaemon              	static              	RYk8H692            
+1545      	com.webos.service.tvrm.policy.receiver	/usr/sbin/tvrm                     	static              	L2omfVES            
+3484      	com.webos.service.ime.globalplugin	/usr/sbin/MaliitServer             	static              	paoH2F0c            
+1545      	com.webos.service.tvrm        	/usr/sbin/tvrm                     	static              	KU1uOine            
+1692      	com.webos.service.applicationmanager	/usr/sbin/sam                      	static              	qqfPABUP            
+3187      	com.webos.media.appobserver   	/usr/sbin/umediaserver             	unknown/client only 	jqq6ldaF            
+1583      	(null)                        	/mnt/lg/tvservice/lgapp/tvservice  	unknown/client only 	v50oJ5Fy            
+3484      	(null)                        	/usr/sbin/MaliitServer             	unknown/client only 	Hri1SUTj            
+4541      	com.webos.service.nlpmanager  	/usr/sbin/nlpmanager               	dynamic             	yKlCxjGz            
+1578      	com.webos.service.sysuicompmgr	/usr/bin/surface-manager-starfish  	static              	V5bQSGJR            
+2229      	com.webos.service.alarm       	/usr/sbin/sleepd                   	static              	RyHBH36J            
+3437      	com.webos.service.sdx.init    	/usr/sbin/sdx                      	unknown/client only 	J9tsRDc1            
+3187      	com.webos.media.configmgr     	/usr/sbin/umediaserver             	unknown/client only 	IAbCU5Cb            
+1583      	com.webos.service.tv.tvrm     	/mnt/lg/tvservice/lgapp/tvservice  	unknown/client only 	6VqDZTKN            
+23719     	(null)                        	/media/cryptofs/apps/usr/palm/applications/netflix/bin/netflix.bin	unknown/client only 	B0q3HxGM            
+2912      	com.webos.service.wan         	/usr/sbin/webos-connman-adapter    	static              	UKtkbIz7            
+1583      	com.webos.service.tv.twindvr  	/mnt/lg/tvservice/lgapp/tvservice  	static              	xmCH7Bcx            
+2202      	com.webos.service.reclistmgr  	/usr/sbin/rec-listmgr              	static              	OdQazPdb            
+2202      	com.webos.service.reclistmgr.listadap	/usr/sbin/rec-listmgr              	static              	48jGnr2R            
+2565      	com.webos.service.btaudiosrc  	/usr/sbin/btaudiosrc               	static              	78CnBq8c            
+23719     	netflix                       	/media/cryptofs/apps/usr/palm/applications/netflix/bin/netflix.bin	unknown/client only 	5LP3JKVV            
+3187      	com.webos.media               	/usr/sbin/umediaserver             	static              	Ury8xQ4C            
+2209      	com.webos.service.utp.sound   	/usr/sbin/utp                      	static              	pXSvTFd3            
+2209      	com.webos.service.utp.broadcast	/usr/sbin/utp                      	static              	5S83lvNV            
+1583      	com.webos.service.videosinkmanager	/mnt/lg/tvservice/lgapp/tvservice  	static              	zygsDmlM            
+2533      	com.webos.service.nop         	/usr/sbin/nopd                     	static              	JIitvAQl            
+2813      	com.webos.service.ssc         	/usr/sbin/ssc                      	dynamic             	o8veIHOG            
+1736      	com.webos.app.home            	/usr/bin/com.webos.app.home        	unknown/client only 	wNJaFPbk            
+1583      	com.webos.service.tv.tvlink   	/mnt/lg/tvservice/lgapp/tvservice  	static              	bo8K6fyA            
+2503      	com.webos.service.pdm         	/usr/sbin/physical-device-manager  	static              	YJLmsx9H            
+23719     	com.webos.rm.client._lmIpcx340VE71X	/media/cryptofs/apps/usr/palm/applications/netflix/bin/netflix.bin	static              	65iHUL3e            
+5120      	com.webos.service.nudgeSync   	/usr/sbin/nudge                    	static              	KzkF5wIa            
+1583      	com.webos.service.tv.broadcast	/mnt/lg/tvservice/lgapp/tvservice  	static              	eKixm1VE            
+3799      	com.webos.dmr                 	/usr/sbin/dmr                      	unknown/client only 	ZbVazDi7            
+3437      	com.webos.service.sdx.xpa     	/usr/sbin/sdx                      	unknown/client only 	Njhrs6KY            
+2229      	com.palm.sleep                	/usr/sbin/sleepd                   	static              	Z0vCCL04            
+1692      	com.webos.service.applicationManager	/usr/sbin/sam                      	static              	iNEuBJkS            
+1578      	com.webos.systemui.mobileconnection	/usr/bin/surface-manager-starfish  	static              	cc4sUtGs            
+1578      	com.webos.surfacemanager.screenSaver	/usr/bin/surface-manager-starfish  	static              	Nhvrb9hh            
+1578      	com.webos.app.quicksettings   	/usr/bin/surface-manager-starfish  	static              	ESjfadRZ            
+1583      	com.webos.service.tv.sound    	/mnt/lg/tvservice/lgapp/tvservice  	static              	4Ua0qxe2            
+2972      	com.webos.app.igallery.preview	/usr/bin/node                      	dynamic             	V8gNeDN8            
+25062     	io.github.sunnyside007.lumen.shell	/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-shell	unknown/client only 	KnccEa8w            
+3068      	(null)                        	/usr/bin/WebAppMgr                 	unknown/client only 	0XUwp15k            
+1583      	com.webos.service.tv.monitoring	/mnt/lg/tvservice/lgapp/tvservice  	static              	4R3xiilL            
+1578      	com.webos.surfacemanager.audio	/usr/bin/surface-manager-starfish  	unknown/client only 	77o5Gi13            
+5056      	com.webos.service.cbox        	/usr/sbin/cbox                     	dynamic             	Uj4bPKBO            
+3192      	com.webos.mediadb             	/usr/sbin/mojodb-luna              	static              	hB7avLV2            
+3156      	com.webos.service.sm.adapter  	/usr/sbin/securitymanager          	static              	LgLCskGx            
+25433     	com.webos.app.qmlrunner-25433 	/usr/bin/qml-runner                	unknown/client only 	IOxhIIfC            
+2547      	com.webos.service.voiceinput  	/usr/sbin/voiceinput               	static              	UPdgqtb5            
+1583      	com.webos.service.tv.display  	/mnt/lg/tvservice/lgapp/tvservice  	static              	UNYg9K23            
+2701      	com.webos.service.bluetooth   	/usr/sbin/webos-bluetooth-service  	static              	0Jx7EYbO            
+2257      	com.webos.service.tvpower     	/usr/sbin/tvpowerd                 	static              	RQaiTg1c            
+1578      	com.webos.platformstarfish    	/usr/bin/surface-manager-starfish  	unknown/client only 	PiQsQwy3            
+1578      	com.webos.app.cpcover         	/usr/bin/surface-manager-starfish  	static              	feVJs9lk            
+1583      	com.webos.service.tv.externaldevice	/mnt/lg/tvservice/lgapp/tvservice  	static              	hr7cwJKa            
+1583      	com.webos.service.tv.dvr      	/mnt/lg/tvservice/lgapp/tvservice  	static              	rr2Fju7w            
+2972      	com.webos.service.dial        	/usr/bin/node                      	dynamic             	SgD80P4C            
+2202      	com.webos.service.reclistmgr.list	/usr/sbin/rec-listmgr              	static              	LWF2wzGJ            
+3175      	com.webos.service.update      	/usr/sbin/update                   	dynamic             	xwY8Gygz            
+3160      	com.lge.service.qosm          	/usr/sbin/qosm                     	static              	jYtbPpMw            
+1578      	com.webos.surfacemanager.tips 	/usr/bin/surface-manager-starfish  	static              	ORPN3oGQ            
+1583      	com.webos.service.tv.xpa      	/mnt/lg/tvservice/lgapp/tvservice  	static              	0jYcuDMd            
+3187      	com.webos.media.donglemgr     	/usr/sbin/umediaserver             	unknown/client only 	VWNQwPcP            
+2533      	com.webos.service.nomotion    	/usr/sbin/nopd                     	static              	fOCCfFcc            
+2229      	com.webos.service.power       	/usr/sbin/sleepd                   	static              	gBhjWxIC            
+1583      	com.webos.rm.client._nqlaDgdm7Iasq5	/mnt/lg/tvservice/lgapp/tvservice  	static              	ULLB34Wl            
+1583      	com.webos.service.tv.tvpowerd 	/mnt/lg/tvservice/lgapp/tvservice  	unknown/client only 	BKoE94c9            
+22958     	com.webos.service.photorenderer	/usr/sbin/photorenderer            	dynamic             	yxO8tRWF            
+3199      	com.webos.service.settings    	/usr/sbin/SettingsService          	static              	WZatNvpV            
+25433     	com.webos.app.screensaver-25433	/usr/bin/qml-runner                	unknown/client only 	aPeztbot            
+3068      	com.palm.webappmanager        	/usr/bin/WebAppMgr                 	static              	5OZhMBFe            
+2523      	com.webos.service.eim.sender  	/usr/sbin/eim                      	unknown/client only 	0Xfvh5eL            
+3166      	com.webos.service.dnssd       	/usr/sbin/avahi-adaptor            	static              	mO4ysER4            
+1578      	com.webos.surfacemanager.hcap 	/usr/bin/surface-manager-starfish  	static              	8TPvUxPq            
+1578      	com.webos.surfacemanager      	/usr/bin/surface-manager-starfish  	static              	GvTtuKqU            
+3799      	com.webos.service.dmrsvc      	/usr/sbin/dmr                      	static              	HQmHORd2            
+3196      	com.palm.tempdb               	/usr/sbin/mojodb-luna              	static              	6oeTxr5f            
+1583      	com.webos.service.tv.a        	/mnt/lg/tvservice/lgapp/tvservice  	static              	nCnRfztw            
+3082      	com.webos.service.pbsw        	/usr/sbin/pbs                      	dynamic             	rFFrhbrJ            
+3484      	(null)                        	/usr/sbin/MaliitServer             	unknown/client only 	T7jHS8sL            
+1578      	com.webos.surfacemanager.home 	/usr/bin/surface-manager-starfish  	static              	Oi9qxQF9            
+2912      	com.webos.service.wifi        	/usr/sbin/webos-connman-adapter    	static              	eine5Pni            
+2240      	com.webos.service.recinfoadp  	/usr/sbin/rec-info-adapter         	static              	BpZwhcNi            
+3072      	com.webos.service.btaudiosnk  	/usr/sbin/btaudiosnk               	static              	JjjUJl48            
+3683      	com.webos.service.upnp        	/usr/sbin/upnpd                    	dynamic             	KiFkXlew            
+1745      	com.webos.app.hdmi3           	/usr/bin/com.webos.app.inputcommon 	unknown/client only 	GYljIaVI            
+5056      	com.webos.service.cbox.recording	/usr/sbin/cbox                     	unknown/client only 	fwaadoZJ            
+23719     	(null)                        	/media/cryptofs/apps/usr/palm/applications/netflix/bin/netflix.bin	unknown/client only 	dqoCrsl2            
+2257      	com.webos.service.aos         	/usr/sbin/tvpowerd                 	static              	MVCOxLpM            
+1583      	com.webos.service.tv.tvrmproxy	/mnt/lg/tvservice/lgapp/tvservice  	static              	ZQFIIUKa            
+1545      	com.webos.service.tvrm.policy.sender	/usr/sbin/tvrm                     	static              	HcDxLOsa            
+5120      	com.webos.service.nudge       	/usr/sbin/nudge                    	static              	B9X32Syk            
+3437      	com.webos.service.sdx.noti    	/usr/sbin/sdx                      	unknown/client only 	1k2wFDGr            
+1696      	com.webos.memorymanager       	/usr/sbin/memchute                 	static              	GZ6DYJY5            
+2972      	com.webos.app.music.preview   	/usr/bin/node                      	dynamic             	AOZ19gIZ            
+1578      	com.webos.surfacemanager.windowext	/usr/bin/surface-manager-starfish  	static              	ejWScUY0            
+1583      	com.webos.rm.client._NnqpLYSEr57p53	/mnt/lg/tvservice/lgapp/tvservice  	static              	CcsvFS8i            
+1583      	com.webos.service.tv.hbbtv    	/mnt/lg/tvservice/lgapp/tvservice  	static              	l4GukIXg            
+3364      	com.webos.service.avf.adapter 	/usr/sbin/avf                      	unknown/client only 	ezfVjvux            
+3792      	com.webos.service.activitymanager.client	/usr/sbin/activitymanager          	unknown/client only 	KDHm3Ok7            
+1583      	com.webos.service.tv.keymanager	/mnt/lg/tvservice/lgapp/tvservice  	static              	4jvBvX6f            
+3128      	com.palm.db                   	/usr/sbin/mojodb-luna              	static              	fpy9geDv            
+1578      	com.webos.starfish.keyfilters 	/usr/bin/surface-manager-starfish  	static              	mQUMp0ZV            
+2523      	com.webos.service.eim.setting.xpa	/usr/sbin/eim                      	unknown/client only 	RrV646hr            
+1583      	com.webos.service.tv.capture  	/mnt/lg/tvservice/lgapp/tvservice  	static              	1jNSGuhs            
+1578      	com.webos.keyfilter.magicnumber	/usr/bin/surface-manager-starfish  	static              	NDVAcAfm            
+2183      	com.webos.bootManager         	/usr/sbin/bootd                    	static              	e2NgkInx            
+3068      	com.webos.service.wampluggable	/usr/bin/WebAppMgr                 	static              	NR6Nutwl            
+2972      	com.webos.service.jsserver    	/usr/bin/node                      	dynamic             	qP3QUtf5            
+2517      	com.webos.audio               	/usr/sbin/audiod                   	static              	VlpmLI2Q            
+3275      	com.webos.pipeline._NnLuLpB5AGveD2	/usr/sbin/starfish-media-pipeline  	static              	uP3AqBsm            
+3364      	com.webos.service.avf         	/usr/sbin/avf                      	dynamic             	AJnP7N2l            
+3187      	com.webos.pipelinectrl._NnLuLpB5AGveD2	/usr/sbin/umediaserver             	static              	8b4Sg6Uw            
+2209      	com.webos.service.utp.subtitle	/usr/sbin/utp                      	static              	bnKzQajV            
+1583      	com.webos.service.tv.teletext 	/mnt/lg/tvservice/lgapp/tvservice  	static              	ELoFTZZE            
+2972      	com.webos.service.membership  	/usr/bin/node                      	dynamic             	UtlhtlFa            
+2503      	com.webos.service.pdm.xpa     	/usr/sbin/physical-device-manager  	unknown/client only 	eLRlSORF            
+1583      	com.webos.service.tv.channel  	/mnt/lg/tvservice/lgapp/tvservice  	static              	OxtAyMNf            
+1583      	com.webos.service.tv          	/mnt/lg/tvservice/lgapp/tvservice  	static              	ABMetG7S            
+2523      	com.webos.service.eim         	/usr/sbin/eim                      	static              	QEDb3LDg            
+2972      	com.webos.service.secondscreen.gateway	/usr/bin/node                      	dynamic             	yHyfspyJ            
+4532      	com.webos.service.preloadmanager	/usr/bin/webos-preload-manager     	static              	VmJMbILe            
+2695      	com.webos.service.mrcu        	/usr/sbin/lginput2                 	static              	BEgQ7rYF            
+3061      	com.webos.service.iepg.pbsw   	/usr/sbin/iepg                     	static              	FhYpBZ2a            
+1583      	com.webos.service.tv.bootani  	/mnt/lg/tvservice/lgapp/tvservice  	static              	pZOgW0gt            
+23719     	(null)                        	/media/cryptofs/apps/usr/palm/applications/netflix/bin/netflix.bin	unknown/client only 	HeOawt3W            
+4577      	com.webos.service.airplayadaptor	/usr/sbin/airplay-adaptor          	static              	BSmf0lbR            
+2702      	com.webos.service.asc         	/usr/sbin/asc                      	static              	uovD6xdW            
+3061      	com.webos.service.iepg.ch     	/usr/sbin/iepg                     	unknown/client only 	OKFf0UO2            
+1578      	com.webos.systemui.notification	/usr/bin/surface-manager-starfish  	unknown/client only 	e0NrPybq            
+4675      	com.webos.service.hdcp2       	/usr/sbin/hdcp2                    	dynamic             	9YXH3V93            
+2767      	com.webos.service.ics         	/usr/sbin/iconnectivity            	dynamic             	dHZk67xg            
+3275      	(null)                        	/usr/sbin/starfish-media-pipeline  	unknown/client only 	EHRsEoaf            
+4554      	com.webos.service.dot         	/usr/sbin/bluetooth-dot-service    	static              	w00wjbL9            
+1578      	com.webos.service.recent      	/usr/bin/surface-manager-starfish  	static              	abtoIurO            
+2532      	com.webos.service.acb.client  	/usr/sbin/AcbService               	unknown/client only 	vcBmVkro            
+1583      	com.webos.service.tv.sumdsvcnetwork	/mnt/lg/tvservice/lgapp/tvservice  	unknown/client only 	hUVmtHVY            
+2912      	com.webos.service.connectionmanager	/usr/sbin/webos-connman-adapter    	static              	ZKtRF0jt            
+1578      	com.webos.app.nudge           	/usr/bin/surface-manager-starfish  	static              	iNyvi3e6            
+1583      	com.webos.service.tv.legacyinput	/mnt/lg/tvservice/lgapp/tvservice  	static              	inAoR8wo            
+2209      	com.webos.service.utp.externaldevice	/usr/sbin/utp                      	static              	2v2QTkwT            
+2813      	com.webos.service.ssc.req     	/usr/sbin/ssc                      	unknown/client only 	zugEooj7            
+4546      	com.webos.service.tts         	/usr/sbin/tts                      	dynamic             	9Ivq2ivX            
+1545      	com.webos.service.tvrm.synccaller	/usr/sbin/tvrm                     	static              	fuFPnvy8            
+2972      	com.webos.app.photovideo.preview	/usr/bin/node                      	dynamic             	Y2BW8WW7            
+1583      	com.webos.service.tv.avblock  	/mnt/lg/tvservice/lgapp/tvservice  	static              	1tPwvfw8            
+2248      	com.webos.service.broadcast-conf-downloader.adaptersm	/usr/sbin/broadcast-conf-downloader	dynamic             	bh1dOcFk            
+3061      	com.webos.service.iepg        	/usr/sbin/iepg                     	static              	drb0IJz3            
+3797      	com.webos.appUpdateService    	/usr/sbin/appinstalld              	static              	ImPHy7M1            
+2248      	com.webos.service.broadcast-conf-downloader.adaptersdx	/usr/sbin/broadcast-conf-downloader	dynamic             	aMhkGXCg            
+$ ls-monitor -i com.webos.service.tvpower
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.tvpower' WITH UNIQUE NAME 'RQaiTg1c' AT HUB
+
+  "/power":
+      "registerActiveStandbyRequest": {"provides":["private","tv.management","all"]}
+      "registerScreenSaverRequest": {"provides":["private","tv.management","all","public"]}
+      "sendPowerOffRequestAck": {"provides":["private","tv.management","all"]}
+      "getPowerState": {"provides":["activities.callbacks","private","tv.management","configurator.callbacks","all"]}
+      "registerPrepareActiveStandby": {"provides":["private","tv.management","all","public"]}
+      "sendActiveStandbyRequestAck": {"provides":["private","tv.management","all"]}
+      "responsePreparePowerOff": {"provides":["private","tv.management","all","public"]}
+      "getClientList": {"provides":["private","tv.management","all"]}
+      "sendPreparePowerOffAck": {"provides":["private","tv.management","all"]}
+      "responseSuspendRequest": {"provides":["private","tv.management","all"]}
+      "sendPrepareActiveStandbyAck": {"provides":["private","tv.management","all"]}
+      "registerPrepareSuspend": {"provides":["private","tv.management","all","public"]}
+      "powerOn": {"provides":["private","tv.management","all"]}
+      "registerPowerOffRequest": {"provides":["private","tv.management","all"]}
+      "sendPreparePowerOnAck": {"provides":["private","tv.management","all"]}
+      "turnOffScreen": {"provides":["private","tv.management","all"]}
+      "turnOnScreen": {"provides":["private","tv.management","all"]}
+      "registerPreparePowerOn": {"provides":["private","tv.management","all","public"]}
+      "registerSuspendRequest": {"provides":["private","tv.management","all"]}
+      "responseActiveStandbyRequest": {"provides":["private","tv.management","all"]}
+      "setScreenBlock": {"provides":["private","tv.management","all"]}
+      "responsePrepareActiveStandby": {"provides":["private","tv.management","all","public"]}
+      "getPowerOnReason": {"provides":["private","tv.management","all"]}
+      "responsePrepareSuspend": {"provides":["private","tv.management","all","public"]}
+      "powerOff": {"provides":["private","tv.management","all"]}
+      "test": {"provides":["private","all"]}
+      "reboot": {"provides":["private","tv.management","all"]}
+      "setPowerInitState": {"provides":["private","tv.management","all"]}
+      "setPowerOnReason": {"provides":["private","tv.management","all"]}
+      "registerPrepareResume": {"provides":["private","tv.management","all","public"]}
+      "responsePowerOffRequest": {"provides":["private","tv.management","all"]}
+      "responsePreparePowerOn": {"provides":["private","tv.management","all","public"]}
+      "turnOnScreenSaver": {"provides":["private","tv.management","all"]}
+      "responseScreenSaverRequest": {"provides":["private","tv.management","all","public"]}
+      "responsePrepareResume": {"provides":["private","tv.management","all","public"]}
+      "registerPreparePowerOff": {"provides":["private","tv.management","all","public"]}
+$ ls-monitor -i com.webos.audio
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.audio' WITH UNIQUE NAME 'VlpmLI2Q' AT HUB
+
+  "/media":
+      "status": {"provides":["private","settings.read","media","public","settings","all"]}
+      "getVolume": {"provides":["private","settings.read","media","settings","all"]}
+      "setVolume": {"provides":["private","media","public","all"]}
+      "offsetVolume": {"provides":["private","media","all"]}
+      "listScenarios": {"provides":["private","media","all"]}
+      "lockVolumeKeys": {"provides":["private","media","public","all"]}
+      "getLatency": {"provides":["private","settings.read","media","settings","all"]}
+      "offsetMicGain": {"provides":["private","media","all"]}
+      "setCurrentScenario": {"provides":["private","media","all"]}
+      "getMicGain": {"provides":["private","settings.read","media","settings","all"]}
+      "broadcastEvent": {"provides":["private","media","all"]}
+      "setLatency": {"provides":["private","media","all"]}
+      "setMicGain": {"provides":["private","media","all"]}
+      "enableScenario": {"provides":["private","media","all"]}
+      "disableScenario": {"provides":["private","media","all"]}
+      "getCurrentScenario": {"provides":["private","settings.read","media","settings","all"]}
+  "/timer":
+      "setTimerOn": {"provides":["all"]}
+      "getTimerOn": {"provides":["all"]}
+      "status": {"provides":["all"]}
+      "offsetVolume": {"provides":["all"]}
+      "setMuted": {"provides":["all"]}
+      "setVolume": {"provides":["all"]}
+      "getVolume": {"provides":["all"]}
+  "/tonegenerator":
+      "playCallertone": {"provides":["all"]}
+  "/alarm":
+      "setVolume": {"provides":["all"]}
+      "setAlarmOn": {"provides":["all"]}
+      "getAlarmOn": {"provides":["all"]}
+      "status": {"provides":["all"]}
+      "offsetVolume": {"provides":["all"]}
+      "getVolume": {"provides":["all"]}
+      "setMuted": {"provides":["all"]}
+  "/phone":
+      "bluetoothAudioPropertiesSet": {"provides":["private","media","all"]}
+      "status": {"provides":["private","media","all"]}
+      "getVolume": {"provides":["private","settings.read","media","settings","all"]}
+      "setVolume": {"provides":["private","media","all"]}
+      "hacSet": {"provides":["private","media","all"]}
+      "offsetVolume": {"provides":["private","media","all"]}
+      "CallStatusUpdate": {"provides":["private","media","all"]}
+      "listScenarios": {"provides":["private","media","all"]}
+      "lockVolumeKeys": {"provides":["private","media","all"]}
+      "setCurrentScenario": {"provides":["private","media","all"]}
+      "museSet": {"provides":["private","media","all"]}
+      "hacGet": {"provides":["private","media","all"]}
+      "setMuted": {"provides":["private","media","all"]}
+      "broadcastEvent": {"provides":["private","media","all"]}
+      "getCurrentScenario": {"provides":["private","settings.read","media","settings","all"]}
+      "enableScenario": {"provides":["private","media","all"]}
+      "disableScenario": {"provides":["private","media","all"]}
+  "/voiceCommand":
+      "status": {"provides":["all"]}
+      "getVolume": {"provides":["all"]}
+      "setVolume": {"provides":["all"]}
+      "offsetVolume": {"provides":["all"]}
+      "listScenarios": {"provides":["all"]}
+      "offsetMicGain": {"provides":["all"]}
+      "setCurrentScenario": {"provides":["all"]}
+      "getMicGain": {"provides":["all"]}
+      "broadcastEvent": {"provides":["all"]}
+      "getCurrentScenario": {"provides":["all"]}
+      "setMicGain": {"provides":["all"]}
+      "enableScenario": {"provides":["all"]}
+      "disableScenario": {"provides":["all"]}
+      "control": {"provides":["all"]}
+  "/notification":
+      "offsetVolume": {"provides":["all"]}
+      "getVolume": {"provides":["all"]}
+      "setVolume": {"provides":["all"]}
+      "status": {"provides":["all"]}
+  "/ringtone":
+      "lockVolumeKeys": {"provides":["private","media","all"]}
+      "status": {"provides":["private","settings.read","media","settings","all"]}
+      "offsetVolume": {"provides":["private","media","all"]}
+      "setMuted": {"provides":["private","media","all"]}
+      "setVolume": {"provides":["private","media","all"]}
+      "getVolume": {"provides":["private","settings.read","media","settings","all"]}
+  "/state":
+      "setNREC": {"provides":["all"]}
+      "volumeRamp": {"provides":["media","all"]}
+      "setSoundProfile": {"provides":["all"]}
+      "loadRTPModule": {"provides":["all"]}
+      "getVolumeBalance": {"provides":["all"]}
+      "get": {"provides":["private","settings.read","media","settings","all"]}
+      "getPreference": {"provides":["private","settings.read","media","settings","all"]}
+      "setVolumeBalance": {"provides":["all"]}
+      "unloadRTPModule": {"provides":["all"]}
+      "getSoundProfile": {"provides":["all"]}
+      "setPreference": {"provides":["private","media","all"]}
+      "loopback": {"provides":["all"]}
+      "set": {"provides":["private","media","all"]}
+      "getTouchSound": {"provides":["all"]}
+      "setRingerSwitch": {"provides":["all"]}
+      "setTouchSound": {"provides":["all"]}
+  "/state/pulse":
+      "suspend": {"provides":["private","media","all"]}
+      "sinkStatus": {"provides":["private","media","all"]}
+      "setFilter": {"provides":["private","media","all"]}
+  "/nav":
+      "status": {"provides":["private","settings.read","media","settings","all"]}
+  "/system":
+      "status": {"provides":["private","settings.read","media","settings","all"]}
+      "offsetVolume": {"provides":["private","media","all"]}
+      "setMuted": {"provides":["private","media","all"]}
+      "setVolume": {"provides":["private","media","all"]}
+      "getVolume": {"provides":["private","settings.read","media","settings","all"]}
+  "/dtmf":
+      "emergencyCall": {"provides":["all"]}
+      "busyTone": {"provides":["all"]}
+      "playDTMF": {"provides":["all"]}
+      "stopDTMF": {"provides":["all"]}
+      "playAlert": {"provides":["all"]}
+  "/vvm":
+      "status": {"provides":["all"]}
+      "getVolume": {"provides":["all"]}
+      "setVolume": {"provides":["all"]}
+      "offsetVolume": {"provides":["all"]}
+      "listScenarios": {"provides":["all"]}
+      "setCurrentScenario": {"provides":["all"]}
+      "broadcastEvent": {"provides":["all"]}
+      "getCurrentScenario": {"provides":["all"]}
+      "control": {"provides":["all"]}
+      "enableScenario": {"provides":["all"]}
+      "disableScenario": {"provides":["all"]}
+  "/":
+      "status": {"provides":["private","media","public","all"]}
+      "volumeKeeping": {"provides":["private","media","all"]}
+      "getVolume": {"provides":["private","settings.read","media","public","settings","all"]}
+      "setVolume": {"provides":["private","media","public","all"]}
+      "setVolume2": {"provides":["private","public","all"]}
+      "listScenarios": {"provides":["private","media","all"]}
+      "volumeUp": {"provides":["private","media","public","all"]}
+      "setCurrentScenario": {"provides":["private","media","all"]}
+      "getSoundOut": {"provides":["private","media","public","all"]}
+      "setMuted": {"provides":["private","media","public","all"]}
+      "broadcastEvent": {"provides":["private","media","all"]}
+      "getCurrentScenario": {"provides":["private","settings.read","media","settings","all"]}
+      "volumeDown": {"provides":["private","media","public","all"]}
+      "enableScenario": {"provides":["private","media","all"]}
+      "disableScenario": {"provides":["private","media","all"]}
+  "/vibrate":
+      "set": {"provides":["all"]}
+      "get": {"provides":["all"]}
+  "/systemsounds":
+      "playFeedback": {"provides":["private","media","public","all"]}
+  "/udev":
+      "event": {"provides":["all"]}
+  "/alert":
+      "status": {"provides":["all"]}
+      "offsetVolume": {"provides":["all"]}
+      "setMuted": {"provides":["all"]}
+      "setVolume": {"provides":["all"]}
+      "getVolume": {"provides":["all"]}
+$ ls-monitor -i com.webos.service.audio
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.audio' WITH UNIQUE NAME 'vCX1qx06' AT HUB
+
+  "/media":
+      "status": {"provides":["all","media"]}
+      "getVolume": {"provides":["all","media"]}
+      "setVolume": {"provides":["all","media"]}
+      "offsetVolume": {"provides":["all","media"]}
+      "listScenarios": {"provides":["all","media"]}
+      "lockVolumeKeys": {"provides":["all","media"]}
+      "getLatency": {"provides":["all","media"]}
+      "offsetMicGain": {"provides":["all","media"]}
+      "setCurrentScenario": {"provides":["all","media"]}
+      "getMicGain": {"provides":["all","media"]}
+      "broadcastEvent": {"provides":["all","media"]}
+      "setLatency": {"provides":["all","media"]}
+      "setMicGain": {"provides":["all","media"]}
+      "enableScenario": {"provides":["all","media"]}
+      "disableScenario": {"provides":["all","media"]}
+      "getCurrentScenario": {"provides":["all","media"]}
+  "/timer":
+      "setTimerOn": {"provides":["all","media"]}
+      "getTimerOn": {"provides":["all","media"]}
+      "status": {"provides":["all","media"]}
+      "offsetVolume": {"provides":["all","media"]}
+      "setMuted": {"provides":["all","media"]}
+      "setVolume": {"provides":["all","media"]}
+      "getVolume": {"provides":["all","media"]}
+  "/tonegenerator":
+      "playCallertone": {"provides":["all","media"]}
+  "/alarm":
+      "setVolume": {"provides":["all","media"]}
+      "setAlarmOn": {"provides":["all","media"]}
+      "getAlarmOn": {"provides":["all","media"]}
+      "status": {"provides":["all","media"]}
+      "offsetVolume": {"provides":["all","media"]}
+      "getVolume": {"provides":["all","media"]}
+      "setMuted": {"provides":["all","media"]}
+  "/phone":
+      "bluetoothAudioPropertiesSet": {"provides":["all","media"]}
+      "status": {"provides":["all","media"]}
+      "getVolume": {"provides":["all","media"]}
+      "setVolume": {"provides":["all","media"]}
+      "hacSet": {"provides":["all","media"]}
+      "offsetVolume": {"provides":["all","media"]}
+      "CallStatusUpdate": {"provides":["all","media"]}
+      "listScenarios": {"provides":["all","media"]}
+      "lockVolumeKeys": {"provides":["all","media"]}
+      "setCurrentScenario": {"provides":["all","media"]}
+      "museSet": {"provides":["all","media"]}
+      "hacGet": {"provides":["all","media"]}
+      "setMuted": {"provides":["all","media"]}
+      "broadcastEvent": {"provides":["all","media"]}
+      "getCurrentScenario": {"provides":["all","media"]}
+      "enableScenario": {"provides":["all","media"]}
+      "disableScenario": {"provides":["all","media"]}
+  "/voiceCommand":
+      "status": {"provides":["all","media"]}
+      "getVolume": {"provides":["all","media"]}
+      "setVolume": {"provides":["all","media"]}
+      "offsetVolume": {"provides":["all","media"]}
+      "listScenarios": {"provides":["all","media"]}
+      "offsetMicGain": {"provides":["all","media"]}
+      "setCurrentScenario": {"provides":["all","media"]}
+      "getMicGain": {"provides":["all","media"]}
+      "broadcastEvent": {"provides":["all","media"]}
+      "getCurrentScenario": {"provides":["all","media"]}
+      "setMicGain": {"provides":["all","media"]}
+      "enableScenario": {"provides":["all","media"]}
+      "disableScenario": {"provides":["all","media"]}
+      "control": {"provides":["all","media"]}
+  "/notification":
+      "offsetVolume": {"provides":["all","media"]}
+      "getVolume": {"provides":["all","media"]}
+      "setVolume": {"provides":["all","media"]}
+      "status": {"provides":["all","media"]}
+  "/ringtone":
+      "lockVolumeKeys": {"provides":["all","media"]}
+      "status": {"provides":["all","media"]}
+      "offsetVolume": {"provides":["all","media"]}
+      "setMuted": {"provides":["all","media"]}
+      "setVolume": {"provides":["all","media"]}
+      "getVolume": {"provides":["all","media"]}
+  "/state":
+      "setNREC": {"provides":["all","media"]}
+      "volumeRamp": {"provides":["all","media"]}
+      "setSoundProfile": {"provides":["all","media"]}
+      "loadRTPModule": {"provides":["all"]}
+      "getVolumeBalance": {"provides":["all","media"]}
+      "get": {"provides":["all","media"]}
+      "getPreference": {"provides":["all","media"]}
+      "setVolumeBalance": {"provides":["all","media"]}
+      "unloadRTPModule": {"provides":["all"]}
+      "getSoundProfile": {"provides":["all","media"]}
+      "setPreference": {"provides":["all","media"]}
+      "loopback": {"provides":["all","media"]}
+      "set": {"provides":["all","media"]}
+      "getTouchSound": {"provides":["all","media"]}
+      "setRingerSwitch": {"provides":["all","media"]}
+      "setTouchSound": {"provides":["all","media"]}
+  "/state/pulse":
+      "suspend": {"provides":["all","media"]}
+      "sinkStatus": {"provides":["all","media"]}
+      "setFilter": {"provides":["all","media"]}
+  "/nav":
+      "status": {"provides":["all","media"]}
+  "/system":
+      "status": {"provides":["all","media"]}
+      "offsetVolume": {"provides":["all","media"]}
+      "setMuted": {"provides":["all","media"]}
+      "setVolume": {"provides":["all","media"]}
+      "getVolume": {"provides":["all","media"]}
+  "/dtmf":
+      "emergencyCall": {"provides":["all","media"]}
+      "busyTone": {"provides":["all","media"]}
+      "playDTMF": {"provides":["all","media"]}
+      "stopDTMF": {"provides":["all","media"]}
+      "playAlert": {"provides":["all","media"]}
+  "/vvm":
+      "status": {"provides":["all","media"]}
+      "getVolume": {"provides":["all","media"]}
+      "setVolume": {"provides":["all","media"]}
+      "offsetVolume": {"provides":["all","media"]}
+      "listScenarios": {"provides":["all","media"]}
+      "setCurrentScenario": {"provides":["all","media"]}
+      "broadcastEvent": {"provides":["all","media"]}
+      "getCurrentScenario": {"provides":["all","media"]}
+      "control": {"provides":["all","media"]}
+      "enableScenario": {"provides":["all","media"]}
+      "disableScenario": {"provides":["all","media"]}
+  "/":
+      "status": {"provides":["all","media"]}
+      "volumeKeeping": {"provides":["all"]}
+      "getVolume": {"provides":["all","media"]}
+      "setVolume": {"provides":["all","media"]}
+      "setVolume2": {"provides":["all"]}
+      "listScenarios": {"provides":["all","media"]}
+      "volumeUp": {"provides":["all","media"]}
+      "setCurrentScenario": {"provides":["all","media"]}
+      "getSoundOut": {"provides":["all","media"]}
+      "setMuted": {"provides":["all","media"]}
+      "broadcastEvent": {"provides":["all","media"]}
+      "getCurrentScenario": {"provides":["all","media"]}
+      "volumeDown": {"provides":["all","media"]}
+      "enableScenario": {"provides":["all","media"]}
+      "disableScenario": {"provides":["all","media"]}
+  "/vibrate":
+      "set": {"provides":["all","media"]}
+      "get": {"provides":["all","media"]}
+  "/systemsounds":
+      "playFeedback": {"provides":["all","media"]}
+  "/udev":
+      "event": {"provides":["all","media"]}
+  "/alert":
+      "status": {"provides":["all","media"]}
+      "offsetVolume": {"provides":["all","media"]}
+      "setMuted": {"provides":["all","media"]}
+      "setVolume": {"provides":["all","media"]}
+      "getVolume": {"provides":["all","media"]}
+$ ls-monitor -i com.webos.applicationManager
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.applicationManager' WITH UNIQUE NAME 'yfVYaPYD' AT HUB
+
+  "/":
+      "getForegroundAppInfo": {"provides":["private","activities.callbacks","configurator.callbacks","all","applications.internal"]}
+      "moveLaunchPoint": {"provides":["private","all","applications.internal"]}
+      "listAllHandlersForMimeByVerb": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "getAppLifeEvents": {"provides":["private","all","applications.internal"]}
+      "listLaunchPoints": {"provides":["private","activities.callbacks","configurator.callbacks","all","applications.internal"]}
+      "listApps": {"provides":["private","activities.callbacks","configurator.callbacks","all","applications.internal"]}
+      "removeLaunchPoint": {"provides":["private","all","applications.internal"]}
+      "searchApps": {"provides":["private","all","applications.internal"]}
+      "registerVerbsForRedirect": {"provides":["private","all","applications.internal"]}
+      "lockApp": {"provides":["private","all","applications.internal"]}
+      "removeAllContents": {"provides":["private","all","applications.internal"]}
+      "closeByAppId": {"provides":["private","activities.callbacks","all","applications.internal"]}
+      "getAllContents": {"provides":["private","all","applications.internal"]}
+      "getAppBasePath": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "getAppLifeStatus": {"provides":["private","activities.callbacks","all","applications.internal"]}
+      "registerApp": {"provides":["private","applications","public","all","applications.internal"]}
+      "getAppInfo": {"provides":["private","all","applications.internal"]}
+      "changeRunningAppId": {"provides":["private","all","applications.internal"]}
+      "setContents": {"provides":["private","public","all","applications.internal"]}
+      "listAllHandlersForUrlPattern": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "running": {"provides":["private","activities.callbacks","all","applications.internal"]}
+      "launchVirtualApp": {"provides":["private","all","applications.internal"]}
+      "getContents": {"provides":["private","public","all","applications.internal"]}
+      "registerNativeApp": {"provides":["private","applications","public","all","applications.internal"]}
+      "getHandlerForUrlByVerb": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "getHandlerForMimeType": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "notifySplashTimeout": {"provides":["private","all","applications.internal"]}
+      "launchDefaultApp": {"provides":["private","applications","all","applications.launch","applications.internal"]}
+      "getAppStatus": {"provides":["private","configurator.callbacks","all","applications.internal"]}
+      "removeContent": {"provides":["private","all","applications.internal"]}
+      "launch": {"provides":["private","activities.callbacks","configurator.callbacks","applications","public","ares.webos.cli","all","applications.launch","applications.internal"]}
+      "addVirtualApp": {"provides":["private","all","applications.internal"]}
+      "mimeTypeForExtension": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "listAllHandlersForMime": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "registerVerbsForResource": {"provides":["private","all","applications.internal"]}
+      "getHandlerForUrl": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "getHandlerForMimeTypeByVerb": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "notifyAlertClosed": {"provides":["private","all","applications.internal"]}
+      "listAllHandlersForMultipleUrlPattern": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "listAllHandlersForUrlByVerb": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "removeVirtualApp": {"provides":["private","all","applications.internal"]}
+      "listExtensionMap": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "listAllHandlersForMultipleMime": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "setOrder": {"provides":["private","all","applications.internal"]}
+      "open": {"provides":["private","applications","public","all","applications.launch","applications.internal"]}
+      "updateLaunchPoint": {"provides":["private","all","applications.internal"]}
+      "getAppLoadStatus": {"provides":["private","public","all","applications.internal"]}
+      "pause": {"provides":["private","all","applications.internal"]}
+      "addLaunchPoint": {"provides":["private","all","applications.internal"]}
+      "listAllHandlersForUrl": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "closeAllApps": {"provides":["private","all","applications.internal"]}
+      "onLaunch": {"provides":["private","all","applications.internal"]}
+      "getHandlerForExtension": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "isPromotionalAppOn": {"provides":["private","applications","public","all","applications.internal"]}
+      "close": {"provides":["private","all","applications.internal"]}
+  "/dev":
+      "closeByAppId": {"provides":["ares.webos.cli","all"]}
+      "listApps": {"provides":["private","applications.dev","ares.webos.cli","all","applications.internal"]}
+      "running": {"provides":["private","applications.dev","ares.webos.cli","all","applications.internal"]}
+$ ls-monitor -i com.webos.settingsservice
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.settingsservice' WITH UNIQUE NAME 'YV10fxPk' AT HUB
+
+  "/":
+      "getCurrentSettings": {"provides":["private","settings.read","settings","all"]}
+      "resetSystemSettingDesc": {"provides":["private","settings","all"]}
+      "getSystemSettings": {"provides":["activities.callbacks","private","configurator.callbacks","settings.read","public","settings","all"]}
+      "setSystemSettingDesc": {"provides":["private","public","settings","all"]}
+      "setSystemSettingFactoryValue": {"provides":["private","settings","all"]}
+      "setSystemSettingFactoryDesc": {"provides":["private","public","settings","all"]}
+      "deleteSystemSettings": {"provides":["private","settings","all"]}
+      "batch": {"provides":["private","settings","all"]}
+      "getSystemSettingValues": {"provides":["private","settings.read","public","settings","all"]}
+      "setSystemSettingValues": {"provides":["private","settings","all"]}
+      "getSystemSettingFactoryValue": {"provides":["private","settings.read","public","settings","all"]}
+      "setSystemSettings": {"provides":["private","public","settings","all"]}
+      "getSystemSettingDesc": {"provides":["private","settings.read","public","settings","all"]}
+      "resetSystemSettings": {"provides":["private","settings","all"]}
+  "/internal":
+      "getCurrentSubscriptions": {"provides":["private","settings","all"]}
+      "instrument": {"provides":["private","settings","all"]}
+$ ls-monitor -i com.webos.service.ime
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.ime' WITH UNIQUE NAME 'tt7J2xfM' AT HUB
+
+  "/":
+      "insertText": {"provides":["all","private","devices"]}
+      "deleteCharacters": {"provides":["all","private","devices"]}
+      "registerRemoteKeyboard": {"provides":["all","private","devices"]}
+      "sendEnterKey": {"provides":["all","private","devices"]}
+$ ls-monitor -i com.webos.service.eim
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.eim' WITH UNIQUE NAME 'QEDb3LDg' AT HUB
+
+  "/":
+      "setDeviceInfo": {"provides":["private","all","public","devices"]}
+      "setLastInput": {"provides":["private","all"]}
+      "getAllInputStatus": {"provides":["private","all","public","devices"]}
+      "addDevice": {"provides":["private","all","public","devices"]}
+      "blockInputPopup": {"provides":["private","all","public"]}
+      "getConnectionStatus": {"provides":["private","all","public"]}
+      "getTotalDeviceList": {"provides":["private","all","public","devices"]}
+      "updateVirtualDevice": {"provides":["private","all","public"]}
+      "setChosenDevice": {"provides":["private","all","public","devices"]}
+      "getLastInput": {"provides":["private","all","public","devices"]}
+      "getInputStatus": {"provides":["private","all","public","devices"]}
+      "registerAppToBlockNoti": {"provides":["private","all","public","devices"]}
+      "getCurrentInput": {"provides":["private","all","public","devices"]}
+      "getDeviceInfo": {"provides":["private","all","public","devices"]}
+      "deleteDevice": {"provides":["private","all","public","devices"]}
+$ ls-monitor -i com.webos.service.tv.systemproperty
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.tv.systemproperty' WITH UNIQUE NAME 'ESFAlYji' AT HUB
+
+  "/":
+      "enableNpointWhiteBalance": {"provides":["private","tv.settings","all"]}
+      "flexGetPosition": {"provides":["private","all"]}
+      "setMSensorInfo": {"provides":["private","all"]}
+      "downloadEdid": {"provides":["private","tv.settings","all"]}
+      "getFanStatus": {"provides":["private","all"]}
+      "flexSaveMotorValue": {"provides":["private","all"]}
+      "getPgamma": {"provides":["private","tv.settings","all"]}
+      "flexGetMotorComp": {"provides":["private","all"]}
+      "getCountryGroupCount": {"provides":["private","tv.settings","all"]}
+      "getAdcCalibrationStatus": {"provides":["private","tv.settings","all"]}
+      "setAdcCalibrationValue": {"provides":["private","tv.settings","all"]}
+      "getPgammaCount": {"provides":["private","tv.settings","all"]}
+      "getAdcCalibrationModeList": {"provides":["private","tv.settings","all"]}
+      "getOLEDAplDiffThreshold": {"provides":["private","all"]}
+      "resetEdid": {"provides":["private","tv.settings","all"]}
+      "getNpointWhiteBalance": {"provides":["private","tv.settings","all"]}
+      "flexGetMotorRepeatCount": {"provides":["private","all"]}
+      "savePgamma": {"provides":["private","tv.settings","all"]}
+      "findInputMap": {"provides":["private","tv.settings","all"]}
+      "setTestPattern": {"provides":["private","tv.settings","all"]}
+      "setCurrentInputMap": {"provides":["private","tv.settings","all"]}
+      "resetNpointWhiteBalance": {"provides":["private","tv.settings","all"]}
+      "getSystemProperties": {"provides":["private","tv.settings","all"]}
+      "flexGetMotorValue": {"provides":["private","all"]}
+      "setPgamma": {"provides":["private","tv.settings","all"]}
+      "getHDMIErrorHistoryCount": {"provides":["private","all"]}
+      "getPowerOffReason": {"provides":["private","tv.settings","all"]}
+      "flexGetMotorAutoTest": {"provides":["private","all"]}
+      "setTwinTunerLNAControl": {"provides":["private","all"]}
+      "getProperties": {"provides":["activities.callbacks","private","tv.settings","configurator.callbacks","all"]}
+      "setOLEDAplDiffThreshold": {"provides":["private","all"]}
+      "getHDMIErrorHistory": {"provides":["private","all"]}
+      "startAdcCalibration": {"provides":["private","tv.settings","all"]}
+      "resetAdcCalibration": {"provides":["private","tv.settings","all"]}
+      "getPowerOffReasonCount": {"provides":["private","tv.settings","all"]}
+      "getMemoryUsage": {"provides":["private","tv.settings","all"]}
+      "setProperties": {"provides":["private","tv.settings","all"]}
+      "doUserDefault": {"provides":["private","tv.settings","all"]}
+      "resetPowerOffReason": {"provides":["private","tv.settings","all"]}
+      "getCurrentCountryGroup": {"provides":["private","tv.settings","public","all"]}
+      "flexGetAbnormalList": {"provides":["private","all"]}
+      "setUserInputMap": {"provides":["private","tv.settings","all"]}
+      "getMemoryReport": {"provides":["private","tv.settings","all"]}
+      "getAdcCalibrationValue": {"provides":["private","tv.settings","all"]}
+      "getTempSensorStatus": {"provides":["private","all"]}
+      "getInputMapInfo": {"provides":["private","tv.settings","all"]}
+      "getInputMap": {"provides":["private","tv.settings","all"]}
+      "setCountryGroup": {"provides":["private","tv.settings","all"]}
+      "flexSetMotorAutoTest": {"provides":["private","all"]}
+      "resetWhiteBalance": {"provides":["private","tv.settings","all"]}
+      "getTwinTunerLNAControl": {"provides":["private","all"]}
+      "getVcom": {"provides":["private","tv.settings","all"]}
+      "getMSensorInfo": {"provides":["private","all"]}
+      "getPgammaMode": {"provides":["private","tv.settings","all"]}
+      "setPgammaMode": {"provides":["private","tv.settings","all"]}
+      "setVcom": {"provides":["private","tv.settings","all"]}
+      "getEdidData": {"provides":["private","tv.settings","all"]}
+      "setWhiteBalance": {"provides":["private","tv.settings","all"]}
+      "getCountryGroup": {"provides":["private","tv.settings","all"]}
+      "flexSetMotorComp": {"provides":["private","all"]}
+      "getAdcCalibrationMode": {"provides":["private","tv.settings","all"]}
+      "flexSetStepMotor": {"provides":["private","all"]}
+      "resetVcom": {"provides":["private","all"]}
+      "flexMotorStatus": {"provides":["private","all"]}
+      "setWBDefaultMode": {"provides":["private","all"]}
+      "flexGetMotorSpeed": {"provides":["private","all"]}
+      "flexSetFakeInit": {"provides":["private","all"]}
+      "getWhiteBalance": {"provides":["private","tv.settings","all"]}
+      "doFactoryDefault": {"provides":["private","tv.settings","all"]}
+      "getMotionStatus": {"provides":["private","all"]}
+      "saveToolOptionValue": {"provides":["private","all"]}
+      "getCurrentInputMap": {"provides":["private","tv.settings","all"]}
+      "flexSetPosition": {"provides":["private","all"]}
+      "getEdidStatus": {"provides":["private","tv.settings","all"]}
+      "resetHDMIErrorHistory": {"provides":["private","all"]}
+      "setNpointWhiteBalance": {"provides":["private","tv.settings","all"]}
+      "getSystemInfo": {"provides":["private","tv.settings","public","all"]}
+$ ls-monitor -i com.webos.notification
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.notification' WITH UNIQUE NAME 'Qu4s4Mno' AT HUB
+
+  "/":
+      "getNotificationInfo": {"provides":["private","notifications","all","notifications.query"]}
+      "getNotification": {"provides":["private","notifications","all","notifications.query"]}
+      "closeAllAlerts": {"provides":["private","notifications","all"]}
+      "removeAllNotification": {"provides":["private","notifications","all"]}
+      "enable": {"provides":["private","notifications","all"]}
+      "closeInputAlert": {"provides":["private","notifications","all"]}
+      "createNotification": {"provides":["private","notifications.manage","notifications","all"]}
+      "removeNotification": {"provides":["private","notifications.manage","notifications","all"]}
+      "getToastNotification": {"provides":["private","notifications","all"]}
+      "createInputAlert": {"provides":["private","notifications","all"]}
+      "closePincodePrompt": {"provides":["private","notifications","all"]}
+      "getAlertNotification": {"provides":["private","notifications","all"]}
+      "disable": {"provides":["private","notifications","all"]}
+      "createPincodePrompt": {"provides":["private","public","notifications","all"]}
+      "closeAlert": {"provides":["private","public","notifications","all"]}
+      "createAlert": {"provides":["activities.callbacks","private","public","notifications","all"]}
+      "createSignageAlert": {"provides":["private","public","notifications","all"]}
+      "getInputAlertNotification": {"provides":["private","notifications","all"]}
+      "getPincodePromptNotification": {"provides":["private","notifications","all"]}
+      "closeToast": {"provides":["private","public","notifications","all"]}
+      "createToast": {"provides":["activities.callbacks","private","notifications.manage","public","notifications","all"]}
+$ ls-monitor -i com.webos.service.config
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.config' WITH UNIQUE NAME 'Nz0khlO3' AT HUB
+
+  "/com/webos/config":
+  "/":
+      "reloadConfigs": {"provides":["all"]}
+      "getConfigs": {"provides":["all","private","activities.callbacks","settings","public"]}
+      "setConfigs": {"provides":["all","private","activities.callbacks","settings"]}
+      "dump": {"provides":["all","private","settings","public"]}
+      "fullDump": {"provides":["all","private","settings","public"]}
+      "reconfigure": {"provides":["all","private","settings","public"]}
+$ ls-monitor -i com.webos.service.connectionmanager
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.connectionmanager' WITH UNIQUE NAME 'ZKtRF0jt' AT HUB
+
+  "/":
+      "checkinternetstatus": {"provides":["private","networking","networking.internal","networking.query","all"]}
+      "getUserStatus": {"provides":["activities.callbacks","private","networking","public","networking.internal","networking.query","all"]}
+      "monitorActivity": {"provides":["private","networking","public","networking.internal","networking.query","all"]}
+      "setipv4": {"provides":["private","networking","networking.internal","all"]}
+      "setipv6": {"provides":["private","networking","networking.internal","all"]}
+      "getStatus": {"provides":["private","networking","public","networking.internal","networking.query","all"]}
+      "getstatus": {"provides":["activities.callbacks","private","configurator.callbacks","networking","public","networking.internal","networking.query","all"]}
+      "setstate": {"provides":["private","networking","networking.internal","all"]}
+      "setEthernetTethering": {"provides":["private","networking","networking.internal","all"]}
+      "setdns": {"provides":["private","networking","networking.internal","all"]}
+      "setProxy": {"provides":["private","networking","networking.internal","all"]}
+      "findProxyForURL": {"provides":["private","networking","public","networking.internal","networking.query","all"]}
+      "getinfo": {"provides":["private","networking","public","networking.internal","networking.query","all"]}
+      "setTechnologyState": {"provides":["private","networking","networking.internal","all"]}
+  "/tv":
+      "setWolWowlStatus": {"provides":["private","networking","networking.internal","all"]}
+      "createVirtualLan": {"provides":["all"]}
+      "getWolWowlStatus": {"provides":["private","networking","networking.internal","all"]}
+      "setExternalWanStatus": {"provides":["all"]}
+
+-- registered services with input, rcu, key or remote in the name
+$ ls-monitor -i com.webos.app.quickinputpicker
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.app.quickinputpicker' WITH UNIQUE NAME 'fbhihMZc' AT HUB
+
+$ ls-monitor -i com.webos.keyfilter.magicnumber
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.keyfilter.magicnumber' WITH UNIQUE NAME 'NDVAcAfm' AT HUB
+
+  "/":
+      "notifyChannelToRegister": {"provides":["private","all"]}
+$ ls-monitor -i com.webos.service.mrcu
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.mrcu' WITH UNIQUE NAME 'BEgQ7rYF' AT HUB
+
+  "/sensor":
+      "setCursorBounds": {"provides":["private","all"]}
+      "resetQuaternion": {"provides":["private","all","devices","public"]}
+      "getSensorData": {"provides":["private","all","devices","public"]}
+  "/cursor":
+      "setAutoAlign": {"provides":["private","all","devices","public"]}
+      "setSlideMode": {"provides":["private","all","devices","public"]}
+      "setSensitivity": {"provides":["private","all","devices"]}
+      "setPosition": {"provides":["private","all","devices","public"]}
+      "setWakeUpCondition": {"provides":["private","all","devices","public"]}
+  "/":
+      "enableDualPairing": {"provides":["private","all","devices","public"]}
+      "subscribeRfStatus": {"provides":["private","all","devices"]}
+      "reset": {"provides":["private","all"]}
+      "getDataDelivery": {"provides":["private","all"]}
+      "getTraceLogStatus": {"provides":["private","all"]}
+      "enableAudioSinkMode": {"provides":["private","all"]}
+      "enableLoggingMotion": {"provides":["private","all"]}
+      "createToast": {"provides":["private","all","devices"]}
+      "getMrcuCmdHistory": {"provides":["private","all"]}
+      "printBtLog": {"provides":["private","all"]}
+      "getConnectionStatus": {"provides":["private","all"]}
+      "getPairingStatus": {"provides":["private","all","devices"]}
+      "getPairingHistory": {"provides":["private","all"]}
+      "startFirmwareUpdate": {"provides":["private","all","devices"]}
+      "getBtServiceAvailable": {"provides":["private","all"]}
+      "createAlert": {"provides":["private","all","devices"]}
+      "enablePrintRfStatus": {"provides":["private","all","devices","public"]}
+      "getDeviceInfo": {"provides":["private","all","devices"]}
+      "isExistDbFile": {"provides":["private","all"]}
+      "activateMotionSensor": {"provides":["private","all"]}
+      "startPairing": {"provides":["private","all","devices"]}
+      "getButtonHistory": {"provides":["private","all"]}
+      "setPairingHistoryKeyCode": {"provides":["private","all"]}
+      "setSleepMode": {"provides":["private","all"]}
+      "setHotkeyCursorPolicy": {"provides":["private","all"]}
+      "getPairingHistoryCount": {"provides":["private","all"]}
+      "isPaired": {"provides":["private","all","devices"]}
+      "getMotionEngineStatus": {"provides":["private","all"]}
+      "activateMrcu": {"provides":["private","all","devices"]}
+      "getCursorHistory": {"provides":["private","all"]}
+      "getDoingOtaStatus": {"provides":["private","all"]}
+      "enableMotionHistory": {"provides":["private","all"]}
+  "/ir":
+      "getUeiCmdResponse": {"provides":["private","all"]}
+      "sendUeiIrCmd": {"provides":["private","all"]}
+      "getCurrentSavedCodeSetId": {"provides":["private","all"]}
+      "requestUeiCodeSetId": {"provides":["private","all"]}
+      "requestUeiPrimaryCodeSetId": {"provides":["private","all"]}
+      "getIrCableConnection": {"provides":["private","all"]}
+  "/voice":
+  "/hid":
+      "disconnect": {"provides":["private","all"]}
+      "connect": {"provides":["private","all"]}
+      "subscribeDevicesStatus": {"provides":["private","all"]}
+$ ls-monitor -i com.webos.service.tv.keymanager
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.tv.keymanager' WITH UNIQUE NAME '4jvBvX6f' AT HUB
+
+  "/":
+      "createKeyboardEvent": {"provides":["all","private","tv.services"]}
+      "listInterestingEvents": {"provides":["all","private","tv.services"]}
+      "createKeyEvent": {"provides":["all","private","tv.services","public"]}
+      "createMouseEvent": {"provides":["all","private","tv.services"]}
+$ ls-monitor -i com.webos.service.tv.legacyinput
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.tv.legacyinput' WITH UNIQUE NAME 'inAoR8wo' AT HUB
+
+  "/":
+      "createKeyEvent": {"provides":["all","private","tv.services"]}
+$ ls-monitor -i com.webos.service.voiceinput
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.voiceinput' WITH UNIQUE NAME 'UPdgqtb5' AT HUB
+
+  "/":
+      "getDevices": {"provides":["all","private"]}
+      "startStreaming": {"provides":["all","private"]}
+      "restartTimer": {"provides":["all","private"]}
+      "stopStreaming": {"provides":["all","private"]}
+      "respondEvent": {"provides":["all","private"]}
+$ ls-monitor -i com.webos.starfish.keyfilters
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.starfish.keyfilters' WITH UNIQUE NAME 'mQUMp0ZV' AT HUB
+
+
+-- read-only calls (get and list methods only)
+$ luna com.webos.service.tv.systemproperty/getSystemInfo {"keys":["modelName","firmwareVersion","sdkVersion"]}
+{
+    "modelName": "OLED55B9PUA",
+    "firmwareVersion": "05.50.00",
+    "returnValue": true,
+    "sdkVersion": "4.10.0"
+}
+$ luna com.webos.service.tvpower/power/getPowerState {}
+{
+    "state": "Screen Saver",
+    "returnValue": true
+}
+$ luna com.webos.audio/getStatus {}
+{
+    "errorCode": -1,
+    "returnValue": false,
+    "errorText": "Unknown method \"getStatus\" for category \"/\""
+}
+$ luna com.webos.audio/getVolume {}
+{
+    "scenario": "mastervolume_tv_speaker_ext",
+    "muted": false,
+    "volume": 6,
+    "returnValue": true
+}
+$ luna com.webos.service.audio/master/getVolume {}
+{
+    "errorCode": -1,
+    "returnValue": false,
+    "errorText": "Unknown method \"getVolume\" for category \"/master\""
+}
+$ luna com.webos.applicationManager/getForegroundAppInfo {}
+{
+    "appId": "io.github.sunnyside007.lumen.shell",
+    "returnValue": true,
+    "windowId": "",
+    "processId": "<redacted>"
+}
+$ luna com.webos.service.eim/getAllInputStatus {}
+{
+    "arcDevicePower": 1,
+    "returnValue": true,
+    "arcDevice": false,
+    "devices": [
+        {
+            "connected": false,
+            "subCount": 0,
+            "iconPrefix": "/usr/palm/plugins/inputapps/assets/small/",
+            "subList": [
+            ],
+            "id": "AV_1",
+            "port": 1,
+            "modified": false,
+            "appId": "com.webos.app.externalinput.av1",
+            "label": "AV",
+            "activate": false,
+            "icon": "av.png",
+            "chosen": false
+        },
+        {
+            "connected": true,
+            "subCount": 0,
+            "iconPrefix": "/usr/palm/plugins/inputapps/assets/small/",
+            "subList": [
+            ],
+            "lastUniqueId": 255,
+            "id": "HDMI_1",
+            "port": 1,
+            "modified": true,
+            "appId": "com.webos.app.hdmi1",
+            "label": "PC",
+            "activate": false,
+            "icon": "pc.png",
+            "chosen": false,
+            "dongleConnected": false,
+            "hdmiPlugIn": false
+        },
+        {
+            "connected": true,
+            "subCount": 1,
+            "iconPrefix": "/usr/palm/plugins/inputapps/assets/small/",
+            "subList": [
+                {
+                    "settopCode": "incomplete",
+                    "ossSetupStatus": "complete",
+                    "connectedInput": "ARC",
+                    "id": "URCU",
+                    "serviceType": "audio",
+                    "brandName": "Samsung",
+                    "settopOption": "",
+                    "codeset": "M4011",
+                    "serviceName": "",
+                    "isMainSTB": false,
+                    "serviceArea": "",
+                    "labelName": "Samsung",
+                    "detectedMethod": "auto_lookup"
+                }
+            ],
+            "lastUniqueId": 255,
+            "id": "HDMI_2",
+            "port": 2,
+            "modified": true,
+            "appId": "com.webos.app.hdmi2",
+            "label": "Home Theater",
+            "activate": false,
+            "icon": "hometheater.png",
+            "chosen": false,
+            "dongleConnected": false,
+            "hdmiPlugIn": true
+        },
+        {
+            "connected": true,
+            "subCount": 1,
+            "iconPrefix": "/usr/palm/plugins/inputapps/assets/small/",
+            "subList": [
+                {
+                    "cecpDevType": 4,
+                    "uniqueId": 4,
+                    "depth": 1,
+                    "id": "SIMPLINK",
+                    "physicalAddress": 12288,
+                    "vendorId": 6673,
+                    "portId": 3,
+                    "osdName": "Bedroom TV",
+                    "cecpNewType": 9
+                }
+            ],
+            "lastUniqueId": 255,
+            "id": "HDMI_3",
+            "port": 3,
+            "modified": true,
+            "appId": "com.webos.app.hdmi3",
+            "label": "Google Streamer ",
+            "activate": true,
+            "icon": "streamingbox.png",
+            "chosen": false,
+            "dongleConnected": false,
+            "hdmiPlugIn": true
+        },
+        {
+            "connected": true,
+            "subCount": 0,
+            "iconPrefix": "/usr/palm/plugins/inputapps/assets/small/",
+            "subList": [
+            ],
+            "lastUniqueId": 255,
+            "id": "HDMI_4",
+            "port": 4,
+            "modified": false,
+            "appId": "com.webos.app.hdmi4",
+            "label": "HDMI 4",
+            "activate": false,
+            "icon": "HDMI_4.png",
+            "chosen": false,
+            "dongleConnected": false,
+            "hdmiPlugIn": false
+        }
+    ],
+    "blockedAllInput": false,
+    "totalCount": 5,
+    "unknownCECPNumber": 0,
+    "atmosDevice": false
+}
+$ luna com.webos.service.connectionmanager/getstatus {}
+{
+    "cellular": {
+        "enabled": false
+    },
+    "returnValue": true,
+    "offlineMode": "disabled",
+    "wired": {
+        "plugged": false,
+        "state": "disconnected"
+    },
+    "wifi": {
+        "netmask": "255.255.255.0",
+        "dns1": "<lan-ip>",
+        "ipAddress": "<redacted>",
+        "proxyinfo": {
+            "method": "direct"
+        },
+        "isWakeOnWifiEnabled": false,
+        "onInternet": "yes",
+        "method": "dhcp",
+        "ssid": "<redacted>",
+        "displayName": "<redacted>",
+        "state": "connected",
+        "gateway": "<lan-ip>",
+        "checkingInternet": false,
+        "interfaceName": "wlan0"
+    },
+    "subscribed": false,
+    "bluetooth": {
+        "tetheringEnabled": false,
+        "state": "disconnected"
+    },
+    "wan": {
+        "connected": false,
+        "connectedContexts": [
+        ]
+    },
+    "wifiDirect": {
+        "state": "disconnected"
+    },
+    "isInternetConnectionAvailable": true
+}
+$ luna com.webos.settingsservice/getSystemSettings {"category":"picture"}
+{
+    "dimension": {
+        "pictureMode": "hdrEffect",
+        "input": "default",
+        "_3dStatus": "2d",
+        "dynamicRange": "sdr"
+    },
+    "subscribed": false,
+    "category": "picture",
+    "method": "getSystemSettings",
+    "settings": {
+        "colorManagementLuminanceMagenta": "0",
+        "colorManagementSaturationYellow": "0",
+        "keyListForCopyCms": [
+            "colorManagementSaturationRed",
+            "colorManagementSaturationGreen",
+            "colorManagementSaturationBlue",
+            "colorManagementSaturationCyan",
+            "colorManagementSaturationMagenta",
+            "colorManagementSaturationYellow",
+            "colorManagementHueRed",
+            "colorManagementHueGreen",
+            "colorManagementHueBlue",
+            "colorManagementHueCyan",
+            "colorManagementHueMagenta",
+            "colorManagementHueYellow",
+            "colorManagementLuminanceRed",
+            "colorManagementLuminanceGreen",
+            "colorManagementLuminanceBlue",
+            "colorManagementLuminanceCyan",
+            "colorManagementLuminanceMagenta",
+            "colorManagementLuminanceYellow"
+        ],
+        "pictureMode": "hdrEffect",
+        "hSharpness": "10",
+        "inputListForCopyWb": [
+            "dtv",
+            "atv",
+            "av1",
+            "av2",
+            "comp1",
+            "comp2",
+            "hdmi1",
+            "hdmi2",
+            "hdmi3",
+            "hdmi4",
+            "hdmi1_pc",
+            "hdmi2_pc",
+            "hdmi3_pc",
+            "hdmi4_pc",
+            "movie",
+            "photo",
+            "default",
+            "smhl",
+            "ip"
+        ],
+        "colorManagementSaturationGreen": "0",
+        "colorManagementLuminanceCyan": "0",
+        "colorManagementLuminanceBlue": "0",
+        "aiPictureReset": "on",
+        "energySavingModified": "true",
+        "aspectRatioHdmiCinema": "just_scan",
+        "whiteBalanceRedOffset": "0",
+        "oledPanelSettings": "off",
+        "colorTemperature": "-50",
+        "hPosition": "0",
+        "avMode": "off",
+        "doNotShowAbcNotification": "false",
+        "expertPattern": "off",
+        "cinemaVPosition": "0",
+        "colorGamut": "auto",
+        "keyListForCopyPsm": [
+            "backlight",
+            "contrast",
+            "brightness",
+            "sharpness",
+            "color",
+            "tint",
+            "colorTemperature"
+        ],
+        "vSize": "0",
+        "whiteBalanceRed": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "noiseReduction": "low",
+        "whiteBalanceColorTemperature": "warm2",
+        "hSize": "0",
+        "whiteBalanceApplyAllInputs": "off",
+        "captionZoomVPosition": "0",
+        "RGBWDotPatternOnOff": "off",
+        "colorManagementHueCyan": "0",
+        "colorManagementHueBlue": "0",
+        "pcMode": {
+            "hdmi2": false,
+            "hdmi3": false,
+            "hdmi4": false,
+            "hdmi1": true
+        },
+        "edgeEnhancer": "on",
+        "xvycc": "auto",
+        "hdrEffect": "off",
+        "whiteBalanceRedGain": "0",
+        "motionPro": "off",
+        "whiteBalanceGreen": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "whiteBalanceCodeValue": "21",
+        "adjustingLuminance10pt": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "dynamicColor": "off",
+        "colorManagementLuminanceGreen": "0",
+        "whiteBalanceIre10pt": "100",
+        "erpUserConfirm": false,
+        "whiteBalanceGreenOffset": "0",
+        "whiteBalanceBlueGain": "0",
+        "colorManagementSaturationMagenta": "0",
+        "whiteBalancePoint": "high",
+        "colorManagementColorSystem": "red",
+        "RGBWDotPatternMax": 223,
+        "truMotionBlur": "10",
+        "aspectRatio": "16x9",
+        "RGBWDotPatternMin": 31,
+        "truMotionJudder": 10,
+        "energySaving": "off",
+        "aspectRatioActive": "true",
+        "colorManagementLuminanceRed": "0",
+        "colorManagementSaturationRed": "0",
+        "wb22PointsGammaValue": {
+            "high1": [
+                0.000143,
+                0.000754,
+                0.001996,
+                0.003981,
+                0.010535,
+                0.021012,
+                0.035897,
+                0.055602,
+                0.080494,
+                0.110903,
+                0.147133,
+                0.189465,
+                0.238161,
+                0.29347,
+                0.355625,
+                0.42485,
+                0.501357,
+                0.58535,
+                0.677026,
+                0.776573,
+                0.884172,
+                1
+            ],
+            "high2": [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1
+            ],
+            "low": [
+                0.000904,
+                0.003373,
+                0.007288,
+                0.012589,
+                0.0272,
+                0.046985,
+                0.071794,
+                0.101515,
+                0.13606,
+                0.175353,
+                0.219333,
+                0.267943,
+                0.321136,
+                0.378868,
+                0.441098,
+                0.507792,
+                0.578917,
+                0.654442,
+                0.734338,
+                0.818579,
+                0.907141,
+                1
+            ],
+            "medium": [
+                0.000299,
+                0.001373,
+                0.003351,
+                0.00631,
+                0.015396,
+                0.028991,
+                0.047366,
+                0.07074,
+                0.0993,
+                0.133209,
+                0.172611,
+                0.217638,
+                0.26841,
+                0.325037,
+                0.387623,
+                0.456263,
+                0.531049,
+                0.612066,
+                0.699394,
+                0.79311,
+                0.893289,
+                1
+            ]
+        },
+        "skinColor": 0,
+        "colorManagementSaturationCyan": "0",
+        "whiteBalanceGreenGain": "0",
+        "colorManagementSaturationBlue": "0",
+        "captionZoomRatio": "0",
+        "isfMode": {
+            "expert2": "none",
+            "expert1": "none"
+        },
+        "vPosition": "0",
+        "mediaZoomRatio": "0",
+        "gamma": "medium",
+        "colorFilter": "off",
+        "localDimming": "high",
+        "hdrDynamicToneMapping": "on",
+        "motionProOLED": "off",
+        "pictureTempKey": "off",
+        "colorManagementHueGreen": "0",
+        "skyColor": "0",
+        "inputListForCopyCms": [
+            "dtv",
+            "atv",
+            "av1",
+            "av2",
+            "comp1",
+            "comp2",
+            "hdmi1",
+            "hdmi2",
+            "hdmi3",
+            "hdmi4",
+            "movie",
+            "photo",
+            "default",
+            "smhl",
+            "ip"
+        ],
+        "doNotShowMecNotification": "false",
+        "colorManagementHueRed": "0",
+        "colorManagementHueMagenta": "0",
+        "psmListForExpert": [
+            "expert1",
+            "expert2",
+            "cinema",
+            "photo",
+            "hdrExternal",
+            "hdrCinema",
+            "dolbyHdrCinema",
+            "dolbyHdrDarkAmazon",
+            "dolbyHdrCinemaBright",
+            "technicolorHdrCinema",
+            "technicolor",
+            "hdrTechnicolor",
+            "technicolorHdrTechnicolor",
+            "game",
+            "hdrGame",
+            "dolbyHdrGame",
+            "technicolorHdrGame"
+        ],
+        "wssZoomVPosition": "0",
+        "whiteBalanceCodeValue10pt": "9",
+        "whiteBalanceActive": "true",
+        "peakBrightness": "off",
+        "vSharpness": "10",
+        "tint": "0",
+        "backlight": "100",
+        "whiteBalanceBlueOffset": "0",
+        "ambientLightCompensation": "off",
+        "mpegNoiseReduction": "low",
+        "motionEyeCare": "off",
+        "zoomVPosition": "0",
+        "sharpness": "20",
+        "pictureModeSettingsActive": "true",
+        "realCinema": "on",
+        "aspectRatioTv": "16x9",
+        "whiteBalanceLuminance": "130",
+        "contrast": "100",
+        "blackLevel": {
+            "palm": "auto",
+            "paln": "auto",
+            "ntsc": "auto",
+            "pal60": "auto",
+            "secam": "auto",
+            "unknown": "auto",
+            "ntsc443": "auto",
+            "pal": "auto"
+        },
+        "colorManagementLuminanceYellow": "0",
+        "zoomRatio": "0",
+        "wb10PointsGammaValue": {
+            "high1": [
+                0.003981,
+                0.021012,
+                0.055602,
+                0.110903,
+                0.189465,
+                0.29347,
+                0.42485,
+                0.58535,
+                0.776573,
+                1
+            ],
+            "high2": [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1
+            ],
+            "low": [
+                0.012589,
+                0.046985,
+                0.101515,
+                0.175353,
+                0.267943,
+                0.378868,
+                0.507792,
+                0.654442,
+                0.818579,
+                1
+            ],
+            "medium": [
+                0.00631,
+                0.028991,
+                0.07074,
+                0.133209,
+                0.217638,
+                0.325037,
+                0.456263,
+                0.612066,
+                0.79311,
+                1
+            ]
+        },
+        "externalPqlDbType": "none",
+        "whiteBalanceMethod": "2",
+        "whiteBalancePattern": "outer",
+        "mediaZoomVPosition": "0",
+        "inputListForCopyPsm": [
+            "dtv",
+            "atv",
+            "av1",
+            "av2",
+            "comp1",
+            "comp2",
+            "hdmi1",
+            "hdmi2",
+            "hdmi3",
+            "hdmi4",
+            "movie",
+            "photo",
+            "default",
+            "smhl",
+            "ip"
+        ],
+        "keyListForCopyWb": [
+            "whiteBalanceMethod",
+            "whiteBalancePoint",
+            "whiteBalanceRedGain",
+            "whiteBalanceGreenGain",
+            "whiteBalanceBlueGain",
+            "whiteBalanceRedOffset",
+            "whiteBalanceGreenOffset",
+            "whiteBalanceBlueOffset",
+            "whiteBalanceCodeValue",
+            "whiteBalanceIre",
+            "whiteBalanceLuminance",
+            "whiteBalanceRed",
+            "whiteBalanceGreen",
+            "whiteBalanceBlue",
+            "adjustingLuminance",
+            "whiteBalanceCodeValue10pt",
+            "whiteBalanceIre10pt",
+            "whiteBalanceRed10pt",
+            "whiteBalanceGreen10pt",
+            "whiteBalanceBlue10pt",
+            "adjustingLuminance10pt"
+        ],
+        "adjustingLuminance": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "colorManagementHueYellow": "0",
+        "brightness": "50",
+        "screenShift": "on",
+        "eyeComfortMode": "off",
+        "color": "50",
+        "whiteBalanceRed10pt": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "aiPicture": "on",
+        "grassColor": "0",
+        "whiteBalanceBlue": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "smoothGradation": "low",
+        "logoLuminanceAdjust": "light",
+        "whiteBalanceIre": "100",
+        "superResolution": "high",
+        "whiteBalanceBlue10pt": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "pictureSettingModified": {
+            "hdrCinema": false,
+            "technicolorHdrTechnicolor": false,
+            "technicolorHdrStandard": false,
+            "sports": false,
+            "bright": false,
+            "game": false,
+            "eyeq": false,
+            "dolbyHdrVivid": false,
+            "movie": false,
+            "eco": false,
+            "dolbyHdrStandard": true,
+            "hdrCinemaBright": true,
+            "natural": false,
+            "hdrVivid": false,
+            "hdrTechnicolor": false,
+            "cinema": false,
+            "hdrStandard": false,
+            "dolbyHdrCinemaBright": true,
+            "vivid": false,
+            "expert1": true,
+            "expert2": true,
+            "normal": true,
+            "technicolorHdrGame": false,
+            "hdrGame": true,
+            "tecnicolorHdrVivid": false,
+            "hdrEffect": true,
+            "technicolorHdrCinemaBright": false,
+            "technicolor": false,
+            "technicolorHdrCinema": false,
+            "dolbyHdrGame": false,
+            "dolbyHdrCinema": false,
+            "aps": false
+        },
+        "_14_9VPosition": "0",
+        "pictureControlLimitation": "false",
+        "dynamicContrast": "off",
+        "whiteBalanceGreen10pt": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "cinemaZoomRatio": "0"
+    },
+    "returnValue": true
+}
+$ luna com.webos.settingsservice/getSystemSettings {"category":"sound"}
+{
+    "dimension": {
+        "input": "default"
+    },
+    "subscribed": false,
+    "category": "sound",
+    "method": "getSystemSettings",
+    "settings": {
+        "avSyncSpeaker": "0",
+        "sound": "on",
+        "slidingSpeaker": "openPowerOn",
+        "soundOptimizer": "normal",
+        "soundOutputDigital": "pcm",
+        "avSync": "off",
+        "analogOut": "headphone",
+        "startupSound": "on",
+        "userEqualizer": "off",
+        "btDotAutoScan": "on",
+        "_3dSoundZooming": "off",
+        "avSyncWisa": "0",
+        "digitalAudioPriority": "auto",
+        "volumeControl": "medium",
+        "coSoundOutputState": "off",
+        "btDotSignalStrength": "high",
+        "magicSpaceSound": "standard",
+        "soundEffect": "on",
+        "supportATMOS": "on",
+        "coSoundOutput": "off",
+        "avSyncBypass": "off",
+        "smartSoundMode": "off",
+        "eArcSupport": "on",
+        "audioLanguageSecond": "spa",
+        "audioLanguageFirst": "eng",
+        "inputAudioFormatHDMI2": "bitstream",
+        "hdmiArcMode": "off",
+        "inputAudioFormatHDMI4": "bitstream",
+        "virtualSurround": "on",
+        "soundModeModified": "true",
+        "audioBalance": 0,
+        "inputAudioFormatHDMI3": "bitstream",
+        "inputAudioFormatHDMI1": "bitstream",
+        "autoVolume": "off",
+        "soundMode": "standard",
+        "magicSoundModified": "true",
+        "avSyncBypassInput": "off",
+        "slidingSpeakerMelody": "on",
+        "lgSoundSync": "off",
+        "soundOutput": "tv_external_speaker",
+        "audioDescription": "off",
+        "soundOutputs": [
+            "tv_speaker"
+        ],
+        "btSpeakerMode": "off",
+        "clearVoice": "off",
+        "userEqualizerValues": [
+            0,
+            0,
+            0,
+            0,
+            0
+        ],
+        "avSyncSpdif": "0",
+        "aiSound": "off",
+        "volumeStep": 3,
+        "tvPowerSound": "off",
+        "wooferLevel": "10",
+        "visualImpaired": "off",
+        "magicSoundTime": 1749350343,
+        "audioDescriptionVolume": "10",
+        "wisaSpeakerChannelType": "5.1"
+    },
+    "returnValue": true
+}
+$ luna com.webos.settingsservice/getSystemSettings {"category":"option"}
+{
+    "subscribed": false,
+    "category": "option",
+    "method": "getSystemSettings",
+    "settings": {
+        "enabling3dSettingsMenu": "off",
+        "avatar": "off",
+        "storeLogo": "0",
+        "phlCitySelection": "0",
+        "appUpdateMode": "auto",
+        "focusedItemEnlarged": "off",
+        "livePlus": "off",
+        "pstreamerUser": "off",
+        "usbBuiltInVideo": "on",
+        "demoMode": "on",
+        "modeSelectFlag": "off",
+        "storeModeVideo": "off",
+        "audioGuidancePitch": "medium",
+        "ibb": "off",
+        "enableIpControl": "off",
+        "miracastOverlayAdRecovery": "off",
+        "promotionPeriodStart": "0",
+        "additionalAudioSelection": "none",
+        "curDemoFile": "undefined",
+        "estreamerMinimalMode": "off",
+        "standByLight": "off",
+        "speakToTv": "off",
+        "helpOnSettings": "on",
+        "channelplus": "on",
+        "logoLight": "off",
+        "hddEcoMode": "on",
+        "IPControlSecureKey": "",
+        "ohtv": "on",
+        "enableToastPopup": "on",
+        "virtualSetTop": "off",
+        "freeviewplay": "off",
+        "demoFileList": "undefined",
+        "pointerSpeed": "fast",
+        "setId": 1,
+        "_3dModeEstreamer": "off",
+        "password_ipcontrol": "<redacted>",
+        "interactivity": "off",
+        "dataService": "mheg",
+        "supplementaryAudio": "off",
+        "hbbTvDnt": "off",
+        "promotionStreamer": "off",
+        "firstTvSignalStatus": "none",
+        "japanCitySelection": "Tokyo",
+        "hbbTV": "off",
+        "freeviewMode": "off",
+        "irBlaster": "off",
+        "magicNumHelpShow": true,
+        "eStreamerPosition": "all",
+        "teletextLanguageFirst": "eng",
+        "menuTransparency": "on",
+        "subdivisionCodeOfServiceCountry": "",
+        "promotionOriginEnd": "undefined",
+        "searchAppTTS": "off",
+        "webOSPromotionVideo": "on",
+        "channelplusPopup": "off",
+        "backupPsm": {
+            "backupPsm2d": "hdrStandard",
+            "backupPsm3d": "hdrStandard"
+        },
+        "syncModeTvCondition": "none",
+        "orbit": "off",
+        "autoSmartServiceCountry": "on",
+        "inputDevicesSupportStatus": {
+            "keyboard": true,
+            "motionSensor": true,
+            "pointer": true,
+            "voice": true,
+            "touch": true
+        },
+        "googleAssistantTTS": "on",
+        "hbbTvDeviceId": "<redacted>",
+        "quickStartMode": "off",
+        "epgPipMode": "off",
+        "audioGuidance": "off",
+        "cicNumber": [
+            {
+                "number": "none",
+                "country": "default",
+                "shortName": "default",
+                "_id": "361977"
+            }
+        ],
+        "ibbDnt": "off",
+        "broadcastInfoNoti": "off",
+        "appInstallDevice": {
+            "deviceId": "<redacted>",
+            "driveId": ""
+        },
+        "turnOnByVoice": "off",
+        "countryRegion": "other",
+        "smartServiceCountryCode2": "US",
+        "smartServiceCountryCode3": "USA",
+        "storeHDR": "on",
+        "teletextLanguageSecond": "eng",
+        "motionRecognition": "off",
+        "magicNum1": {
+            "id": "",
+            "params": {
+            }
+        },
+        "magicNum2": {
+            "id": "",
+            "params": {
+            }
+        },
+        "mhegGuide": "off",
+        "magicNum3": {
+            "id": "",
+            "params": {
+            }
+        },
+        "magicNum5": {
+            "id": "",
+            "params": {
+            }
+        },
+        "magicNum6": {
+            "id": "",
+            "params": {
+            }
+        },
+        "powerOnLight": "off",
+        "addressInfo": [
+            "not_defined",
+            "not_defined",
+            "not_defined",
+            "not_defined"
+        ],
+        "subtitleLanguageSecond": "eng",
+        "magicNum7": {
+            "id": "",
+            "params": {
+            }
+        },
+        "magicNum8": {
+            "id": "",
+            "params": {
+            }
+        },
+        "smartSoundDemo": "on",
+        "pointerAlignment": "off",
+        "voiceRecognitionLanguage": "eng",
+        "vsn": "N/A",
+        "enableSDDP": "off",
+        "pointerSize": "small",
+        "watchedListCollection": "on",
+        "magicNum4": {
+            "id": "",
+            "params": {
+            }
+        },
+        "autoComplete": false,
+        "bannerPosition": "righttop",
+        "subtitleLanguageFirst": "eng",
+        "animationGuide": "on",
+        "magicNum9": {
+            "id": "com.webos.app.self-diagnosis",
+            "params": {
+                "from": "magicNum"
+            }
+        },
+        "play8kVideoOnApps": "off",
+        "liveMenuLaunched": false,
+        "multiViewStatus": "off",
+        "audioGuidanceSpeed": "medium",
+        "zipcode": "<redacted>",
+        "storeMode": "home",
+        "country": "USA",
+        "storeMode2": "on",
+        "wakeUpword": "LGTV",
+        "syncMode": "off",
+        "screenRotation": "off",
+        "hybridCast": "off",
+        "promotionPeriodEnd": "0",
+        "backupPsmDolby": {
+            "backupPsm2d": "dolbyHdrDark",
+            "backupPsm3d": "dolbyHdrDark"
+        },
+        "countryGroup": "US",
+        "virtualKeyboardLanguage": [
+            "en-US"
+        ],
+        "highContrast": "off",
+        "menuLanguage": "eng",
+        "audioGuidanceVolume": "medium",
+        "miracastOverlayStatus": "off",
+        "pointerShape": "auto",
+        "baloonHelp": "on",
+        "promotionOriginStart": "undefined",
+        "emergencyAlert": "on",
+        "ismMethod": "normal",
+        "estreamerStatus": "off",
+        "localeCountryGroup": "langSelUS"
+    },
+    "returnValue": true
+}
+$ luna com.webos.settingsservice/getSystemSettings {"category":"network"}
+{
+    "subscribed": false,
+    "category": "network",
+    "method": "getSystemSettings",
+    "settings": {
+        "sscNetworkKey": true,
+        "wolwowlOnOff": "true",
+        "ipv6Enable": "false",
+        "bleAdvertisingOnOff": "<redacted>",
+        "deviceName": "<redacted>",
+        "allowMobileDeviceAccess": true
+    },
+    "returnValue": true
+}
+
+===== keys =====
+$ ls -l /dev/uinput
+crw-------    1 root     root       10, 223 Dec 31  1969 /dev/uinput
+/dev/input/uinput: (absent)
+$ ls -l /dev/uhid
+crw-------    1 root     root       10, 239 Dec 31  1969 /dev/uhid
+$ ls -l /dev/input
+total 0
+crw-rw----    1 root     composit   13,  64 Dec 31  2018 event0
+crw-rw----    1 root     composit   13,  65 Dec 31  2018 event1
+crw-rw----    1 root     composit   13,  74 Dec 31  2018 event10
+crw-rw----    1 root     composit   13,  75 Dec 31  2018 event11
+crw-rw----    1 root     composit   13,  76 Dec 31  2018 event12
+crw-rw----    1 root     composit   13,  77 Dec 31  2018 event13
+crw-rw----    1 root     composit   13,  78 Dec 31  2018 event14
+crw-rw----    1 root     composit   13,  79 Dec 31  2018 event15
+crw-rw----    1 root     composit   13,  80 Dec 31  2018 event16
+crw-rw----    1 root     composit   13,  81 Dec 31  2018 event17
+crw-rw----    1 root     composit   13,  82 Dec 31  2018 event18
+crw-rw----    1 root     composit   13,  83 Dec 31  2018 event19
+crw-rw----    1 root     composit   13,  66 Dec 31  2018 event2
+crw-rw----    1 root     composit   13,  84 Dec 31  2018 event20
+crw-rw----    1 root     composit   13,  85 Dec 31  2018 event21
+crw-rw----    1 root     composit   13,  86 Dec 31  2018 event22
+crw-rw----    1 root     composit   13,  87 Dec 31  2018 event23
+crw-rw----    1 root     composit   13,  88 Dec 31  2018 event24
+crw-rw----    1 root     composit   13,  89 Dec 31  2018 event25
+crw-rw----    1 root     composit   13,  90 Dec 31  2018 event26
+crw-rw----    1 root     composit   13,  91 Dec 31  2018 event27
+crw-rw----    1 root     composit   13,  92 Dec 31  2018 event28
+crw-rw----    1 root     composit   13,  93 Dec 31  2018 event29
+crw-rw----    1 root     composit   13,  67 Dec 31  2018 event3
+crw-rw----    1 root     composit   13,  94 Dec 31  2018 event30
+crw-rw----    1 root     composit   13,  95 Dec 31  2018 event31
+crw-rw----    1 root     composit   13,  68 Dec 31  2018 event4
+crw-rw----    1 root     composit   13,  69 Dec 31  2018 event5
+crw-rw----    1 root     composit   13,  70 Dec 31  2018 event6
+crw-rw----    1 root     composit   13,  71 Dec 31  2018 event7
+crw-rw----    1 root     composit   13,  72 Dec 31  2018 event8
+crw-rw----    1 root     composit   13,  73 Dec 31  2018 event9
+crw-------    1 root     root       13,  63 Dec 31  1969 mice
+crw-------    1 root     root       13,  32 Dec 31  2018 mouse0
+crw-------    1 root     root       13,  33 Dec 31  2018 mouse1
+crw-------    1 root     root       13,  34 Dec 31  2018 mouse2
+$ kernel config (uinput, uhid)
+CONFIG_INPUT_UINPUT=y
+CONFIG_UHID=y
+--- /proc/bus/input/devices (Phys and Uniq withheld, they can hold Bluetooth addresses)
+I: Bus=0006 Vendor=0001 Product=0001 Version=0004
+N: Name="CHECK INPUT"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input0
+U: Uniq=
+H: Handlers=kbd event0 
+B: PROP=0
+B: EV=3
+B: KEY=ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff fffffffe
+
+I: Bus=0003 Vendor=0001 Product=0001 Version=0004
+N: Name="LGE RCU"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input1
+U: Uniq=
+H: Handlers=kbd event1 
+B: PROP=0
+B: EV=7
+B: KEY=ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff ffffffff fffffffe
+B: REL=0
+
+I: Bus=0003 Vendor=0000 Product=0000 Version=0004
+N: Name="Bluetooth-audio-source"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input2
+U: Uniq=
+H: Handlers=kbd event2 
+B: PROP=0
+B: EV=3
+B: KEY=c0000 0 0 0 0 0 18000 100 1 800000 0 0 0
+
+I: Bus=0003 Vendor=0000 Product=0000 Version=0004
+N: Name="LGE M-RCU - Builtin [0]"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input3
+U: Uniq=
+H: Handlers=kbd mouse0 event3 
+B: PROP=0
+B: EV=f
+B: KEY=7f0350 fc00 0 0 0 8dffffff 8000e01f f0030004 8c000000 40 0 7fffff ffffffff 20206003 e9081e28 0 0 0 0 0 0 0 0 0 0 1000 100fc000 2001440 0 0 70000 20000 2018000 4180 10801 9e1680 0 0 10000ffc
+B: REL=100
+B: ABS=3
+
+I: Bus=0003 Vendor=0000 Product=0000 Version=0004
+N: Name="LGE M-RCU - Builtin [1]"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input4
+U: Uniq=
+H: Handlers=kbd mouse1 event4 
+B: PROP=0
+B: EV=f
+B: KEY=7f0350 fc00 0 0 0 8dffffff 8000e01f f0030004 8c000000 40 0 7fffff ffffffff 20206003 e9081e28 0 0 0 0 0 0 0 0 0 0 1000 100fc000 2001440 0 0 70000 20000 2018000 4180 10801 9e1680 0 0 10000ffc
+B: REL=100
+B: ABS=3
+
+I: Bus=0003 Vendor=0000 Product=0000 Version=0004
+N: Name="LGE Simple Premium"
+P: Phys=
+S: Sysfs=/devices/virtual/input/input5
+U: Uniq=
+H: Handlers=kbd mouse2 event5 
+B: PROP=0
+B: EV=f
+B: KEY=7f0350 fc00 0 0 0 8dffffff 8000e01f f0030004 8c000000 40 0 7fffff ffffffff 20206003 e9081e28 0 0 0 0 0 0 0 0 0 0 1000 100fc000 2001440 0 0 70000 20000 2018000 4180 10801 9e1680 0 0 10000ffc
+B: REL=100
+B: ABS=3
+
+$ luna service files with input, rcu, key, remote or hid in the name
+/usr/share/luna-service2/services.d/com.webos.service.mrcu.service:Name=com.webos.service.mrcu
+/usr/share/luna-service2/services.d/com.webos.service.mrcu.service:Exec=/usr/sbin/lginput2
+/usr/share/luna-service2/services.d/com.webos.service.voiceinput.service:Name=com.webos.service.voiceinput
+/usr/share/luna-service2/services.d/com.webos.service.voiceinput.service:Exec=/usr/sbin/voiceinput
+$ registered input-related services (from luna-methods above)
+com.webos.app.quickinputpicker
+com.webos.keyfilter.magicnumber
+com.webos.service.mrcu
+com.webos.service.tv.keymanager
+com.webos.service.tv.legacyinput
+com.webos.service.voiceinput
+com.webos.starfish.keyfilters
+
+===== firmware-date =====
+--- /etc/starfish-release
+Rockhopper release 4.10.2-31 (goldilocks2-grampians)
+--- /etc/buildinfo
+(absent)
+--- /etc/build-info
+(absent)
+--- /etc/lsb-release
+(absent)
+--- /proc/version
+Linux version 4.4.84-169.gld4tv.5 (gatekeeper.tvsw@swfarm-oeci-r134-1404) (gcc version 6.4.0 (GCC) ) #1 SMP PREEMPT Wed Aug 27 09:10:01 KST 2025
+$ ls -l /etc/starfish-release
+-rw-r--r--    1 root     root            53 Aug 26  2025 /etc/starfish-release
+$ stat -L /etc/starfish-release
+  File: /etc/starfish-release
+  Size: 53        	Blocks: 1          IO Block: 4096   regular file
+Device: b31ch/45852d	Inode: 3362        Links: 1
+Access: (0644/-rw-r--r--)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2025-08-26 17:09:47.000000000
+Modify: 2025-08-26 17:09:47.000000000
+Change: 2025-08-26 17:09:47.000000000
+
+$ ls -l /usr/bin/com.webos.app.home
+-rwxr-xr-x    1 root     root         39732 Aug 26  2025 /usr/bin/com.webos.app.home
+$ stat -L /usr/bin/com.webos.app.home
+  File: /usr/bin/com.webos.app.home
+  Size: 39732     	Blocks: 78         IO Block: 4096   regular file
+Device: b31ch/45852d	Inode: 4669        Links: 1
+Access: (0755/-rwxr-xr-x)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2025-08-26 17:24:16.000000000
+Modify: 2025-08-26 17:24:16.000000000
+Change: 2025-08-26 17:24:16.000000000
+
+$ ls -l /usr/lib/libSDL2-2.0.so.0
+lrwxrwxrwx    1 root     root            20 Aug 26  2025 /usr/lib/libSDL2-2.0.so.0 -> libSDL2-2.0.so.0.4.1
+$ ls -lL /usr/lib/libSDL2-2.0.so.0
+-rwxr-xr-x    1 root     root        648212 Aug 26  2025 /usr/lib/libSDL2-2.0.so.0
+$ stat -L /usr/lib/libSDL2-2.0.so.0
+  File: /usr/lib/libSDL2-2.0.so.0
+  Size: 648212    	Blocks: 1267       IO Block: 4096   regular file
+Device: b31ch/45852d	Inode: 5748        Links: 1
+Access: (0755/-rwxr-xr-x)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2025-08-26 17:26:54.000000000
+Modify: 2025-08-26 17:26:54.000000000
+Change: 2025-08-26 17:26:54.000000000
+
+
+===== home =====
+--- /usr/palm/applications/com.webos.app.home/appinfo.json
+{
+    "id": "com.webos.app.home",
+    "version": "1.0.0",
+    "vendor": "LG Electronics",
+    "type": "native",
+    "main": "file:///usr/bin/com.webos.app.home",
+    "title": "Home",
+    "transparent": true,
+    "splashBackground": "assets/splash.png",
+    "icon": "assets/icon.png",
+    "noSplashOnLaunch" : true,
+    "mediumIcon": "assets/icon.png",
+    "largeIcon": "assets/icon.png",
+    "iconColor": "#1ec15f",
+    "visible": false,
+    "disableBackHistoryAPI": true,
+    "nativeLifeCycleInterfaceVersion": 2,
+    "lockable": false,
+    "supportQuickStart": false,
+    "hasPromotion": false,
+    "accessibility": {
+        "supportsAudioGuidance" : true
+    },
+    "defaultWindowType": "home",
+    "appCategory": ["home"]
+}
+--- /usr/palm/applications/com.webos.app.homeconnect/appinfo.json
+{
+	"id": "com.webos.app.homeconnect",
+	"version": "1.0.0",
+	"vendor": "lge",
+	"type": "web",
+	"main": "index.html",
+	"title": "Home Dashboard",
+	"icon": "icon.png",
+	"largeIcon": "icon_large.png",
+	"miniicon": "icon.png",
+	"imageForRecents": "recent.png",
+	"bgImage": "splash.png",
+	"splashBackground": "splash.png",
+	"iconColor": "#ffffff",
+	"visible": true,
+	"transparent": true,
+	"uiRevision": 2,
+	"vendorExtension": {
+		"allowCrossDomain": true
+	},
+	"useNativeScroll": true,
+	"resolutionIndependent": false,
+	"disableBackHistoryAPI": true,
+	"accessibility": {
+		"supportsAudioGuidance": true
+	},
+	"trustLevel": "trusted",
+	"voiceControl": "manual",
+	"enablePigScreenSaver": false,
+	"usePrerendering": true,
+	"v8SnapshotFile": "snapshot_blob.bin"
+}
+--- /usr/lib/qt5/qml/KeyFilters/appLaunch.js
+    (LG's own program, 1869 lines, withheld from the repository; the raw copy stays in tools/out/)
+--- /usr/lib/qt5/qml/KeyFilters/systemUi.js
+    (LG's own program, 442 lines, withheld from the repository; the raw copy stays in tools/out/)
+$ initctl list (sam, bootd, surface, home)
+com.webos.app.fullhome stop/waiting
+bootd start/running, process 2183
+bootd-mode stop/waiting
+surface-manager start/running, process 1578
+home_launcher stop/waiting
+sam start/running, process 1692
+surface-manager-finalize stop/waiting
+com.webos.app.home stop/waiting
+surface-manager-snapshot stop/waiting
+$ upstart job files for sam, bootd, surface and home
+--- /etc/init/sam.conf
+    (LG's own file, 28 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/init/bootd-mode.conf
+    (LG's own file, 72 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/init/bootd.conf
+    (LG's own file, 23 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/init/surface-manager-finalize.conf
+    (LG's own file, 22 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/init/surface-manager-snapshot.conf
+    (LG's own file, 28 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/init/surface-manager.conf
+    (LG's own file, 68 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/init/com.webos.app.fullhome.conf
+    (LG's own file, 27 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/init/com.webos.app.home.conf
+    (LG's own file, 27 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/init/home_launcher.conf
+    (LG's own file, 9 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+$ jail files and folders
+$ ls -ld /etc/jail_default.conf
+-rw-r--r--    1 root     root          3742 Aug 26  2025 /etc/jail_default.conf
+$ ls -ld /etc/jail_device.conf
+-rw-r--r--    1 root     root          3835 Aug 26  2025 /etc/jail_device.conf
+$ ls -ld /etc/jail_minimum.conf
+-rw-r--r--    1 root     root           612 Aug 26  2025 /etc/jail_minimum.conf
+$ ls -ld /etc/jail_native-palm.conf
+-rw-r--r--    1 root     root           435 Aug 26  2025 /etc/jail_native-palm.conf
+$ ls -ld /etc/jail_native.conf
+-rw-r--r--    1 root     root         10593 Aug 26  2025 /etc/jail_native.conf
+$ ls -ld /etc/jail_native_builtin.conf
+-rw-r--r--    1 root     root         11071 Aug 26  2025 /etc/jail_native_builtin.conf
+$ ls -ld /etc/jail_native_devmode.conf
+-rw-r--r--    1 root     root         13482 Aug 26  2025 /etc/jail_native_devmode.conf
+$ ls -ld /etc/jail_native_game.conf
+-rw-r--r--    1 root     root          6322 Aug 26  2025 /etc/jail_native_game.conf
+$ ls -ld /etc/jail_native_mvpd.conf
+-rw-r--r--    1 root     root         13094 Aug 26  2025 /etc/jail_native_mvpd.conf
+$ ls -ld /etc/jail_triton-inst.conf
+-rw-r--r--    1 root     root          2593 Aug 26  2025 /etc/jail_triton-inst.conf
+$ ls -ld /etc/jail_triton.conf
+-rw-r--r--    1 root     root          2547 Aug 26  2025 /etc/jail_triton.conf
+$ ls -ld /var/palm/jail
+drwxr-xr-x   10 root     root          4096 Oct 20 18:54 /var/palm/jail
+$ ls /var/palm/jail
+amazon
+amazon.alexa.view
+com.apple.appletv
+com.beb.plxnative
+com.webos.app.browser
+io.github.sunnyside007.lumen.shell
+netflix
+youtube.leanback.v4
+$ jail*.conf contents
+--- /etc/jail_default.conf
+    (LG's own file, 188 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/jail_device.conf
+    (LG's own file, 186 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/jail_minimum.conf
+    (LG's own file, 20 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/jail_native-palm.conf
+    (LG's own file, 14 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/jail_native.conf
+    (LG's own file, 542 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/jail_native_builtin.conf
+    (LG's own file, 565 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/jail_native_devmode.conf
+    (LG's own file, 638 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/jail_native_game.conf
+    (LG's own file, 343 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/jail_native_mvpd.conf
+    (LG's own file, 652 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/jail_triton-inst.conf
+    (LG's own file, 130 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+--- /etc/jail_triton.conf
+    (LG's own file, 125 lines, withheld from the repository: it carries LG's confidentiality notice or is LG's program; the raw copy stays in tools/out/)
+$ processes: com.webos.app.home, sam, surface-manager, bootd
+pid 1578: uid 0 (root), gid 0, groups 0 10 506 509 777 , capabilities 0000003fffffffff
+  binary /usr/bin/surface-manager-starfish, root /, mnt namespace the same as init
+  args: /usr/bin/surface-manager-starfish -platform starfish 
+pid 1692: uid 0 (root), gid 0, groups 0 10 506 509 777 , capabilities 0000003fffffffff
+  binary /usr/sbin/sam, root /, mnt namespace the same as init
+  args: /usr/sbin/sam 
+pid 1736: uid 0 (root), gid 0, groups 0 10 506 509 777 , capabilities 0000003fffffffff
+  binary /usr/bin/com.webos.app.home, root /, mnt namespace the same as init
+  args: /usr/bin/com.webos.app.home {"parameters":{"snapshot":true},"interfaceMethod":"registerApp","appId":"com.webos.app.home","reason":"undefined","event":"launch","interfaceVersion":2,"@system_native_app":true,"preload":"full"} 
+pid 2183: uid 0 (root), gid 0, groups 0 10 506 509 777 , capabilities 0000003fffffffff
+  binary /usr/sbin/bootd, root /, mnt namespace the same as init
+  args: /usr/sbin/bootd 
+$ luna com.webos.settingsservice/getSystemSettings {"category":"general","keys":["homeAutoLaunch","lastInput"]}
+{
+    "subscribed": false,
+    "category": "general",
+    "errorKey": [
+        "lastInput"
+    ],
+    "settings": {
+        "homeAutoLaunch": "off"
+    },
+    "returnValue": false,
+    "method": "getSystemSettings"
+}
+$ luna com.webos.settingsservice/getSystemSettings {"category":"option","keys":["homeAutoLaunch","lastInput"]}
+{
+    "subscribed": false,
+    "category": "option",
+    "method": "getSystemSettings",
+    "returnValue": false,
+    "errorText": "There is no matched result from DB"
+}
+$ bootd files and the preferences folder (names only)
+(no /etc/bootd*)
+$ ls /var/luna/preferences/
+caption
+caption.md5
+channel
+channel.md5
+devmode_enabled
+environmentCondition
+eula
+eula.md5
+general
+general.md5
+hotelMode
+hotelMode.md5
+installsetting_disableHome_default_false
+installsetting_inputhub_default_launchinputmgr
+localeInfo
+localeInfo.md5
+localtime
+lock
+lock.md5
+network
+network.md5
+option
+option.md5
+other
+other.md5
+paneltype_oled
+ran-firstuse
+sound
+sound.md5
+systemprefs.db
+time
+time.md5
+timezone
+twinTv
+twinTv.md5
+webosbrew_block_updates
+webosbrew_sshd_enabled
+webosbrew_telnet_disabled
+zoneinfo
+
+===== end =====
+remote survey complete
