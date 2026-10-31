@@ -13,6 +13,7 @@ from what it measured.
 | **4. Polish** | Top Shelf hero, glass dock, parallax icons, Control Center, app editing, more loops, Dolby Vision | The reference screens pass the owner's review on the TV, and the frame budget holds with each feature on screen ([look and feel](specs/look-and-feel.md)); toggles match LG Settings |
 | **5. Release** | CI-built IPKs, docs, screenshots, Homebrew Channel submission; upstream pull requests (B9 profile and HDR saver to Glasshouse, deep links to plx-native) | A clean install on a freshly reset set, following only the docs |
 | **P. Play** (parallel, proposed) | RetroArch measured on the B9, one controller working, a Games row, OLED care, the phone path ([spec](specs/play.md), decision 7) | A pad plays a game started from the shell at full speed on the B9; every step reverts |
+| **R. Remote** (parallel, approved 2026-10-31) | `lumen-ctl` on the TV behind an SSH forced command, Lumen Remote for Windows, the phone's web UI served by the TV, Google Home through the Streamer's CEC ([spec](specs/remote.md), decision 9) | The PC and the Pixel control power, volume, inputs, apps, the remote's keys and picture presets; LG's gateway ports closed; nothing opened to the internet; every step reverts |
 
 Status on 2026-10-30, how deep the B9 lets Lumen reach, the upstream prior
 art and the next steps with hand-off lanes: [specs/depth.md](specs/depth.md)

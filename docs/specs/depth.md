@@ -16,7 +16,7 @@ whom. Nothing here has run on the TV; every TV step waits for the owner
 | `claude/shell-timing` (c35e7e4, 20 commits over `main`) | The real shell: `lumen-core`, B2 icons and Inter text, B3 luna launcher, the timing and key-diagnostics lines, hardware float, the style module, kerning, LG's icons through a root copy, stage 3's vsync pacer and glyph warming. 3a89955 is the build on the TV today | Owed: the `--no-ff` merge into `main` and its pull requests; the slow-motion video (targets 3 and 5) |
 | `refactor/loop-pass` (61cf2fc, 5 commits over `claude/shell-timing`) | The home loop behind events, screen and clock adapters, tested through fakes (decision 8, proposed) | Owed: one `lumen-tv-check` against 3a89955's numbers, then the merge |
 | `claude/studio-9e791a` (c407f65, 12 commits) | The HDR studio: aurora and fireflies loops, the HDR switch check (passed on the B9 2026-10-20) | Owed: the 60 s loops on the TV; Dolby Vision and more scenes when the owner says so |
-| `claude/tv-remote-plan-cb573f` (worktree `studio-9e791a`), uncommitted | [remote.md](remote.md) (R0 to R6), decision 9, the "Remote" research | Awaiting the owner's approval before anything is built |
+| `claude/tv-remote-plan-cb573f` (30d67ba), merged into `main` on 2026-10-31 | [remote.md](remote.md) (R0 to R6), decision 9, the "Remote" research | Approved by the owner on 2026-10-31 as drafted; lane D and R0's run are open |
 | The TV | Root, SSH by key, plx-native 0.8.0, Lumen 3a89955 with LG's icons copied, the S1 boot hook, IPv6 off, Glasshouse not installed | As left on 2026-10-28 |
 
 Phase 1 as the roadmap words it (Glasshouse, a 24 h capture) is being
@@ -120,13 +120,13 @@ git-ignored), **here** means this session off the TV.
 | 6 | Guard G1 on the TV by hand, then as a hook; a week of log | TV | 2, 5 | privacy.md G1's "done when" |
 | 7 | `--no-ff` merge of `claude/shell-timing` (and `refactor/loop-pass` once checked) into `main`; the pull requests; the push | here | 5, the owner's call | CI green; `v0.3.0` waits for the takeover |
 | 8 | **`takeover/`** on the chosen route: hook, stand-in or appinfo, hold-Home escape, watchdog, `uninstall-all.sh` coverage | lane (Codex, Astra) after 5, then TV | 5, 7 | Home opens Lumen in under 150 ms on the B9; every escape hatch works; a reboot without the hook restores LG |
-| 9 | **Lumen Remote front-end** against a mock `lumen-ctl` (R3's web UI, the shared front-end) | lane D (Gemini 4 Argon) | The owner's approval of remote.md | A bundled TypeScript UI with the verbs of remote.md, no CDN, a demo recording |
+| 9 | **Lumen Remote front-end** against a mock `lumen-ctl` (R3's web UI, the shared front-end) | lane D (Gemini 4 Argon) | Nothing: remote.md approved 2026-10-31 | A bundled TypeScript UI with the verbs of remote.md, no CDN, a demo recording |
 | 10 | **Original Top Shelf and tile art** for Lumen's own tiles and the inputs | lane E (Gemini, image generation) | Nothing | PNGs that fit the look-and-feel tokens, CC BY-SA 4.0, no brand marks |
 | 11 | Phase 4 on the merged shell: focus light and tilt, the Top Shelf hero with 10's art, frosted glass B, the Control Center (with OpenHome's key map as a reference), editing; the dither | here and lanes, after 7 | 7, 10 | look-and-feel.md's three checks |
 | 12 | Guard G2 and G3, senders G4, the Privacy panel G5 | here, TV | 6 | privacy.md |
 
-Lanes A, B and C can start the moment 1 is committed; D waits for remote.md;
-E has no dependency. Three Codex lanes and one Gemini lane at a time is the
+Lanes A, B, C and D can start now (1 is done and remote.md is approved); E
+waits for D8. Three Codex lanes and one Gemini lane at a time is the
 owner's limit, and the README says how each comes back.
 
 ### What this changes in the roadmap
@@ -141,11 +141,11 @@ owner's limit, and the README says how each comes back.
 
 | | Question | Recommendation |
 |---|---|---|
-| D1 | Commit the privacy work on `main` now (your post-boot check first, or trust the 2026-10-28 log and check later) | Commit now: lanes branch from it |
+| D1 | Commit the privacy work on `main` now (your post-boot check first, or trust the 2026-10-28 log and check later) | Done 2026-10-30: commits 354d989 to 655518b, pushed |
 | D2 | Home: run the five-read look next time at the TV | Yes; then route A if SAM runs a native Home from a developer path, else B |
 | D3 | YouTube AdFree through Homebrew Channel | Yes, after the look says which copy SAM picks; one IPK, reversible |
 | D4 | Lanes: A Guard (Astra high), B frame-stats (Sol high), C remote survey (Sol high), D remote front-end (Argon high, after remote.md), E art (Gemini image generation) | Start A, B and C after D1; E any time; D when remote.md is approved |
-| D5 | remote.md: approve as drafted on 2026-10-28, with your D1 to D13 answers | Approve; it unlocks lane D and item 4's run |
+| D5 | remote.md: approve as drafted on 2026-10-28, with your D1 to D13 answers | Approved 2026-10-31, merged into `main` |
 | D6 | plx-native: pin a 0.10.0 nightly for a look at the HDR and remote changes, or stay on 0.8.0 | Stay until a tagged 0.9 or 0.10; nightlies change daily |
 | D7 | Glasshouse: still install at all | Decide after G1's week, as P2 says; if yes, for OLED care and remote keys only |
 | D8 | Art: the generated images' rights follow the tool's terms; Lumen ships them CC BY-SA 4.0 | Confirm you accept that before lane E runs |

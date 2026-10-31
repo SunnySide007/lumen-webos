@@ -213,3 +213,141 @@ sends nothing, and over Bluetooth it pairs but never connects (measured
 2026-10-21). P1 is parked until there's more research and the user-space USB
 helper. Meanwhile RetroArch can be measured with the Magic Remote, and the
 phone-as-a-pad route matters more.
+
+## Remote: control channels, Google Home and the desktop app
+
+Researched on 2026-10-28 for the proposed Remote spec
+([specs/remote.md](specs/remote.md)). Nothing here has run on the B9 yet
+except the privacy surveys of the same day, so each point is marked high,
+medium or low confidence.
+
+### What the B9 already offers
+
+* **The survey's facts** (`docs/device/privacy-20261028-061746.txt`):
+  * tcp 3000 and 3001 are `xinetd` → `nsl` → `com.webos.service.secondscreen.gateway`
+    (LG's second-screen API, "SSAP").
+  * tcp 36866 and 18181 are DIAL, through the same `nsl`.
+  * LG's network settings read `wolwowlOnOff: "true"` (wake on LAN and
+    wireless LAN), `allowMobileDeviceAccess: true` and `enableIpControl: "off"`.
+  * The TV is on Wi-Fi (`wlan0`); `eth0` isn't used.
+
+  High.
+* **SSAP** (LG's second-screen API) is a WebSocket API on 3000 (plain) and 3001
+  (TLS). A client registers once, the TV shows a prompt, and the client keeps
+  the key it gets back. It reaches power off, volume, inputs, apps, toasts and
+  a pointer socket for remote buttons. Home Assistant's
+  [webOS TV integration](https://www.home-assistant.io/integrations/webostv/)
+  uses it, needs "LG Connect Apps" on, and can't turn the TV on: it needs a
+  Wake-on-LAN automation, which "usually only works" on the same network. High.
+* **SSAP's security record:**
+  * **The 2024 bugs.** Bitdefender's
+    [2024 report](https://www.bitdefender.com/blog/labs/vulnerabilities-identified-in-lg-webos)
+    found that the gateway's PIN could be skipped (CVE-2023-6317), followed by
+    root command injection. Both the bypass and one of the injections
+    (CVE-2023-6319, `getAudioMetadata`) were confirmed on webOS 4.9.7, on a
+    2019 set (LG43UM7000PLA), so the B9's generation. LG patched them on
+    2024-03-22. High.
+  * **The October 2026 chain.** It gets root from the LAN through port 3001
+    with no PIN ([SSD advisory](https://ssd-disclosure.com/lg-webos-sync-demo-preauth-rce/),
+    [The Hacker News](https://thehackernews.com/2026/10/lg-smart-tvs-vulnerable-to-pre-auth.html)).
+    It was tested only on webOS 7.5.7, and no workaround was given but the
+    update. High for 7.5; unknown for 4.5.
+  * **The B9 can't be patched either way.** Whether firmware 05.50.00 has
+    the 2024 fixes is unknown: no source names it.
+    [dejavuln-autoroot](https://github.com/throwaway96/dejavuln-autoroot),
+    which rooted this TV, works on unpatched webOS 3.5 and later. And updates
+    stay blocked (safety rule 8), so no fix will arrive. Medium.
+* **Remote keys:** LG offers apps no API for sending remote keys
+  ([LG developer forum](https://forum.webostv.developer.lge.com/t/send-key-messages-by-web-apps/397)).
+  As root, the routes are SSAP's pointer socket, LG's input services over
+  luna, or a kernel `uinput` device (whether the B9's kernel has it is
+  unchecked). Low until tried on the TV.
+* **SSH:** Homebrew Channel's dropbear already listens on 22, key only.
+  Dropbear's `authorized_keys` takes `command="…"` (the client's command is
+  ignored and handed over in `SSH_ORIGINAL_COMMAND`), `no-pty`,
+  `no-port-forwarding` and, in newer releases, `restrict`
+  ([dropbear(8)](https://man.archlinux.org/man/dropbear.8)). Which release the
+  TV runs is unchecked. High for dropbear; unknown for the TV's build.
+* **DIAL** only starts DIAL apps (YouTube, Netflix) with a payload. It can't
+  change the volume or the input. High.
+
+### Google Home without LG's cloud
+
+* **Google TV Streamer over HDMI-CEC.** With a Chromecast or a Google TV
+  Streamer on the TV and CEC on, "Hey Google, turn on/off the TV" works
+  ([Google](https://support.google.com/chromecast/answer/7498991)). Google
+  describes it for its speakers and displays; whether the Pixel's assistant
+  does the same is unchecked. Owners report the Streamer turning the TV back
+  on about 10 s after it's turned off
+  ([Google Nest Community](https://www.googlenestcommunity.com/t5/Streaming/Google-Streamer-4k-When-turning-TV-off-device-will-turn-TV-back-on/td-p/736320)),
+  and CEC volume is uneven across reports. Medium.
+* **Matter hubs:** Google's list includes the Nest Wifi Pro and the Google TV
+  Streamer (4K), both in this house. Its 32 supported Matter device types
+  include "Speaker" (on/off and level), but no TV or video player, and device
+  types not listed aren't supported
+  ([Google Home developers](https://developers.home.google.com/matter/supported-devices)).
+  High.
+* **Home Assistant as a Matter bridge.**
+  [home-assistant-matter-hub](https://github.com/RiDDiX/home-assistant-matter-hub)
+  is the maintained fork; the original was archived in January 2026. It maps
+  `media_player` to a Matter Speaker or a Basic Video Player. Google would see
+  only the Speaker: on, off and volume level. One user reports only on/off
+  for TVs with it. Medium.
+* **Home Assistant's Google Assistant integration**
+  ([docs](https://www.home-assistant.io/integrations/google_assistant/)):
+  * **What it reaches:** a `media_player` gets on/off, volume, source (inputs,
+    and the LG apps in the source list) and playback.
+  * **Self-hosted:** a cloud-to-cloud project in Google's Home Developer
+    Console, with Home Assistant reachable from the internet "with a hostname
+    and SSL certificate". Its test mode is reported to expire after about 30
+    days.
+  * **Local fulfillment:** Google's devices can send commands straight to
+    Home Assistant, but still use the internet for credentials and as a
+    fallback.
+
+  High.
+* **Nabu Casa's Home Assistant Cloud** does the internet side for a
+  subscription ([pricing](https://www.nabucasa.com/pricing/): 6.50 a month or
+  65 a year in the listed currency). Commands pass through its relay. It is
+  reported to be renamed "Home Assistant Link" from Home Assistant 2026.12.
+  Medium.
+* **Whichever route:** Google's servers process the voice. LG ThinQ, the
+  usual way to link an LG TV, is blocked by decision 5.
+
+### The desktop app
+
+* **Tauri 2** uses Windows' own WebView2, so its installer stays small. Its
+  backend is Rust, like the shell.
+  * **Tray:** an icon with click events
+    ([tray](https://v2.tauri.app/learn/system-tray/)), plus a positioner
+    plugin that places a window relative to the tray icon
+    ([positioner](https://v2.tauri.app/plugin/positioner/)).
+  * **Glass:** a transparent window with Acrylic (Windows 10 and 11) or Mica
+    (11 only) behind it
+    ([window API](https://v2.tauri.app/reference/javascript/api/namespacewindow/),
+    [window-vibrancy](https://github.com/tauri-apps/window-vibrancy)).
+    Acrylic is slow while the window is dragged.
+
+  High.
+* **Size and speed:** blog comparisons give Tauri installers of a few MB
+  against 80–200 MB for Electron, and a faster start. On Windows, memory is
+  about the same, since both run Chromium
+  ([tauri#5889](https://github.com/tauri-apps/tauri/issues/5889)). Low until
+  measured.
+* **WebView2's data:**
+  * **Optional data** follows Windows' Diagnostic data switch.
+  * **Required data** is collected "regardless of" that switch.
+  * **What an app can turn off:** SmartScreen
+    (`IsReputationCheckingRequired = false`), and crash dumps can stay local
+    (`IsCustomCrashReportingEnabled`)
+    ([Microsoft](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/data-privacy)).
+
+  So an app on WebView2 can promise that it sends nothing itself, but not that
+  Windows' component sends nothing. High.
+* **Electron** ships its own Chromium, so its updates are the app's job.
+  Electron's crash reporter does nothing until the app starts it
+  ([docs](https://www.electronjs.org/docs/latest/api/crash-reporter)). Whether
+  its Chromium makes other background calls is unchecked. Medium.
+* **Other stacks:** WinUI 3 or WPF (native look, Composition animations, C#)
+  and Wails (Go on WebView2) give no web animations, or bring in a third
+  language.
