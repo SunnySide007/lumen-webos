@@ -12,7 +12,9 @@ request that breaks one will not be merged.
    * configd values it owns (for example its own key-filter entry);
    * boot scripts in `/var/lib/webosbrew/init.d`;
    * its own files under `/var/lib/lumen` and its app directories.
-2. **Everything is reversible.** Each mod ships with its undo. Whatever Lumen
+2. **Everything is reversible.** Each mod ships with its undo. Before each
+   persistent change, `tools/backup.sh` copies the TV's settings and data to
+   the owner's PC, outside the repository. Whatever Lumen
    overlays is backed up first, and `tools/uninstall-all.sh` (Phase 1) returns
    the TV to stock. Uninstalling and rebooting must leave no trace beyond what
    [Glasshouse documents](https://github.com/rorygallagher2024/glasshouse/blob/main/docs/TV-CHANGES.md)
