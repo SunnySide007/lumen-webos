@@ -37,9 +37,13 @@ tools/tv.sh log             # what the shell logged on the TV
 * Rust: `cargo fmt` and `cargo clippy -D warnings`, both for the PC and for the
   TV target. Every `unsafe` block carries a `// SAFETY:` comment.
 * Shell that runs on the TV: POSIX `sh` (the TV has busybox), `shellcheck`-clean.
-* Files pushed to the TV as root are staged under `/var/lib/lumen/stage/`,
-  never `/tmp`, which every app jail shares, and checked against the PC's
-  SHA-256 while staged, before they go anywhere they can run.
+* Root writes nothing into `/tmp` on the TV, which every app jail shares
+  (and where nothing stops a link an app put there): logs and staged files
+  go under `/var/lib/lumen`. Files pushed to the TV as root are staged under
+  `/var/lib/lumen/stage/` and checked against the PC's SHA-256 while staged,
+  before they go anywhere they can run. Boot hooks log to
+  `/var/lib/lumen/log/<hook>.log`, keeping the run before as `.log.1`, and
+  log nothing when that folder is not root's alone.
 * JavaScript that runs on webOS 4 (key filters): ES5 only, since node 0.12 and
   Chromium 53 parse nothing newer.
 * Everything that ships to the TV uses LF line endings (`.gitattributes`

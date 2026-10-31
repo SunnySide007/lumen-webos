@@ -25,6 +25,8 @@ setup() {
     export T CALLS REAL_SLEEP REAL_NODE REAL_TIMEOUT
     : >"$CALLS"
     mkdir -p "$T/bin" "$T/tmp" "$T/apps/$LUMEN" "$T/initd"
+    # /var/lib/lumen as on the TV: root's, writable by no one else.
+    mkdir -m 755 "$T/lumen"
 
     # Every TV path moved into this test's folder, and root's uid to ours.
     # The file a generated script carries is left as the PC sent it.
@@ -33,7 +35,7 @@ setup() {
 s|/var/luna/preferences/lumen_disable|$T/lumen_disable|g
 s|/var/lib/lumen/takeover|$T/takeover|g
 s|/var/lib/lumen/stage|$T/lumen/stage|g
-s|/tmp/lumen-home|$T/tmp/lumen-home|g
+s|/var/lib/lumen/log|$T/lumen/log|g
 s|/media/developer/apps/usr/palm/applications|$T/apps|g
 s|/var/lib/webosbrew/init.d|$T/initd|g
 s|/proc/uptime|$T/uptime|g
@@ -171,11 +173,22 @@ run_hook() {
 
 wait_done() {
     for _ in $(seq 400); do
-        grep -q 'lumen-home: done' "$T/tmp/lumen-home.log" 2>/dev/null && return 0
+        grep -q 'lumen-home: done' "$T/lumen/log/lumen-home.log" 2>/dev/null && return 0
         "$REAL_SLEEP" 0.05
     done
     echo "the hook never finished:"
-    cat "$T/tmp/lumen-home.log"
+    cat "$T/lumen/log/lumen-home.log"
+    return 1
+}
+
+# wait_calls PATTERN N: N calls that match, for a hook that logs nothing.
+wait_calls() {
+    for _ in $(seq 400); do
+        [ "$(grep -c -- "$1" "$CALLS")" -ge "$2" ] && return 0
+        "$REAL_SLEEP" 0.05
+    done
+    echo "never $2 calls of $1:"
+    cat "$CALLS"
     return 1
 }
 
@@ -205,9 +218,10 @@ stage_clean() {
     [ "$(stat -c %a "$T/lumen/stage")" = 700 ]
 }
 
-# Code without comments or the words of messages, for the read-only checks.
+# Code without comments or the words of messages, for the read-only checks;
+# the log helpers the boot hooks share are checked in hook-logs.bats.
 commands() {
-    sed -e '/^chain() {/,/^}/d' -e 's/^[[:space:]]*#.*//' -e 's/[[:space:]]#.*//' \
+    sed -e '/^chain() {/,/^}/d' -e '/^folder_ok() {/,/^}/d' -e '/^log_to() {/,/^}/d' -e 's/^[[:space:]]*#.*//' -e 's/[[:space:]]#.*//' \
         -e 's/\(say\|echo\|refuse\) *"[^"]*"/\1 ""/g' "$1"
 }
 
@@ -322,7 +336,17 @@ commands() {
     [[ "$output" == *"hook in init.d: none"* ]]
     [[ "$output" == *"filter file: none"* ]]
     [[ "$output" == *"filter: not in the chain"* ]]
+    [[ "$output" == *"no log: the hook has not run, or its log folder failed its check"* ]]
     not grep -qE '/set[A-Z]|/close' "$CALLS"
+}
+
+@test "status shows the hook's log from /var/lib/lumen/log" {
+    run_tv apply.sh
+    run_hook
+    wait_done
+    run_tv status.sh
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"hook log, the latest run:"*"round 1: closed LG Home"*"lumen-home: done"* ]]
 }
 
 # --- the boot hook
@@ -333,7 +357,7 @@ commands() {
     FAKE_SAM_DOWN_FOR=2 run_hook
     [ "$status" -eq 0 ]
     wait_done
-    log=$(cat "$T/tmp/lumen-home.log")
+    log=$(cat "$T/lumen/log/lumen-home.log")
     [[ "$log" == *"SAM answers"* ]]
     [[ "$log" == *"round 1: closed LG Home"* ]]
     [[ "$log" == *"round 1: LG Home stayed closed 10 s later; running: com.webos.app.hdmi3"* ]]
@@ -348,7 +372,7 @@ commands() {
     : >"$CALLS"
     FAKE_KEEPALIVE=1 run_hook
     wait_done
-    [[ "$(cat "$T/tmp/lumen-home.log")" == *"round 1: LG Home is back 10 s later"* ]]
+    [[ "$(cat "$T/lumen/log/lumen-home.log")" == *"round 1: LG Home is back 10 s later"* ]]
     run grep -c 'closeByAppId' "$CALLS"
     [ "$output" -ge 3 ]
     [ "$output" -le 5 ]
@@ -360,7 +384,7 @@ commands() {
     FAKE_SAM_DOWN_FOR=5 FAKE_KEEPALIVE=1 run_hook
     wait_done
     [ $(($(uptime_now) - start)) -le 300 ]
-    not grep -q 'round 6' "$T/tmp/lumen-home.log"
+    not grep -q 'round 6' "$T/lumen/log/lumen-home.log"
 }
 
 @test "the hook leaves LG's Home alone when it is in front, or not running" {
@@ -368,14 +392,14 @@ commands() {
     echo "$LG" >"$T/front"
     run_hook
     wait_done
-    [[ "$(cat "$T/tmp/lumen-home.log")" == *"round 1: LG Home is in front; left alone"* ]]
+    [[ "$(cat "$T/lumen/log/lumen-home.log")" == *"round 1: LG Home is in front; left alone"* ]]
     not grep -q closeByAppId "$CALLS"
 }
 
 @test "with LG's Home as the default the hook does nothing and says so" {
     run_hook
     wait_done
-    [[ "$(cat "$T/tmp/lumen-home.log")" == *"the default home is com.webos.app.home, not Lumen; nothing done"* ]]
+    [[ "$(cat "$T/lumen/log/lumen-home.log")" == *"the default home is com.webos.app.home, not Lumen; nothing done"* ]]
     not grep -q closeByAppId "$CALLS"
 }
 
@@ -383,7 +407,7 @@ commands() {
     run_tv apply.sh
     FAKE_LG_HOME_AT=150 run_hook
     wait_done
-    [[ "$(cat "$T/tmp/lumen-home.log")" == *"not Lumen; nothing done"* ]]
+    [[ "$(cat "$T/lumen/log/lumen-home.log")" == *"not Lumen; nothing done"* ]]
     [ "$(grep -c closeByAppId "$CALLS")" -eq 1 ]
 }
 
@@ -392,7 +416,7 @@ commands() {
     : >"$CALLS"
     FAKE_SAM_DOWN_FOR=99 run_hook
     wait_done
-    [[ "$(cat "$T/tmp/lumen-home.log")" == *"SAM never answered; nothing done"* ]]
+    [[ "$(cat "$T/lumen/log/lumen-home.log")" == *"SAM never answered; nothing done"* ]]
     [ "$(grep -c '^luna com.webos.applicationManager/running' "$CALLS")" -eq 6 ]
     not grep -qE 'getSystemSettings|closeByAppId' "$CALLS"
 }
@@ -405,12 +429,12 @@ commands() {
     [ "$status" -eq 0 ]
     "$REAL_SLEEP" 0.3
     [ ! -s "$CALLS" ]
-    [ ! -e "$T/tmp/lumen-home.log" ]
+    [ ! -e "$T/lumen/log/lumen-home.log" ]
     rm "$T/lumen_disable"
     FAKE_KILL_AT=140 run_hook
     wait_done
     [ "$(grep -c closeByAppId "$CALLS")" -eq 1 ]
-    not grep -q 'round 3' "$T/tmp/lumen-home.log"
+    not grep -q 'round 3' "$T/lumen/log/lumen-home.log"
 }
 
 @test "the hook never sets anything, mounts, or touches a job, and writes only its log" {
@@ -421,10 +445,11 @@ commands() {
     not grep -qE 'setSystemSettings|setConfigs|^mount|^umount|^initctl|^reboot' "$CALLS"
     code=$(commands "$TAKEOVER/lumen-home")
     not grep -Eq '\b(setSystemSettings|setConfigs|u?mount|initctl|reboot|launch)\b' <<<"$code"
-    grep -qx 'LOG=/tmp/lumen-home.log' "$TAKEOVER/lumen-home"
+    grep -qx 'LOGDIR=/var/lib/lumen/log' "$TAKEOVER/lumen-home"
+    grep -qx 'LOG=$LOGDIR/lumen-home.log' "$TAKEOVER/lumen-home"
     run grep -Eo '>>?[[:space:]]*[^[:space:]&;)|]+' <<<"$code"
     for target in "${lines[@]}"; do
-        [[ "$target" =~ ^\>\>?[[:space:]]*(\"\$LOG\"|/dev/null)$ ]] || {
+        [[ "$target" =~ ^\>\>?[[:space:]]*(\"\$OUT\"|/dev/null)$ ]] || {
             echo "writes to $target"
             return 1
         }
@@ -461,10 +486,62 @@ commands() {
     : >"$CALLS"
     FAKE_NO_TIMEOUT=1 run_hook
     wait_done
-    log=$(cat "$T/tmp/lumen-home.log")
+    log=$(cat "$T/lumen/log/lumen-home.log")
     [[ "$log" == *"no timeout command; nothing done"* ]]
     not grep -q '^luna' "$CALLS"
     grep -q "$LG" "$T/running"
+}
+
+@test "the hook keeps one run before in lumen-home.log.1, in a folder only root may use" {
+    run_tv apply.sh
+    log="$T/lumen/log/lumen-home.log"
+    run_hook
+    wait_done
+    grep -q 'round 1: closed LG Home' "$log"
+    run_hook
+    wait_done
+    echo "$LG" >>"$T/running"
+    echo "$LG" >"$T/front"
+    run_hook
+    wait_done
+    grep -q 'round 1: LG Home is in front' "$log"
+    grep -q 'round 1: LG Home is not running' "$log.1"
+    not grep -q 'closed LG Home' "$log" "$log.1"
+    [ "$(ls "$T/lumen/log" | tr '\n' ' ')" = "lumen-home.log lumen-home.log.1 " ]
+    [ "$(stat -c %a "$T/lumen/log")" = 700 ]
+}
+
+@test "with a log folder others may write the hook logs nothing, says why, and still closes LG's Home" {
+    run_tv apply.sh
+    : >"$CALLS"
+    mkdir "$T/lumen/log"
+    chmod 777 "$T/lumen/log"
+    # The default home goes back to LG's in round 2, so the hook ends there.
+    FAKE_LG_HOME_AT=150 run_hook
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$T/lumen/log is writable by others"* ]]
+    [[ "$output" == *"no log: this run's output goes to /dev/null"* ]]
+    wait_calls getSystemSettings 2
+    [ "$(grep -c closeByAppId "$CALLS")" -eq 1 ]
+    [ -z "$(ls -A "$T/lumen/log")" ]
+}
+
+@test "home-apply.sh says when this run left no log, even with an earlier run's log there" {
+    run_tv apply.sh
+    mkdir -p "$T/takeover"
+    cp "$T/lumen-home" "$T/takeover/boot-hook"
+    run_hook
+    wait_done
+    chmod 777 "$T/lumen/log"
+    : >"$CALLS"
+    FAKE_LG_HOME_AT=150 run sh "$T/home-apply.sh" 3>&-
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"is writable by others"* ]]
+    [[ "$output" == *"takeover: no log from this run"* ]]
+    # The hook still runs its rounds, unlogged, and the old log is untouched.
+    wait_calls getSystemSettings 2
+    not grep -q 'not Lumen' "$T/lumen/log/lumen-home.log"
+    [ ! -e "$T/lumen/log/lumen-home.log.1" ]
 }
 
 # --- the key filter, put on the fake TV through tools/takeover.sh
@@ -692,7 +769,7 @@ commands() {
     [ -z "$(ls "$T/initd" | grep -v '^lumen-home$')" ]
     stage_clean
     not grep -q '^luna' "$CALLS"
-    [ ! -e "$T/tmp/lumen-home.log" ]
+    [ ! -e "$T/lumen/log/lumen-home.log" ]
 }
 
 @test "a staged hook that differs from the PC's installs nothing anywhere" {
@@ -758,22 +835,23 @@ commands() {
     done
 }
 
-@test "nothing in takeover/ writes outside /var/lib/lumen and /tmp, but the hook into init.d" {
+@test "nothing in takeover/ writes outside /var/lib/lumen, but the hook into init.d" {
     for f in $SCRIPTS; do
         code=$(commands "$TAKEOVER/$f")
-        # Each path variable is under /var/lib/lumen's takeover or stage
-        # folder, or /tmp; hook-install.sh alone names init.d's hook.
+        # Each path variable is under /var/lib/lumen's takeover, stage or log
+        # folder, never /tmp; hook-install.sh alone names init.d's hook.
         while IFS='=' read -r name value; do
             case $f:$name=$value in
-                *=/var/lib/lumen/takeover | *='$DIR/'* | *=/tmp/lumen-home*) ;;
+                *=/var/lib/lumen/takeover | *='$DIR/'*) ;;
+                *:LOGDIR=/var/lib/lumen/log | *:LOG='$LOGDIR/'* | *:LOG=/var/lib/lumen/log/lumen-home.log) ;;
                 *:STAGE=/var/lib/lumen/stage | *:STAGED='$STAGE/'*) ;;
                 hook-install.sh:HOOK_DEST=/var/lib/webosbrew/init.d/lumen-home) ;;
                 *) echo "$f: $name=$value"; return 1 ;;
             esac
-        done < <(grep -E '^(DIR|BEFORE|FILTER|STAGE|STAGED|SAVED|LOG|HOOK_DEST)=' "$TAKEOVER/$f")
+        done < <(grep -E '^(DIR|BEFORE|FILTER|STAGE|STAGED|SAVED|LOG|LOGDIR|HOOK_DEST)=' "$TAKEOVER/$f")
         run grep -Eo '>>?[[:space:]]*[^[:space:]&;)|]+' <<<"$code"
         for target in "${lines[@]}"; do
-            [[ "$target" =~ ^\>\>?[[:space:]]*(/dev/null|\"\$LOG\"|\"\$BEFORE.tmp\"|\"\$DIR/keyFilters.before.tmp\"|\"\$STAGED\")$ ]] || {
+            [[ "$target" =~ ^\>\>?[[:space:]]*(/dev/null|\"\$OUT\"|\"\$BEFORE.tmp\"|\"\$DIR/keyFilters.before.tmp\"|\"\$STAGED\")$ ]] || {
                 echo "$f writes to $target"
                 return 1
             }
@@ -839,6 +917,16 @@ commands() {
     [[ "${lines[0]}" == "script|"*"/takeover/apply.sh|" ]]
     [[ "${lines[1]}" == "script|"*"/takeover/undo.sh|" ]]
     [ "${#lines[@]}" -eq 2 ]
+}
+
+@test "takeover.sh hook status reads the hook's logs from /var/lib/lumen/log" {
+    run "$CTL" hook status
+    [ "$status" -eq 0 ]
+    calls=$(cat "$T/tvcalls")
+    [[ "$calls" == *"tail -n 30 /var/lib/lumen/log/lumen-home.log;"* ]]
+    [[ "$calls" == *"tail -n 5 /var/lib/lumen/log/lumen-home.log.1;"* ]]
+    [[ "$calls" == *"no log: the hook has not run"* ]]
+    [[ "$calls" != *"/tmp"* ]]
 }
 
 @test "takeover.sh hook remove deletes only the hook" {

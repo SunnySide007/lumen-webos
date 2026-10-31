@@ -16,6 +16,7 @@ APP=/media/developer/apps/usr/palm/applications/$ID
 DIR=/var/lib/lumen/takeover
 HOOK=/var/lib/webosbrew/init.d/lumen-home
 FILTER=$DIR/lumen-home.js
+LOG=/var/lib/lumen/log/lumen-home.log
 
 # busybox before 1.30 wants `timeout -t SECS`; coreutils wants `timeout SECS`.
 if timeout -t 1 true >/dev/null 2>&1; then
@@ -65,7 +66,12 @@ call com.webos.applicationManager/getForegroundAppInfo '{}'
 echo "== the boot hook"
 echo "hook in init.d: $(sha "$HOOK")"
 echo "hook's by-hand copy: $(sha "$DIR/boot-hook")"
-tail -n 20 /tmp/lumen-home.log 2>/dev/null || echo "no hook log since the last boot"
+if [ -f "$LOG" ]; then
+    echo "hook log, the latest run:"
+    tail -n 20 "$LOG"
+else
+    echo "no log: the hook has not run, or its log folder failed its check"
+fi
 
 echo "== the key filter"
 echo "filter file: $(sha "$FILTER")"

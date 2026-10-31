@@ -16,6 +16,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TV=${LUMEN_TV_SH:-$ROOT/tools/tv.sh}
 HOOK=$ROOT/profiles/privacy/lumen-privacy
 DEST=/var/lib/webosbrew/init.d/lumen-privacy
+LOG=/var/lib/lumen/log/lumen-privacy.log
 # Uploads land where only root can write: the app jails share /tmp.
 STAGE=/var/lib/lumen/stage
 NEW=$STAGE/lumen-privacy
@@ -37,7 +38,8 @@ case ${1:-} in
         "$TV" run "if [ -f $DEST ]; then echo \"on the TV:    \$(sha256sum < $DEST | cut -d' ' -f1)\"; else echo 'on the TV:    not installed'; fi
             for job in crashreportd rdxd uploadd remotelogger; do initctl status \$job; done
             iptables -L INPUT -n -v | grep 'dpt:11111' || echo 'no tcp 11111 rule'
-            tail -n 20 /tmp/lumen-privacy.log 2>/dev/null || echo 'no log since the last boot'"
+            if [ -f $LOG ]; then echo '$LOG, the latest run:'; tail -n 20 $LOG; else echo 'no log: the hook has not run, or its log folder failed its check:'; ls -ld /var/lib/lumen /var/lib/lumen/log 2>&1; fi
+            if [ -f $LOG.1 ]; then echo '$LOG.1, the run before:'; tail -n 5 $LOG.1; fi"
         ;;
     install)
         "$TV" run "umask 077; mkdir -p $STAGE && [ ! -L $STAGE ]" || die "could not make $STAGE on the TV"

@@ -245,7 +245,11 @@ lumen-guard --probe ADDR:PORT [--name NAME]
   Center).
 - **Started** by `profiles/privacy/lumen-guard` in
   `/var/lib/webosbrew/init.d`. It does nothing while the kill switch exists,
-  returns at once and logs to `/tmp/lumen-guard.log`. In the background it
+  returns at once and logs to `/var/lib/lumen/log/lumen-guard.log`, keeping
+  the run before as `lumen-guard.log.1`; never to `/tmp`, which the app jails
+  share. When that folder or `/var/lib/lumen` is a link, or writable or owned
+  by anyone but root, the hook starts Guard all the same, unlogged, and
+  `tools/guard.sh status` says "no log". In the background it
   finds the upstream (connman's newest `Nameservers=` line in
   `/var/lib/connman/*/settings`, else an address the owner wrote to
   `/var/lib/lumen/guard/upstream`, never loopback). It starts Guard, keeps
