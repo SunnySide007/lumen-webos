@@ -155,7 +155,12 @@ the B9 doesn't expose its clock speeds.
 **Status.** Proposed on 2026-10-23, with the code that carries it out
 ([specs/shell-mvp.md](specs/shell-mvp.md), "Home loop: deepening the
 loop"). It becomes accepted once `lumen-tv-check` on the B9 shows the same
-missed vsyncs, frame-3 times, key to frame and start-up as 3a89955.
+missed vsyncs, frame-3 times, key to frame and start-up as 3a89955. Run on
+2026-10-31, back to back with 3a89955: the missed vsyncs, frame-3 times
+and key to frame were the same; start-up was not compared like for like,
+since the two were launched over different apps ("Measured on the B9", 17,
+in specs/shell-mvp.md). Merged into `main` the same day; acceptance is the
+owner's call.
 
 **Context.** The home loop (GLOSSARY.md) called SDL, GL and the clock from
 inside one 323-line function, and no test reached it. Three of the four bugs

@@ -1050,6 +1050,25 @@ build ran on 2026-10-23 at 01:42 UTC (report:
     work (5 glyphs and a 128 KB icon). The missed vsyncs are as before: 10
     of 16 bursts had a frame over 25 ms, and 9 of the 11 slow frames were
     frame 3. The owner saw no difference on screen.
+17. **The home loop behind adapters** ("Home loop: deepening the loop";
+    `refactor/loop-pass` merged on `main`, binary fa35105c…) against
+    3a89955 (b1605833…), back to back on 2026-10-31 with the same moves,
+    arrows held around the grid with no OK (report
+    `tools/out/archive/tv-check-20261031T184850Z`):
+    * Frames: 17.00 against 17.05 ms on average; a frame over 25 ms in 25
+      of 28 bursts against 40 of 44; frame 3 slow in 23 of 28 against 35
+      of 44, in `submit` (p50 32.09 against 32.06 ms); no uploads in
+      either; 8.7 against 11.3 vsyncs skipped per 10 s of motion.
+    * Key to frame: the same two groups in both, 1–2 ms for a press made
+      while idle and one period (15–18 ms) for one made while moving; 61
+      of 61 and 55 of 56 within 33 ms. The medians (17 and 2 ms) differ
+      by how many presses came while moving (41 of 61, 22 of 56).
+    * Start-up: 736 ms launched over Netflix and 554 ms (3a89955) over
+      HDMI 3, the gap in `gl` and `renderer`; not like for like.
+    * The same day: LG's installer reads an IPK staged in root's
+      `/var/lib/lumen/stage`; and the app's files and folders, 0755 when
+      3a89955 was installed on 2026-10-23, were all 0777 before the run
+      (cause unknown; each install sets 0755 again).
 
 Still open:
 
