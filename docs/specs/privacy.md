@@ -128,7 +128,7 @@ From the setting down to the wire; each catches what the one above misses.
 |---|---|---|---|---|
 | 1 | LG's switches | ACR, ad profiles, recommendations | LG Settings | done |
 | 2 | LG Home out of the way | launcher, beacon and promotion calls at their source | the shell as home (Phase 3) | measure with layer 3's log once the shell owns Home |
-| 3 | Names | telemetry, ads, AI, ThinQ, with suffix rules | Lumen Guard, below | G1 (log only) built; rebuilt around `resolv.conf` after its first by-hand run (2026-10-31); the new hook not yet run on the TV |
+| 3 | Names | telemetry, ads, AI, ThinQ, with suffix rules | Lumen Guard, below | G1 (log only) built; rebuilt around `resolv.conf` after its first by-hand run (2026-10-31); the new hook passed by hand the same day, not yet installed |
 | 4 | Senders | LG jobs that report | stop them at run time, one per check, from the list above; never `tvdataexchanger` or `alwaysready` | measured; four proposed for S1 |
 | 5 | Addresses | hard-coded endpoints, public resolvers | iptables `OUTPUT` rules; LG-owned addresses only, never AWS or CDN ranges (the store is on AWS: five us-west-2 addresses) | possible: netfilter measured |
 | 6 | Identifiers | the MAC inside the TV's IPv6 address | IPv6 off in LG's settings | done 2026-10-28: `ipv6Enable` false, no IPv6 address on `wlan0` |
@@ -151,8 +151,9 @@ toolchain (`tools/dev.sh make guard`, into `dist/guard/`). Stage G1, which
 only logs, was built on 2026-10-30. Its first hook sent lookups to Guard
 with a nat redirect. On the B9 on 2026-10-31 that redirect failed by hand and
 the hook failed open as designed. The hook was rebuilt around a
-`resolv.conf` mount, which had been proven by hand the same day. The new
-hook has not yet run on the TV.
+`resolv.conf` mount, which had been proven by hand the same day, and the
+new hook passed its by-hand run later that day (b9.md, "Resolver"): the
+start, the lookups, the kill switch, a Wi-Fi drop and a hung Guard.
 
 ```text
 lumen-guard --listen ADDR:PORT --upstream ADDR:PORT --rules DIR --log DIR --status FILE
@@ -171,7 +172,9 @@ lumen-guard --probe ADDR:PORT [--name NAME]
     Guard directly. That includes every app launched after it, because the
     app jails copy `/etc/resolv.conf` at launch. Done by hand, `ping` and
     `wget` resolved through Guard in under a second. Homebrew's hosts-file
-    sinkholes still applied first.
+    sinkholes still applied first. The jail's copy stays when Guard stops,
+    so an app launched while Guard ran keeps asking 127.0.0.2 after a
+    fail-open, until it is launched again (P11).
   - Not everything. glibc 2.24 reads `resolv.conf` when a process first
     resolves, not when the file changes. So processes started before the
     mount keep asking connman, and connman forwards to the router unlogged.
@@ -195,9 +198,10 @@ lumen-guard --probe ADDR:PORT [--name NAME]
     iptables -t nat -A OUTPUT -p tcp --dport 53 ! -o lo ! -d <router> -m dscp ! --dscp 7 -j DNAT --to-destination 127.0.0.2:53
     ```
 
-    No such program has been seen on the B9 yet. Whether DNAT to loopback
-    works for a socket not bound to `wlan0` is not yet measured on the TV.
-    There is no owner match, so Guard marks its own upstream packets with
+    Netflix is such a program: `netflix.bin` sends its own lookups to
+    8.8.8.8, and on 2026-10-31 these rules brought them to Guard, which
+    answered; DNAT to loopback works both ways for a socket not bound to
+    `wlan0` (b9.md, "Resolver"). There is no owner match, so Guard marks its own upstream packets with
     DSCP 7 (`IP_TOS`, set before the first packet, the TCP SYN included),
     and the rules skip them. 7 comes from RFC 2474's pool for local use and
     is in the same priority class as unmarked packets. A fixed source port
@@ -283,8 +287,8 @@ lumen-guard --probe ADDR:PORT [--name NAME]
 - **Small surface:** about 1,400 lines of Rust besides its tests: `std`, and
   the `libc` crate in one module (`sys.rs`: the DSCP mark, `poll`, SIGTERM,
   the local date and the `getauxval` shim), with `unsafe` denied everywhere
-  else. Two threads, UDP and TCP; under 4 MB resident is the target, to be
-  measured on the TV.
+  else. Two threads, UDP and TCP; under 4 MB resident was the target, and
+  the B9 measured 940 kB on 2026-10-31.
 
 | | Glasshouse hosts | dnsmasq, static | Lumen Guard |
 |---|---|---|---|
@@ -306,7 +310,7 @@ Each is undone by a reboot until it becomes a boot hook, and each ends with
 |---|---|---|
 | S0 | `tools/recon.sh --privacy`, the read-only survey | done: two runs on 2026-10-28 (above) |
 | S1 | Quick fixes. Owner, in LG Settings: IPv6 off. By hand over SSH, undone by a reboot: `initctl stop` for `uploadd`, `rdxd`, `crashreportd` and `remotelogger`; an `INPUT` rule rejecting tcp 11111 from the LAN; P9 and P10's answers. Then one boot hook for whatever passed. `nsu.lge.com` waits for Guard (G2) | each checked; the checklist passes, also after a cold boot with the hook. Applied by hand 2026-10-28 06:30 UTC with `profiles/privacy/s1-apply.sh` (undo: `s1-undo.sh` or a reboot): the four jobs stayed stopped, tcp 11111 no longer answers from the LAN, DIAL still does; the owner's checklist passed the same day. A full backup (`tools/backup.sh`) was taken at 06:52 UTC, before any boot hook. The boot hook (`profiles/privacy/lumen-privacy`, SHA-256 `35747be3…`) was installed with `tools/privacy-hook.sh install` at 07:00 UTC, the first persistent change. After a reboot at 07:03:49 UTC it added the rule and stopped all four jobs at 07:04:23, about 37 s into the boot; tcp 11111 again didn't answer from the LAN, and DIAL did. Still owed: the owner's quick check (Netflix, casting) after that boot |
-| G1 | Guard, log only: forwards everything | a week of names across power-offs, summarised like the capture. Built 2026-10-30 (`shell/crates/lumen-guard`, `profiles/privacy/lumen-guard`, `tools/guard.sh`). The redirect design was tried by hand on the B9 on 2026-10-31 and failed open as designed. The hook was rebuilt around `resolv.conf`, a design proven by hand the same day. Next: the by-hand run of the new hook with `guard-apply.sh`, then the hook |
+| G1 | Guard, log only: forwards everything | a week of names across power-offs, summarised like the capture. Built 2026-10-30 (`shell/crates/lumen-guard`, `profiles/privacy/lumen-guard`, `tools/guard.sh`). The redirect design was tried by hand on the B9 on 2026-10-31 and failed open as designed. The hook was rebuilt around `resolv.conf`, a design proven by hand the same day. The new hook passed its by-hand run on 2026-10-31 15:25 to 15:54 UTC: one read-only mount, both rules, 940 kB resident, Netflix's own resolver (8.8.8.8) caught by the rules, the kill switch failing open in 5 s, a Wi-Fi drop survived, a hung Guard failing open in 2 min 51 s, nothing left after `guard-undo.sh`. Next: P11, then `tools/backup.sh`, `tools/guard.sh install`, a cold boot and a week of log |
 | G2 | Guard blocks: required hosts and the confirmed list | the store-safe check and the checklist pass, also after a cold boot |
 | G3 | Encrypted upstream (P4) | lookups leave the TV only to the chosen resolver |
 | G4 | Senders stopped, one job per check | each job's effect is recorded; the checklist passes |
@@ -328,3 +332,4 @@ G1 replaces the Stage C capture of the runbook; G2 replaces Stages C7–D.
 | P8 | Run the second survey (listening programs, reporting jobs' start-up) | done 2026-10-28 |
 | P9 | Does anyone at home use AirPlay or HomeKit (an iPhone, iPad or Mac)? | if not, reject tcp 7000 and 35254 from the LAN |
 | P10 | Ports 3000 and 3001: does the family use LG ThinQ, a phone remote app or Web Video Caster? | if not, reject them; if so, keep them open, since the router hands out addresses and a rule per phone would need fixed ones |
+| P11 | After a fail-open, an app launched while Guard ran keeps asking 127.0.0.2 (its jail's copy of `resolv.conf`) and can't resolve until it is launched again. Accept that, or have Guard's file name connman's proxy second (`nameserver 127.0.0.2`, then `nameserver 127.0.0.1`), so glibc moves on to connman when nothing listens on 127.0.0.2 | name connman second, tried by hand first: a mount with both lines and no Guard, then a lookup that should come back through connman at once |
