@@ -91,7 +91,8 @@ wait_done() {
 @test "with the rule and the jobs already in place the hook changes nothing" {
     FAKE_RULE=1 FAKE_STOPPED=1 run_hook
     wait_done
-    ! grep -q -E '^(iptables -I|initctl stop)' "$CALLS"
+    run grep -q -E '^(iptables -I|initctl stop)' "$CALLS"
+    [ "$status" -eq 1 ]
     grep -q 'rule already in place' "$T/log"
 }
 
@@ -125,7 +126,8 @@ wait_done() {
     FAKE_BAD_SHA=1 run "$HOOKCTL" install
     [ "$status" -eq 1 ]
     [[ "$output" == *"is not this checkout's"* ]]
-    ! grep -qx 'run|/var/lib/webosbrew/init.d/lumen-privacy|' "$CALLS"
+    run grep -qx 'run|/var/lib/webosbrew/init.d/lumen-privacy|' "$CALLS"
+    [ "$status" -eq 1 ]
 }
 
 @test "privacy-hook.sh remove deletes only the hook" {
