@@ -21,6 +21,8 @@
 #                                                                the shell, a burst of motion
 #   drew 23 frames in 371 ms (avg 16.85 ms, worst 28.41 ms, 36 quads); first 28.41, 16.70, 16.68 ms; idle
 #                                                                the same, with its frames 2 to 4
+#   drew 21 frames in 343 ms (avg 17.13 ms, worst 33.45 ms, 52 quads); first 8.79, 33.45, 16.67 ms; 0 vsyncs skipped; idle
+#                                                                the same, from a shell with the vsync pacer
 #   SDL repeat 2 of scancode 79: 533 ms after the press, 33 ms after the last
 #
 # A window is about a second of frames. The log keeps one average and one worst
@@ -41,6 +43,7 @@
 #   foreground: not shown after 5700 ms: <why>
 #   launch <id>: answered in 45 ms
 #   launch <id>: failed after 12 ms: <error text>
+#   launch <id>: dropped: the window was hidden
 #   window focus lost: last key 12.3 s ago, 1 other events since
 #   window focus lost: no key yet, 3 other events since
 # These lines are matched by their fixed fields, so "key down scancode ..." and
@@ -72,6 +75,29 @@
 # of its time (nearest rank), how many uploaded (and the KB) or rasterised
 # glyphs, and their page faults; then the first frames, with in how many bursts
 # frame 2, 3 and 4 took over --miss-ms, each over the bursts that drew it.
+#
+# Stage 3 lines, only from a shell with the vsync pacer (docs/specs/look-and-feel.md,
+# "Log lines"), besides the "vsyncs skipped" part of the burst line above:
+#   motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms
+#   warm: 137 glyphs, 134 uploads, 769 KB in 156.5 ms
+# A burst's "<K> vsyncs skipped" counts the vsyncs of the burst that showed the
+# frame before again, 0 included; a burst with no pacer (--fixed-dt, or no vsync)
+# has none. The burst section then adds the skip count: how many bursts carry the
+# part, the vsyncs skipped in all and in how many bursts, the rate per 10 s of
+# motion (the bursts' "in <ms> ms" summed) and the worst burst. The part changes
+# no other statistic. "motion paced" is logged once at start-up: the period that
+# motion steps by and where it came from, what SDL_webOSGetRefreshRate and SDL's
+# display mode each said ("<n> Hz", "absent" or "failed") and the time to read
+# them. "warm" is logged once at the first idle: the glyphs made ahead, the atlas
+# uploads that took, their KB and the time. A log of several runs holds several of
+# each; the paced and warm sections, after the first frames, show the first with
+# the count. A dropped launch is listed with the others and counted by reason; no
+# call was made, so target 6 is over the others.
+#
+# Both lines come at start-up, so a --since after the launch loses them, as it
+# loses "start:". The stage 3 statements ("not paced", "no ... line") are made
+# only when the period holds a stage 3 line (a skip count, "motion paced" or
+# "warm"), so a log from before stage 3 prints what it always did.
 #
 # Input lines, only from the shell (<state> is LG's power state, such as
 # "Active" or "Screen Saver", and may hold spaces; "last input" is the seconds
@@ -206,10 +232,30 @@ function first_times(n,   i, k, t, s, comma) {
         t[++k] = s + 0
         if (!comma) break
     }
-    if (comma || $(i + 1) != "ms;" || $(i + 2) != "idle" || k > n - 1) return
+    if (comma || $(i + 1) != "ms;" || k > n - 1) return
+    # What closes the line: "idle", or "<K> vsyncs skipped; idle" from a paced burst.
+    if (!($(i + 2) == "idle" || (whole($(i + 2)) && $(i + 3) == "vsyncs" && $(i + 4) == "skipped;" && $(i + 5) == "idle"))) return
     nbf++
     for (i = 1; i <= k; i++) if (t[i] > missv) bfover[i + 1]++
 }
+# The "; 2 vsyncs skipped; idle" that closes the line of a paced burst, as its
+# count; -1 when the line does not end so (a burst with no pacer has no such part).
+function skipped_vsyncs() {
+    if (NF < 5 || $NF != "idle" || $(NF - 1) != "skipped;" || $(NF - 2) != "vsyncs" || !whole($(NF - 3))) return -1
+    if ($(NF - 4) != "ms;" && $(NF - 4) != "quads);") return -1
+    return $(NF - 3) + 0
+}
+# A rate as the motion paced line prints it from field i, with sep ("," or ";")
+# after it: "120 Hz", "absent" or "failed", else "". Sets rate_next to the field
+# after it.
+function rate(i, sep) {
+    rate_next = i + 1
+    if ($i == "absent" sep || $i == "failed" sep) return substr($i, 1, length($i) - 1)
+    if ($i ~ /^-?[0-9]+$/ && $(i + 1) == "Hz" sep) { rate_next = i + 2; return $i " Hz" }
+    return ""
+}
+# What a rate says in words.
+function answered(r) { return (r == "absent" || r == "failed") ? r : "answered " r }
 # The keys of counts[] in alphabetical order in names[1..n]; returns n.
 function sorted_keys(counts, names,   k, n, raw) {
     n = 0
@@ -217,11 +263,13 @@ function sorted_keys(counts, names,   k, n, raw) {
     if (n > 0) isort(raw, n, names)
     return n
 }
-# One line for each reason a press or a wake-up was not shown.
-function by_reason(counts,   names, n, i) {
+# One line under the label for each reason in counts[].
+function by_label(label, counts,   names, n, i) {
     n = sorted_keys(counts, names)
-    for (i = 1; i <= n; i++) printf "  %-16s %d %s\n", "not shown", counts[names[i]], names[i]
+    for (i = 1; i <= n; i++) printf "  %-16s %d %s\n", label, counts[names[i]], names[i]
 }
+# One line for each reason a press or a wake-up was not shown.
+function by_reason(counts) { by_label("not shown", counts) }
 
 # One part of the slow frames: its p50 (nearest rank) and max.
 function slow_part(label, src,   s) {
@@ -274,10 +322,50 @@ function report_foreground(   fs) {
     if (nfn > 0) by_reason(fnot)
 }
 function report_launches(   i) {
-    if (nl == 0) return
-    printf "launches (launch <id>: lines): %d, %d failed\n", nl, nlfail
-    for (i = 1; i <= nl; i++) printf "  %s\n", lline[i]
-    printf "  %-16s %d of %d within 100 ms\n", "target 6", lwithin, nl
+    if (nl + nld == 0) return
+    # A dropped launch was never called: it is listed and counted by reason, but
+    # target 6 is over the launches that were.
+    if (nld > 0) printf "launches (launch <id>: lines): %d, %d failed, %d dropped\n", nl + nld, nlfail, nld
+    else printf "launches (launch <id>: lines): %d, %d failed\n", nl, nlfail
+    for (i = 1; i <= nll; i++) printf "  %s\n", lline[i]
+    if (nl > 0) printf "  %-16s %d of %d within 100 ms%s\n", "target 6", lwithin, nl, (nld > 0) ? " (a dropped launch was never called)" : ""
+    if (nld > 0) by_label("dropped", ldrop)
+}
+# A stage 3 line is in the period: a burst with its skip count, the motion paced
+# line, or the warm line. The statements that something is missing are made only
+# then, so a log from before stage 3 prints what it always did.
+function stage3() { return nsfield + npaced + nwarm > 0 }
+# The skip count of the bursts that the burst statistics count: what the bursts
+# lost to missed vsyncs. A burst of one frame has no frame to miss with.
+function report_skips() {
+    if (nbs > 0) {
+        printf "  %-16s %d of %d bursts carry it\n", "skip count", nbs, nb
+        printf "  %-16s %d in all, in %d of %d bursts\n", "vsyncs skipped", bs_total, bs_with, nbs
+        if (bs_ms > 0) printf "  %-16s %.2f over %.1f s of motion\n", "per 10 s", bs_total * 10000 / bs_ms, bs_ms / 1000
+        if (bs_worst > 0) printf "  %-16s %d skipped, %d frames at %s\n", "worst burst", bs_worst, bs_worst_frames, bs_worst_at
+    } else if (stage3()) {
+        printf "  %-16s none of the %d bursts carries it%s\n", "skip count", nb, (nsfield + npaced > 0) ? "" : "; the run was not paced"
+    }
+}
+function report_paced() {
+    if (npaced == 0) {
+        if (stage3()) print "paced (motion paced: lines): no motion paced line in this period"
+        return
+    }
+    printf "paced (motion paced: lines): %d%s\n", npaced, (npaced > 1) ? ", the first shown" : ""
+    printf "  %-16s %s ms a frame%s, from %s\n", "motion steps by", paced_period, (paced_period + 0 > 0) ? sprintf(" (%.1f Hz)", 1000 / paced_period) : "", paced_source
+    printf "  %-16s SDL_webOSGetRefreshRate %s\n", "LG refresh rate", answered(paced_webos)
+    printf "  %-16s %s\n", "display mode", answered(paced_mode)
+    printf "  %-16s %s ms\n", "read in", paced_read
+}
+function report_warm() {
+    if (nwarm == 0) {
+        if (stage3()) print "warm (warm: lines): no warm line in this period"
+        return
+    }
+    printf "warm (warm: lines): %d%s\n", nwarm, (nwarm > 1) ? ", the first shown" : ""
+    printf "  %-16s %d glyphs, %d uploads, %d KB\n", "made ahead", warm_glyphs, warm_uploads, warm_kb
+    printf "  %-16s %s ms\n", "took", warm_ms
 }
 function report_focus() {
     if (nfl == 0) return
@@ -373,10 +461,15 @@ $2 == "fps" && $4 == "avg" && $6 == "ms" && $7 == "max" {
 
 # drew 40 frames in 650 ms (avg 16.30 ms, worst 17.10 ms, 1200 quads); idle
 # drew 23 frames in 371 ms (avg 16.85 ms, worst 28.41 ms, 36 quads); first 28.41, 16.70, 16.68 ms; idle
-# The "first" part comes after every field the statistics read, so they are the
-# same with or without it.
+# drew 21 frames in 343 ms (avg 17.13 ms, worst 33.45 ms, 52 quads); first 8.79, 33.45, 16.67 ms; 0 vsyncs skipped; idle
+# The "first" and "vsyncs skipped" parts come after every field the statistics
+# read, so they are the same with or without them. A burst with a pacer has the
+# skip count, 0 included; without one it has none. A burst that the statistics
+# skip (one frame) skips no vsync, but its count still shows the pacer was on.
 $2 == "drew" && $4 == "frames" && $5 == "in" && $8 == "(avg" {
     n = $3 + 0
+    k = skipped_vsyncs()
+    if (k >= 0) nsfield++
     if (n < 2) next
     nb++
     bavg[nb] = $9 + 0; bmax[nb] = $12 + 0; q = $14 + 0
@@ -386,6 +479,48 @@ $2 == "drew" && $4 == "frames" && $5 == "in" && $8 == "(avg" {
     if (bq_lo < 0 || q < bq_lo) bq_lo = q
     if (q > bq_hi) bq_hi = q
     if ($15 == "quads);" && $16 == "first") first_times(n)
+    if (k >= 0) {
+        nbs++
+        bs_total += k
+        bs_ms += $6
+        if (k > 0) bs_with++
+        # The first of equal bursts is the worst.
+        if (k > bs_worst) { bs_worst = k; bs_worst_frames = n; bs_worst_at = stamp() }
+    }
+    next
+}
+
+# motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms
+# Once at start-up with the pacer; a log that holds several runs holds several.
+# The source is "the display mode" or "the 60 Hz default"; each rate is "<n> Hz",
+# "absent" or "failed". The first line is the one shown, with the count.
+$2 == "motion" && $3 == "paced:" && decimal($4) && $5 == "ms" && $6 == "a" && $7 == "frame," && $8 == "from" {
+    if ($9 == "the" && $10 == "display" && $11 == "mode;") { psrc = "the display mode"; i = 12 }
+    else if ($9 == "the" && whole($10) && $11 == "Hz" && $12 == "default;") { psrc = "the " $10 " Hz default"; i = 13 }
+    else next
+    if ($i != "SDL_webOSGetRefreshRate") next
+    r1 = rate(i + 1, ",")
+    if (r1 == "") next
+    i = rate_next
+    if ($i != "display" || $(i + 1) != "mode") next
+    r2 = rate(i + 2, ";")
+    if (r2 == "") next
+    i = rate_next
+    if ($i != "read" || $(i + 1) != "in" || !decimal($(i + 2)) || $(i + 3) != "ms" || NF != i + 3) next
+    if (++npaced == 1) {
+        paced_period = $4; paced_source = psrc; paced_webos = r1; paced_mode = r2; paced_read = $(i + 2)
+    }
+    next
+}
+
+# warm: 137 glyphs, 134 uploads, 769 KB in 156.5 ms
+# Once, at the first idle after the first frame (real clock only), so a log that
+# holds several runs holds several. The first line is the one shown, with the count.
+$2 == "warm:" && whole($3) && $4 == "glyphs," && whole($5) && $6 == "uploads," && whole($7) && $8 == "KB" &&
+    $9 == "in" && decimal($10) && $11 == "ms" && NF == 11 {
+    if (++nwarm == 1) {
+        warm_glyphs = $3; warm_uploads = $5; warm_kb = $7; warm_ms = $10
+    }
     next
 }
 
@@ -509,18 +644,29 @@ $2 == "foreground:" && $3 == "not" && $4 == "shown" && $5 == "after" && whole($6
 
 # launch com.webos.app.hdmi1: answered in 45 ms
 # launch com.example.missing: failed after 12 ms: Permission denied
-# A failed launch is counted but is never within the time that target 6 sets.
+# launch com.webos.app.hdmi1: dropped: the window was hidden
+# A failed launch is counted but is never within the time that target 6 sets. A
+# dropped launch was asked for and never called, so it has no time and is left
+# out of that count.
 $2 == "launch" && $3 ~ /^[^:]+:$/ && $4 == "answered" && $5 == "in" && whole($6) && $7 == "ms" {
     nl++
     if ($6 + 0 <= 100) lwithin++
-    lline[nl] = sprintf("%s answered in %d ms", $3, $6 + 0)
+    lline[++nll] = sprintf("%s answered in %d ms", $3, $6 + 0)
     next
 }
 $2 == "launch" && $3 ~ /^[^:]+:$/ && $4 == "failed" && $5 == "after" && whole($6) && $7 == "ms:" {
     nl++
     nlfail++
     why = rest(8)
-    lline[nl] = sprintf("%s failed after %d ms%s", $3, $6 + 0, ((why == "") ? "" : ": " why))
+    lline[++nll] = sprintf("%s failed after %d ms%s", $3, $6 + 0, ((why == "") ? "" : ": " why))
+    next
+}
+$2 == "launch" && $3 ~ /^[^:]+:$/ && $4 == "dropped:" {
+    why = rest(5)
+    if (why == "") why = "no reason given"
+    nld++
+    ldrop[why]++
+    lline[++nll] = sprintf("%s dropped: %s", $3, why)
     next
 }
 
@@ -670,6 +816,7 @@ function frame_report(   avg, shown) {
         spread("burst average", bavg, nb)
         printf "  missed vsync     %d of %d bursts had a frame over %g ms\n", bmissed, nb, missv
         quads(bq_lo, bq_hi)
+        report_skips()
     }
     if (nrep > 0) {
         printf "key repeats (SDL repeat lines): %d lines from %d holds\n", nrep, nfirst
@@ -693,6 +840,8 @@ END {
     if (frames_seen) frame_report()
     report_slow()
     report_first()
+    report_paced()
+    report_warm()
     report_keys()
     report_starts()
     report_foreground()

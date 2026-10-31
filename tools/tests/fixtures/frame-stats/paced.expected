@@ -1,0 +1,36 @@
+bursts (drew ... idle): 5, 172 frames, 2.9 s
+  average frame    17.08 ms (58.5 fps)
+  worst frame      33.63 ms
+  burst worst      p50 32.54  p95 33.63  p99 33.63 ms
+  burst average    p50 16.96  p95 17.83  p99 17.83 ms
+  missed vsync     5 of 5 bursts had a frame over 25 ms
+  quads            39 to 52
+  skip count       5 of 5 bursts carry it
+  vsyncs skipped   2 in all, in 1 of 5 bursts
+  per 10 s         7.01 over 2.9 s of motion
+  worst burst      2 skipped, 28 frames at 1792723995.418
+note: the log keeps one average and one worst frame per window or burst, so percentiles are over those, not over single frames
+slow frames (slow frame lines): 7, 0 more not logged
+  which frame      frame 2: 1, frame 3: 4, frame 4: 0, later: 2
+  loop             p50 0.04  max 0.12 ms
+  batch            p50 0.28  max 0.38 ms
+  upload           p50 0.00  max 0.00 ms
+  submit           p50 31.52  max 32.73 ms
+  swap             p50 0.40  max 0.51 ms
+  uploads          0 of 7 had uploads, 0 KB in all
+  glyphs           0 of 7 rasterised glyphs, 0 in all
+  page faults      1 minor, 0 major; 0 of 7 counted had a major fault
+first frames: in 5 bursts with first times, frame 2 over 25 ms in 1, frame 3 in 4, frame 4 in 0
+paced (motion paced: lines): 1
+  motion steps by  16.667 ms a frame (60.0 Hz), from the 60 Hz default
+  LG refresh rate  SDL_webOSGetRefreshRate answered 120 Hz
+  display mode     answered 0 Hz
+  read in          10.2 ms
+warm (warm: lines): 1
+  made ahead       137 glyphs, 134 uploads, 769 KB
+  took             156.5 ms
+key presses (key ...: lines): 7 shown, 0 not shown, 0 more not timed
+  shown after      p50 2  p95 16  max 16 ms
+  target 2         7 of 7 within 33 ms
+start-ups (start: lines): 1
+  sdl 227 ms, gl 70 ms, renderer 49 ms, assets 160 ms, apps 67 ms, first frame 43 ms (616 ms in all)

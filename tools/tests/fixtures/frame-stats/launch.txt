@@ -1,0 +1,9 @@
+[1792655564.066] key 40: shown after 1 ms
+[1792655564.083] luna launch: 17 ms
+[1792655564.083] launch com.webos.app.hdmi1: answered in 17 ms
+[1792655580.200] launch com.webos.app.hdmi1: dropped: the window was hidden
+[1792655610.410] key 40: shown after 1 ms
+[1792655610.425] luna launch: 15 ms
+[1792655610.425] launch com.webos.app.hdmi1: answered in 16 ms
+[1792655700.300] launch org.webosbrew.hbchannel: dropped: the shell is leaving
+[1792655750.000] launch com.webos.app.hdmi1: dropped: the window was hidden

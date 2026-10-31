@@ -1,0 +1,9 @@
+[1792655538.914] start: sdl 181, gl 331, renderer 383, assets 1315, apps 1376, first frame 1422 ms
+[1792655538.914] drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 48 quads); idle
+[1792655538.938] drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 49 quads); idle
+[1792655549.562] key 80: shown after 2 ms
+[1792655549.600] slow frame 3: 29.26 ms = loop 0.04 + batch 0.28 + upload 0.00 + submit 28.51 + swap 0.43 ms; 0 uploads, 0 KB, 0 glyphs; faults 0 minor, 0 major
+[1792655554.274] drew 281 frames in 4713 ms (avg 16.83 ms, worst 33.55 ms, 53 quads); first 9.04, 29.26, 15.76 ms; idle
+[1792655554.358] slow frame 3: 33.04 ms = loop 0.04 + batch 0.34 + upload 0.00 + submit 32.36 + swap 0.30 ms; 0 uploads, 0 KB, 0 glyphs; faults 0 minor, 0 major
+[1792655554.924] drew 37 frames in 608 ms (avg 16.90 ms, worst 33.04 ms, 51 quads); first 9.18, 33.04, 16.26 ms; idle
+[1792655554.946] key 81: shown after 1 ms
