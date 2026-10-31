@@ -16,6 +16,16 @@ const GUARD: &str = env!("CARGO_BIN_EXE_lumen-guard");
 /// The name the fake upstream never answers.
 const SILENT: &str = "silent.example";
 
+/// Picking a free port and binding it are two steps, and the tests run in
+/// parallel: this keeps one test from taking the port another just picked.
+static PORTS: Mutex<()> = Mutex::new(());
+
+fn ports() -> std::sync::MutexGuard<'static, ()> {
+    PORTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn query(id: u16, name: &str, qtype: u16) -> Vec<u8> {
     let mut msg = id.to_be_bytes().to_vec();
     msg.extend_from_slice(&[0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0]);
@@ -53,7 +63,10 @@ struct Upstream {
 
 impl Upstream {
     fn start(tcp_pad: usize) -> Self {
-        let (udp, tcp) = bind_pair();
+        let (udp, tcp) = {
+            let _ports = ports();
+            bind_pair()
+        };
         let addr = udp.local_addr().unwrap();
         let got = Arc::new(Mutex::new(Vec::new()));
         let seen = Arc::clone(&got);
@@ -134,6 +147,8 @@ impl Guard {
         ] {
             fs::copy(fixture.join(file), dir.join("rules").join(file)).unwrap();
         }
+        // Held until Guard answers, so its port is still free when it binds.
+        let ports = ports();
         let listen: SocketAddr = format!("127.0.0.1:{}", free_port()).parse().unwrap();
         let child = Command::new(GUARD)
             .arg("--listen")
@@ -150,14 +165,26 @@ impl Guard {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let guard = Self { child, listen, dir };
+        let mut guard = Self { child, listen, dir };
         guard.wait_until_answering();
+        drop(ports);
         guard
     }
 
-    fn wait_until_answering(&self) {
+    fn wait_until_answering(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
+            if let Ok(Some(status)) = self.child.try_wait() {
+                let mut err = String::new();
+                if let Some(mut stderr) = self.child.stderr.take() {
+                    let _ = stderr.read_to_string(&mut err);
+                }
+                panic!(
+                    "lumen-guard exited with {status} before answering on {}: {}",
+                    self.listen,
+                    err.trim()
+                );
+            }
             let probe = Command::new(GUARD)
                 .args(["--probe", &self.listen.to_string()])
                 .stderr(Stdio::null())
