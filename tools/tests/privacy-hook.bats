@@ -9,9 +9,13 @@ setup() {
     : >"$CALLS"
     export CALLS
     mkdir -p "$T/bin"
-    # The hook with its kill switch and log moved into this test's folder.
+    # The hook with its kill switch and log folder moved into this test's
+    # folder, and root's uid to ours; /var/lib/lumen as on the TV.
+    mkdir -m 755 "$T/lumen"
+    LOG="$T/lumen/log/lumen-privacy.log"
     sed -e "s|/var/luna/preferences/lumen_disable|$T/lumen_disable|" \
-        -e "s|/tmp/lumen-privacy.log|$T/log|" \
+        -e "s|/var/lib/lumen/log|$T/lumen/log|" \
+        -e "s|^ROOT_UID=0\$|ROOT_UID=$(id -u)|" \
         "$BATS_TEST_DIRNAME/../../profiles/privacy/lumen-privacy" >"$T/hook"
     cat >"$T/bin/initctl" <<'EOF'
 #!/bin/sh
@@ -59,7 +63,7 @@ run_hook() {
 # The hook works in the background; wait for its last line.
 wait_done() {
     for _ in $(seq 100); do
-        grep -q 'lumen-privacy: done' "$T/log" 2>/dev/null && return 0
+        grep -q 'lumen-privacy: done' "$LOG" 2>/dev/null && return 0
         sleep 0.1
     done
     return 1
@@ -79,7 +83,7 @@ wait_done() {
     run grep '^iptables -I' "$CALLS"
     [ "${#lines[@]}" -eq 1 ]
     [ "${lines[0]}" = "iptables -I INPUT -p tcp --dport 11111 ! -i lo -j REJECT" ]
-    grep -q 'tcp 11111 rejected from the LAN' "$T/log"
+    grep -q 'tcp 11111 rejected from the LAN' "$LOG"
 }
 
 @test "the hook ends by itself after its sixty rounds" {
@@ -93,7 +97,7 @@ wait_done() {
     wait_done
     run grep -q -E '^(iptables -I|initctl stop)' "$CALLS"
     [ "$status" -eq 1 ]
-    grep -q 'rule already in place' "$T/log"
+    grep -q 'rule already in place' "$LOG"
 }
 
 @test "with the kill switch the hook does nothing at all" {
@@ -102,7 +106,77 @@ wait_done() {
     [ "$status" -eq 0 ]
     sleep 0.5
     [ ! -s "$CALLS" ]
-    [ ! -e "$T/log" ]
+    [ ! -e "$LOG" ]
+}
+
+@test "the hook keeps one run before in lumen-privacy.log.1, in a folder only root may use" {
+    run_hook
+    wait_done
+    run_hook
+    wait_done
+    grep -q 'tcp 11111 rejected from the LAN' "$LOG.1"
+    grep -q 'stopped crashreportd' "$LOG.1"
+    grep -q 'tcp 11111 rule already in place' "$LOG"
+    run grep -q 'stopped' "$LOG"
+    [ "$status" -eq 1 ]
+    [ "$(grep -c 'lumen-privacy: start' "$LOG")" -eq 1 ]
+    [ "$(ls "$T/lumen/log" | tr '\n' ' ')" = "lumen-privacy.log lumen-privacy.log.1 " ]
+    [ "$(stat -c %a "$T/lumen/log")" = 700 ]
+}
+
+# The hook with no safe log folder: it says why ($1), logs nothing, and still
+# does all its work: the rule, the four jobs, and its sixty rounds.
+works_unlogged() {
+    : >"$CALLS"
+    run_hook
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$1"* ]]
+    [[ "$output" == *"no log: this run's output goes to /dev/null"* ]]
+    for _ in $(seq 100); do
+        [ "$(grep -c '^initctl status remotelogger' "$CALLS")" -ge 60 ] && break
+        sleep 0.1
+    done
+    [ "$(grep -c '^initctl status remotelogger' "$CALLS")" -eq 60 ]
+    [ "$(grep -c '^initctl stop' "$CALLS")" -eq 4 ]
+    grep -q '^iptables -I INPUT -p tcp --dport 11111' "$CALLS"
+}
+
+@test "with a log folder that is a link the hook logs nothing, and still does its work" {
+    mkdir "$T/elsewhere"
+    ln -s "$T/elsewhere" "$T/lumen/log"
+    works_unlogged "$T/lumen/log is not a real folder"
+    [ -z "$(ls -A "$T/elsewhere")" ]
+}
+
+@test "with a log folder others may write the hook logs nothing, and still does its work" {
+    mkdir "$T/lumen/log"
+    chmod 777 "$T/lumen/log"
+    works_unlogged "$T/lumen/log is writable by others"
+    [ -z "$(ls -A "$T/lumen/log")" ]
+}
+
+@test "with /var/lib/lumen owned by someone else the hook makes no log folder, and still does its work" {
+    sed -i 's/^ROOT_UID=.*/ROOT_UID=99999/' "$T/hook"
+    works_unlogged "$T/lumen is owned by uid $(id -u), not root"
+    [ ! -e "$T/lumen/log" ]
+}
+
+@test "with /var/lib/lumen a link the hook writes nothing through it, and still does its work" {
+    rmdir "$T/lumen"
+    mkdir "$T/real"
+    ln -s "$T/real" "$T/lumen"
+    works_unlogged "$T/lumen is not a real folder"
+    [ -z "$(ls -A "$T/real")" ]
+}
+
+@test "privacy-hook.sh status reads the hook's logs from /var/lib/lumen/log" {
+    run "$HOOKCTL" status
+    [ "$status" -eq 0 ]
+    calls=$(cat "$CALLS")
+    [[ "$calls" == *"tail -n 20 /var/lib/lumen/log/lumen-privacy.log;"* ]]
+    [[ "$calls" == *"tail -n 5 /var/lib/lumen/log/lumen-privacy.log.1;"* ]]
+    [[ "$calls" == *"no log: the hook has not run"* ]]
+    [[ "$calls" != *"/tmp"* ]]
 }
 
 @test "privacy-hook.sh: an unknown command fails with usage" {

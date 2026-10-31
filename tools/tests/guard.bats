@@ -20,11 +20,14 @@ setup() {
     export T CALLS REAL_SLEEP
     : >"$CALLS"
     mkdir -p "$T/bin" "$T/tmp" "$T/guard/rules" "$T/connman" "$T/misc" "$T/etc" "$T/mstack"
+    # /var/lib/lumen as on the TV: root's, writable by no one else.
+    mkdir -m 755 "$T/lumen"
 
     # The scripts with every TV path moved into this test's folder.
     for f in lumen-guard guard-apply.sh guard-undo.sh; do
         sed -e "s|/var/luna/preferences/lumen_disable|$T/lumen_disable|g" \
-            -e "s|/tmp/lumen-guard|$T/tmp/lumen-guard|g" \
+            -e "s|/var/lib/lumen/log|$T/lumen/log|g" \
+            -e "s|^ROOT_UID=0\$|ROOT_UID=$(id -u)|" \
             -e "s|/var/lib/lumen/guard|$T/guard|g" \
             -e "s|/var/lib/connman|$T/connman|g" \
             -e "s|/var/lib/misc/resolv.conf|$T/misc/resolv.conf|g" \
@@ -135,8 +138,9 @@ EOF
 
 teardown() {
     p=$(cat "$T/guard/lumen-guard.pid" 2>/dev/null) && kill "$p" 2>/dev/null
-    # A hook still watching Guard fails open and removes the pid file.
-    if grep -q 'Guard started' "$T/tmp/lumen-guard.log" 2>/dev/null; then
+    # A hook still watching Guard fails open and removes the pid file. A
+    # second run moves the first one's log, which it goes on writing.
+    if grep -qs 'Guard started' "$T/lumen/log/lumen-guard.log" "$T/lumen/log/lumen-guard.log.1"; then
         for _ in $(seq 40); do
             [ -e "$T/guard/lumen-guard.pid" ] || break
             sleep 0.05
@@ -177,11 +181,11 @@ run_hook() {
 # The hook works in the background; wait for a line in its log.
 wait_for() {
     for _ in $(seq 200); do
-        grep -q -- "$1" "$T/tmp/lumen-guard.log" 2>/dev/null && return 0
+        grep -q -- "$1" "$T/lumen/log/lumen-guard.log" 2>/dev/null && return 0
         sleep 0.05
     done
     echo "never logged: $1"
-    cat "$T/tmp/lumen-guard.log"
+    cat "$T/lumen/log/lumen-guard.log"
     return 1
 }
 
@@ -232,7 +236,7 @@ $TCP_RULE" ]
     [ ! -e "$T/guard/lumen-guard.pid" ]
     [ -n "$(first '^umount ')" ]
     [ "$(last '^umount ')" -lt "$(first '-t nat -D')" ]
-    grep -q "Guard exited; resolv.conf is connman's, no nat rules, Guard stopped (fail open)" "$T/tmp/lumen-guard.log"
+    grep -q "Guard exited; resolv.conf is connman's, no nat rules, Guard stopped (fail open)" "$T/lumen/log/lumen-guard.log"
 }
 
 @test "two heartbeats in a row without an answer change nothing" {
@@ -248,9 +252,9 @@ $TCP_RULE" ]
     done
     [ "$(grep -c -- '--name us.lgtvsdp.com' "$CALLS")" -eq 1 ]
     [ "$(grep -c -- '--name heartbeat.lumen.invalid' "$CALLS")" -ge 7 ]
-    [ "$(grep -c 'heartbeat: no answer for heartbeat.lumen.invalid' "$T/tmp/lumen-guard.log")" -eq 4 ]
-    grep -q '(2 of 3)' "$T/tmp/lumen-guard.log"
-    not grep -q '(3 of 3)\|fail open' "$T/tmp/lumen-guard.log"
+    [ "$(grep -c 'heartbeat: no answer for heartbeat.lumen.invalid' "$T/lumen/log/lumen-guard.log")" -eq 4 ]
+    grep -q '(2 of 3)' "$T/lumen/log/lumen-guard.log"
+    not grep -q '(3 of 3)\|fail open' "$T/lumen/log/lumen-guard.log"
     not grep -q '^umount\|-t nat -D' "$CALLS"
     [ "$(cat "$T/etc/resolv.conf")" = "$OURS" ]
     [ "$(cat "$T/nat")" = "$UDP_RULE
@@ -262,9 +266,9 @@ $TCP_RULE" ]
     printf 'ok\nmiss\nok\nmiss\nmiss\nmiss\n' >"$T/named"
     run_hook
     wait_for 'three heartbeats in a row got no answer'
-    [ "$(grep -c '(1 of 3)' "$T/tmp/lumen-guard.log")" -eq 2 ]
-    grep -q '(3 of 3)' "$T/tmp/lumen-guard.log"
-    grep -q "resolv.conf is connman's, no nat rules, Guard stopped (fail open)" "$T/tmp/lumen-guard.log"
+    [ "$(grep -c '(1 of 3)' "$T/lumen/log/lumen-guard.log")" -eq 2 ]
+    grep -q '(3 of 3)' "$T/lumen/log/lumen-guard.log"
+    grep -q "resolv.conf is connman's, no nat rules, Guard stopped (fail open)" "$T/lumen/log/lumen-guard.log"
     connmans
     [ ! -s "$T/nat" ]
     [ ! -e "$T/guard/lumen-guard.pid" ]
@@ -295,7 +299,7 @@ $TCP_RULE" ]
 @test "with no upstream the hook starts nothing, mounts nothing and adds no rule" {
     run_hook
     wait_for 'fail open'
-    grep -q 'no upstream resolver' "$T/tmp/lumen-guard.log"
+    grep -q 'no upstream resolver' "$T/lumen/log/lumen-guard.log"
     not grep -q '^guard\|^iptables\|^mount' "$CALLS"
 }
 
@@ -310,7 +314,7 @@ $TCP_RULE" ]
     connman
     FAKE_PROBE_FAILS=1 run_hook
     wait_for 'did not answer'
-    grep -q 'fail open' "$T/tmp/lumen-guard.log"
+    grep -q 'fail open' "$T/lumen/log/lumen-guard.log"
     [ "$(grep -c -- '^guard --probe 127.0.0.2:53$' "$CALLS")" -eq 40 ]
     not grep -q '^mount\|^umount\|-t nat -A' "$CALLS"
     grep -qx 'guard stopped' "$CALLS"
@@ -329,7 +333,7 @@ $TCP_RULE" ]
     connman
     FAKE_MOUNT_FAILS=1 run_hook
     wait_for 'FAILED to mount'
-    grep -q 'fail open' "$T/tmp/lumen-guard.log"
+    grep -q 'fail open' "$T/lumen/log/lumen-guard.log"
     connmans
     not grep -q -- '-t nat -A' "$CALLS"
     grep -qx 'guard stopped' "$CALLS"
@@ -341,7 +345,7 @@ $TCP_RULE" ]
     echo "$CONNMAN" >"$T/etc/resolv.conf"
     run_hook
     wait_for 'does not name 127.0.0.2 after the mount'
-    grep -q 'fail open' "$T/tmp/lumen-guard.log"
+    grep -q 'fail open' "$T/lumen/log/lumen-guard.log"
     [ "$(cat "$T/misc/resolv.conf")" = "$CONNMAN" ]
     [ ! -s "$T/mounts" ]
     not grep -q -- '-t nat -A' "$CALLS"
@@ -372,7 +376,7 @@ $TCP_RULE" ]
     printf 'ok\nmiss\nmiss\nmiss\n' >"$T/named"
     FAKE_UMOUNT_FAILS=1 run_hook
     wait_for 'three heartbeats in a row got no answer'
-    grep -q "no answer; FAILED to unmount $T/misc/resolv.conf, Guard stopped (fail open)" "$T/tmp/lumen-guard.log"
+    grep -q "no answer; FAILED to unmount $T/misc/resolv.conf, Guard stopped (fail open)" "$T/lumen/log/lumen-guard.log"
     [ "$(grep -c '^umount ' "$CALLS")" -eq 10 ]
     [ ! -s "$T/nat" ]
     grep -qx 'guard stopped' "$CALLS"
@@ -395,7 +399,7 @@ $TCP_RULE" ]
     connman
     run_hook
     wait_for 'goes through Guard'
-    grep -q "the mount over $T/misc/resolv.conf is read-only" "$T/tmp/lumen-guard.log"
+    grep -q "the mount over $T/misc/resolv.conf is read-only" "$T/lumen/log/lumen-guard.log"
     grep -q "/dev/fake $T/misc/resolv.conf ext4 ro " "$T/mounts"
     [ "$(first '^mount --bind ')" -lt "$(first '^mount -o remount,bind,ro ')" ]
     [ "$(first '^mount -o remount,bind,ro ')" -lt "$(first '^guard --probe 127.0.0.2:53 --name us.lgtvsdp.com$')" ]
@@ -406,7 +410,7 @@ $TCP_RULE" ]
     connman
     FAKE_REMOUNT_FAILS=1 run_hook
     wait_for 'goes through Guard'
-    grep -q 'note: could not make the mount' "$T/tmp/lumen-guard.log"
+    grep -q 'note: could not make the mount' "$T/lumen/log/lumen-guard.log"
     [ "$(cat "$T/etc/resolv.conf")" = "$OURS" ]
     [ -s "$T/nat" ]
 }
@@ -420,7 +424,7 @@ $TCP_RULE" ]
     wait_for "Guard's file restored"
     [ "$(cat "$T/etc/resolv.conf")" = "$OURS" ]
     [ "$(cat "$T/guard/resolv.conf")" = "$OURS" ]
-    not grep -q 'fail open' "$T/tmp/lumen-guard.log"
+    not grep -q 'fail open' "$T/lumen/log/lumen-guard.log"
     not grep -q '^umount\|-t nat -D' "$CALLS"
 }
 
@@ -478,13 +482,14 @@ $TCP_RULE" ]
     [ "$status" -eq 0 ]
     sleep 0.3
     [ ! -s "$CALLS" ]
-    [ ! -e "$T/tmp/lumen-guard.log" ]
+    [ ! -e "$T/lumen/log/lumen-guard.log" ]
 }
 
 # The scripts without comments and with their messages blanked, so only the
-# commands they run are left to check.
+# commands they run are left to check. The log helpers the boot hooks share
+# are checked in hook-logs.bats.
 commands() {
-    sed -e 's/^[[:space:]]*#.*//' -e 's/[[:space:]]#.*//' \
+    sed -e '/^folder_ok() {/,/^}/d' -e '/^log_to() {/,/^}/d' -e 's/^[[:space:]]*#.*//' -e 's/[[:space:]]#.*//' \
         -e 's/\(say\|fail_open\|state=\|echo\) *"[^"]*"/\1 ""/g' "$1"
 }
 
@@ -498,7 +503,8 @@ commands() {
     hook="$PROFILES/lumen-guard"
     code=$(commands "$hook")
     not grep -Eq '\b(initctl|luna-send|reboot)\b' <<<"$code"
-    grep -qx 'LOG=/tmp/lumen-guard.log' "$hook"
+    grep -qx 'LOGDIR=/var/lib/lumen/log' "$hook"
+    grep -qx 'LOG=$LOGDIR/lumen-guard.log' "$hook"
     grep -qx 'DIR=/var/lib/lumen/guard' "$hook"
     grep -qx 'PIDFILE=$DIR/lumen-guard.pid' "$hook"
     grep -qx 'OURS=$DIR/resolv.conf' "$hook"
@@ -508,7 +514,7 @@ commands() {
     run grep -Eo '>>?[[:space:]]*[^[:space:]&;)|]+' <<<"$code"
     [ "${#lines[@]}" -gt 0 ]
     for target in "${lines[@]}"; do
-        [[ "$target" =~ ^\>\>?[[:space:]]*(\"\$LOG\"|\"\$PIDFILE\"|\"\$OURS\"|/dev/null)$ ]] || {
+        [[ "$target" =~ ^\>\>?[[:space:]]*(\"\$OUT\"|\"\$PIDFILE\"|\"\$OURS\"|/dev/null)$ ]] || {
             echo "writes to $target"
             return 1
         }
@@ -580,12 +586,55 @@ commands() {
     [[ "$output" == *"to:127.0.0.2:53"* ]]
     [[ "$output" == *"guard: running"* ]]
 
-    # Run twice, it leaves the first Guard alone.
+    # Run twice, it leaves the first Guard alone. The first run's log, which
+    # that Guard's watchdog goes on writing, is now the run before.
     PATH="$T/bin:$PATH" run sh "$T/guard-apply.sh" 3>&-
     [ "$status" -eq 0 ]
     [[ "$output" == *"already runs"* ]]
     [ "$(grep -c '^guard --listen' "$CALLS")" -eq 1 ]
     [ "$(grep -c '^mount --bind ' "$CALLS")" -eq 1 ]
+    grep -q 'goes through Guard' "$T/lumen/log/lumen-guard.log.1"
+    not grep -q 'Guard started' "$T/lumen/log/lumen-guard.log"
+    [ "$(stat -c %a "$T/lumen/log")" = 700 ]
+}
+
+@test "guard-apply.sh says when this run left no log, even with an earlier run's log there" {
+    connman
+    PATH="$T/bin:$PATH" run sh "$T/guard-apply.sh" 3>&-
+    [ "$status" -eq 0 ]
+    chmod 777 "$T/lumen/log"
+    PATH="$T/bin:$PATH" run sh "$T/guard-apply.sh" 3>&-
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$T/lumen/log is writable by others"* ]]
+    [[ "$output" == *"guard: no log from this run"* ]]
+    not grep -q 'already runs' "$T/lumen/log/lumen-guard.log"
+    [ ! -e "$T/lumen/log/lumen-guard.log.1" ]
+}
+
+@test "with a log folder that is a link the hook logs nothing, says why, and Guard still goes through" {
+    connman
+    mkdir "$T/elsewhere"
+    ln -s "$T/elsewhere" "$T/lumen/log"
+    run_hook
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$T/lumen/log is not a real folder"* ]]
+    [[ "$output" == *"no log: this run's output goes to /dev/null"* ]]
+    # No log to wait on: the tcp rule is the start-up's last step.
+    for _ in $(seq 200); do
+        grep -q -- '-A OUTPUT -p tcp' "$CALLS" && break
+        sleep 0.05
+    done
+    grep -qF -- "iptables -t nat -A OUTPUT $TCP_RULE" "$CALLS"
+    [ "$(cat "$T/etc/resolv.conf")" = "$OURS" ]
+    # Its watchdog still fails open when Guard goes.
+    kill "$(cat "$T/guard/lumen-guard.pid")"
+    for _ in $(seq 200); do
+        [ -e "$T/guard/lumen-guard.pid" ] || break
+        sleep 0.05
+    done
+    [ ! -e "$T/guard/lumen-guard.pid" ]
+    connmans
+    [ -z "$(ls -A "$T/elsewhere")" ]
 }
 
 @test "guard-apply.sh reports a start that failed open" {
@@ -832,6 +881,19 @@ guardctl() {
     [[ "$output" == *"/dev/fake $R/var/lib/misc/resolv.conf ext4"* ]]
     [[ "$output" == *"DNAT udp"*"to:127.0.0.2:53"* ]]
     [[ "$output" == *"lookups 12"* ]]
+    [[ "$output" == *"no log: the hook has not run, or its log folder failed its check:"* ]]
+}
+
+@test "guard.sh status shows the hook's log and the run before, from /var/lib/lumen/log" {
+    fake_tv
+    mkdir -p "$R/var/lib/lumen/log"
+    printf 'boot two: start\nboot two: goes through Guard\n' >"$R/var/lib/lumen/log/lumen-guard.log"
+    printf 'boot one: start\nboot one: fail open\n' >"$R/var/lib/lumen/log/lumen-guard.log.1"
+    guardctl status
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"/var/lib/lumen/log/lumen-guard.log, the latest run:"*"boot two: goes through Guard"* ]]
+    [[ "$output" == *"/var/lib/lumen/log/lumen-guard.log.1, the run before:"*"boot one: fail open"* ]]
+    [[ "$output" != *"no log"* ]]
 }
 
 @test "guard.sh status says when Guard runs, by the pid file under /var/lib/lumen/guard" {
