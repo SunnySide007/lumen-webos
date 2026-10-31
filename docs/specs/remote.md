@@ -220,6 +220,44 @@ Each verb's time from the PC to the TV acting is recorded.
 * It's root code that reads requests (risk 4).
 * Keys may have no clean route (risk 1).
 
+**Built on 2026-10-31** (`shell/crates/lumen-ctl`, `tools/remote.sh`,
+`profiles/remote/`, `tools/remote/ctl.py`); not yet run on the TV.
+* **The binary:** `lumen-ctl serve [--bus library|command] [--keys
+  none|keymanager] [--log FILE]`, plus `probe` and `probe-keys` for the first
+  TV step. The forced command passes no flags, so
+  `/var/lib/lumen/remote/ctl.conf` decides (`tools/remote.sh config`), else
+  `command` and `none`.
+* **Two buses:**
+  * `command`, the default, runs `/usr/bin/luna-send -n 1 -f`. It polls
+    power, volume, the app in front and the inputs every 2 s, and the
+    picture and sound settings every 10 s.
+  * `library` loads libluna-service2 and subscribes wherever LG's first
+    reply says `"subscribed": true`, polling the rest.
+  * The hello's `polling` lists what is polled. `probe` reports which bus
+    the B9 allows, since LG's access control may refuse an unknown root
+    client on the library route.
+* **Keys:** off until `probe-keys` shows what LG's `createKeyEvent` wants.
+  * `keymanager` builds each call from a template in
+    `/var/lib/lumen/remote/keys.json` (`tools/remote.sh keys`), and `uinput`
+    can come in behind the same seam.
+  * The hello leaves `key` out while there is no route, and leaves out
+    `ambient.start`, which answers `unavailable` for now.
+* **On the TV:**
+  * One line at the end of `/home/root/.ssh/authorized_keys`:
+    `restrict,command="/var/lib/lumen/remote/lumen-ctl serve" ssh-ed25519 …
+    lumen-remote`.
+  * In `/var/lib/lumen/remote/` (mode 0700): `lumen-ctl`, `ctl.conf`,
+    `keys.json`, `authorized_keys.before` (the file as it was before the
+    first install), and `lumen-ctl.log`. The log holds each request and
+    reply, never the text of `text.insert` or `toast`, and is moved to `.1`
+    at 1 MiB.
+* **On the PC:** the key in `~/.lumen/remote/` (`tools/remote.sh keygen`).
+  The copy of `authorized_keys` and the probes' output go in
+  `tools/out/remote/`.
+* **Undo:** `tools/remote.sh remove` takes that line out and leaves every
+  other. It refuses if no key would be left, then deletes the folder.
+  `tools/uninstall-all.sh` runs it.
+
 ### R3: Lumen Remote for Windows
 
 **Brief.**

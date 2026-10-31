@@ -181,11 +181,28 @@ memory only.
 
 ## What waits
 
-**R2, `lumen-ctl`:** speak `protocol.ts` over SSH: the same checks
-(`parseRequest` is the reference), `hello` with the verbs that work on this
-TV, the first value of each subscription after it, `alive`, and an event for
-every change from luna's subscriptions. Map the settings and keys once R0 has
-read LG's names. The mock's tests are a starting list of cases.
+**R2, `lumen-ctl`, is built** ([remote.md, R2](../docs/specs/remote.md)),
+not yet run on the TV.
+* `shell/crates/lumen-ctl` speaks `protocol.ts` on stdin and stdout, with
+  the mock's checks ported.
+* `tools/remote.sh install` puts it on the TV behind an SSH key whose forced
+  command runs it.
+* Its `hello` leaves out `key` until the TV has a key route, and
+  `ambient.start` for now; the UI greys out both.
+
+A page can't open SSH, so the UI can't reach it yet. Today,
+`tools/remote/ctl.py` drives it from a terminal:
+
+```sh
+python tools/remote/ctl.py hello                 # the hello and the TV's state
+python tools/remote/ctl.py volume.set level=20   # a verb, with its round trip
+python tools/remote/ctl.py watch                 # every event, until Ctrl-C
+```
+
+Once R3 exists, the UI runs against the real `lumen-ctl` from the Tauri app.
+R3's `SocketFactory` returns a `SocketLike` that is an SSH session: the key
+and options `ctl.py` uses, one request line in and one line out per reply or
+event. Nothing in `ui/` changes, because `lumen-ctl` sends the mock's lines.
 
 **R3, Tauri:** wrap `ui/` and give `RemoteClient` a transport over the SSH
 forced command instead of a WebSocket (`SocketLike` in `client.ts` is the
