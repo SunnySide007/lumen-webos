@@ -17,7 +17,9 @@ from what it measured.
 
 Status on 2026-10-30, how deep the B9 lets Lumen reach, the upstream prior
 art and the next steps with hand-off lanes: [specs/depth.md](specs/depth.md)
-(proposed; the lanes were handed to Opus 5.5 sessions on 2026-10-31).
+(proposed; the lanes were handed to Opus 5.5 sessions on 2026-10-31). On
+2026-10-31 the shell and the HDR studio merged into `main`; the shell has
+been the B9's Home since that morning (route D), so Phase 3 is under way.
 
 ## Phase 0 checklist
 

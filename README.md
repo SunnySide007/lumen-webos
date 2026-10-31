@@ -4,8 +4,12 @@
 promotions, no telemetry: just your apps, your inputs, and screensavers that
 use what an OLED panel can do.
 
-> **Status: Phase 0, pre-alpha.** The build pipeline works and `hello-gles`
-> proves the native graphics path. There is no home screen yet. See
+> **Status: pre-alpha, Phase 3.** On the developer's B9 the native home screen
+> is the TV's Home: apps and inputs with LG's own icons, launching, and motion
+> paced to 60 Hz with a rare skipped frame. LG's reporting jobs are held down
+> from boot, Lumen Guard logs the TV's DNS lookups, and an original HDR10 loop
+> switches the panel into HDR. Measured on an OLED55B9PUA, webOS 4.10.2-31,
+> firmware 05.50.00. Nothing is packaged for other TVs yet. See
 > [docs/roadmap.md](docs/roadmap.md).
 
 Lumen is an open-source proof of concept developed on an LG OLED B9 (2019,
@@ -20,11 +24,11 @@ flashed, and the TV's system partitions are never written.
 ┌──────────────────────────── Lumen (this repo, GPL-3.0+) ────────────────────────────┐
 │ shell/     native tvOS-style home (Rust + SDL2 + GLES2)   takeover/  Home-key filter │
 │ ambient/   HDR video screensaver                          studio/    HDR content     │
-│ profiles/  privacy settings for Glasshouse                tools/     dev and TV tools│
+│ profiles/  privacy hooks and Guard's rules                tools/     dev and TV tools│
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ┌────────────── System layer: existing projects, installed and configured ─────────────┐
-│ Homebrew Channel (root, boot hooks, SSH)   Glasshouse (ad and telemetry blocking,    │
-│                                            services, OLED care)   plx-native (Plex)  │
+│ Homebrew Channel (root, boot hooks, SSH)   plx-native (Plex)                         │
+│ Glasshouse: optional (OLED care, services), decided after Guard's first week         │
 └──────────────────────────────────────────────────────────────────────────────────────┘
           LG webOS: Settings, picture and sound engine, Netflix, Prime Video: untouched
 ```
@@ -35,9 +39,13 @@ flashed, and the TV's system partitions are never written.
   layers and how they stay out of each other's way.
 * **LG's picture and sound settings stay LG's.** Lumen replaces the home screen,
   not the TV. Quick toggles write through LG's own settings service.
-* **Privacy and debloating** come from [Glasshouse](https://github.com/rorygallagher2024/glasshouse),
-  configured so the LG Content Store keeps working and Netflix and Prime Video
-  keep updating.
+* **Privacy** comes in layers below the hosts file
+  ([docs/specs/privacy.md](docs/specs/privacy.md)): LG's reporting jobs held
+  down from boot, a LAN port closed, and Lumen Guard, a small DNS forwarder
+  that logs every lookup it sees and will block by rule; the rules keep the
+  LG Content Store working and Netflix and Prime Video updating.
+  [Glasshouse](https://github.com/rorygallagher2024/glasshouse) may join for
+  OLED care once Guard's first week of logs is in.
 * **HDR screensavers** are HDR10 and Dolby Vision video loops made for OLED,
   since the TV's graphics layer is always SDR.
 

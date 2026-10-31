@@ -1,8 +1,9 @@
 # Lumen
 
 Native tvOS-style home screen for rooted LG webOS TVs: Rust + SDL2 +
-GLES2 in `shell/`. Dev set: LG OLED B9, webOS 4.5. Phase 0; see
-docs/roadmap.md.
+GLES2 in `shell/`. Dev set: LG OLED B9, webOS 4.5. Phase 3 (the shell
+is the B9's Home), with the privacy and remote tracks alongside; see
+docs/roadmap.md and docs/specs/depth.md.
 
 ## Commands
 

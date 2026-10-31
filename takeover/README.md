@@ -13,7 +13,7 @@ TV through `tools/tv.sh script`, from [tools/takeover.sh](../tools/takeover.sh);
 |---|---|---|
 | The setting | `apply.sh`, `undo.sh`, `status.sh` | Ready; the TV already has it on, set by hand |
 | The boot hook | `lumen-home`, `home-apply.sh` | Installed on the B9 on 2026-10-31 at 17:42 UTC, after its by-hand run and the owner's yes; it closed LG's Home at the next power-on ([b9.md, "Home"](../docs/device/b9.md#home)) |
-| The LG Home tile | in the shell | Waits for `claude/shell-timing` on `main` |
+| The LG Home tile | in the shell | Not built yet; the shell it goes in is on `main` since 2026-10-31 |
 | The long-Home filter | `filters/lumen-home.js`, `filter-*.sh` | Built and tested on the PC, delivered inert: the owner's decision |
 
 ## The setting

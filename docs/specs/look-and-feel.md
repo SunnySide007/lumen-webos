@@ -11,8 +11,8 @@ target, not a result, until a run on the B9 backs it (CONTRIBUTING.md, rule
 3). "Measured" means the owner's OLED55B9PUA, webOS 4.10.2-31, firmware
 05.50.00.
 
-Today's layout and motion values are in `docs/specs/shell-mvp.md` (on branch
-`claude/shell-timing` until the shell merges). This spec doesn't repeat them;
+Today's layout and motion values are in `docs/specs/shell-mvp.md` (on `main`
+since the shell merged on 2026-10-31). This spec doesn't repeat them;
 it sets the bar they are judged against.
 
 ## Principles
@@ -49,8 +49,9 @@ survives.
 
 ### Log lines
 
-Decided; the owner approved them on 2026-10-22. The shell writes them (branch
-`claude/shell-timing`) and `tools/frame-stats.sh` summarises them. Each line
+Decided; the owner approved them on 2026-10-22. The shell writes them (built
+on `claude/shell-timing`, on `main` since 2026-10-31) and
+`tools/frame-stats.sh` summarises them. Each line
 starts with `[<unix seconds>] ` like the others. Times are whole milliseconds.
 `<why>` is one of `the window lost focus`, `the window was hidden`, `the app
 went to the background`, `nothing to draw` or `the shell is leaving`.
@@ -142,7 +143,7 @@ frame-time plan (being written).
 * Unlike the lines above, the frame lines give times to hundredths of a ms;
   only `drew`'s total is whole.
 * The frame lines are stage 1 of "Frame time: finding the missed vsyncs"
-  (shell-mvp.md, on `claude/shell-timing`): which frame of a burst is slow,
+  (shell-mvp.md): which frame of a burst is slow,
   and where its time goes.
 
 #### What stage 1 found
