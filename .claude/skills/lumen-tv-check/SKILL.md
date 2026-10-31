@@ -222,6 +222,18 @@ What the log holds, for reading the output:
   a major one read a page back from swap. A burst logs at most 4, and `slow
   frames: K more not logged`, just before its `drew` line, counts the rest.
   The output summarises them in a "slow frames" section.
+* `drew …; first …, …, … ms; K vsyncs skipped; idle` (a build with the vsync
+  pacer, 3a89955 on): `K` is how many vsyncs of the burst showed the frame
+  before again, 0 included. A run with no pacer (`--fixed-dt`, or no vsync)
+  writes no `K`. The output adds a skip count to the burst section: how many
+  bursts carry it, the vsyncs skipped in all and per 10 s of motion, and the
+  worst burst.
+* `motion paced: … ms a frame, from …; SDL_webOSGetRefreshRate …, display mode
+  …; read in … ms` and `warm: G glyphs, U uploads, X KB in … ms`: once each, the
+  first at start-up and the second at the first idle. The output gives them in
+  a "paced" and a "warm" section after the first frames. Both are logged at
+  start-up, so a `--since` after the launch loses them, as it loses `start:`;
+  the second pass over the whole run reads them too.
 * `SDL repeat K of scancode S: … ms after the press, … ms after the last`: the
   remote's key repeats (B3 builds on), summarised after the frame statistics.
 * `key S: shown after … ms`, `key S: not shown after … ms: <why>` and `keys: K
@@ -230,7 +242,9 @@ What the log holds, for reading the output:
   the presses not shown by reason.
 * `start: …`, `foreground: …` and `launch <id>: …`: the start-up split into its
   phases, the wake-ups from the background, and how long luna took to answer
-  each launch (target 6, 100 ms).
+  each launch (target 6, 100 ms). `launch <id>: dropped: <why>` is a launch the
+  shell asked for and never called, since it was hidden or leaving first; the
+  output lists it with the others and counts it by reason, outside target 6.
 * `window focus lost: …`: how long since the last key. The output counts the
   focus losses with no key pressed.
 * The key-diagnostics lines (written on `claude/shell-timing`, K1–K5, first
