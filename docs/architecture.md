@@ -41,11 +41,13 @@ glibc and runs on every webOS release from the oldest supported up.
 
 ### `takeover/`: making Home open the shell (Phase 3)
 
-A compositor key filter: a small ES5 JavaScript handler registered in the
-configd key `com.webos.surfacemanager.keyFilters`, the mechanism Glasshouse
-documents and runs on webOS 4. A short Home press opens the shell; holding
-Home opens LG's Home. A foreground watcher is the backstop, LG Input Hook the
-fallback, and a heartbeat watchdog hands Home back to LG if the shell stops.
+Route D ([takeover/README.md](../takeover/README.md)): LG's own setting,
+settingsservice's `defaultApps.home`, names the shell, so the compositor's
+Home handler opens it on a short press, with `tools/takeover.sh undo` as
+the way back. A boot hook closes LG's Home, which SAM still preloads, while
+the shell is Home. A small ES5 handler for the compositor's key-filter
+chain (configd's `com.webos.surfacemanager.keyFilters`) makes holding Home
+open LG's Home; it is delivered inert, for the owner to try step by step.
 
 ### `ambient/`: HDR screensavers (Phase 2)
 
