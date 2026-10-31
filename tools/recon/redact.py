@@ -49,6 +49,9 @@ def redact_line(line):
 
 
 def main():
+    # Windows Python would write CRLF and read in the locale's code page.
+    sys.stdin.reconfigure(encoding='utf-8', errors='replace')
+    sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     for line in sys.stdin:
         sys.stdout.write(redact_line(line))
 
