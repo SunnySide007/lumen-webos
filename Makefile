@@ -53,12 +53,13 @@ test:
 	cd shell && cargo test --workspace
 	python3 -I -m unittest discover -s tools/tests -p 'test_*.py'
 	bats tools/tests
+	node --test tools/tests/takeover-filter.test.js
 
 lint:
 	cd shell && cargo fmt --all --check
 	cd shell && cargo clippy --workspace --all-targets -- -D warnings
 	cd shell && cargo clippy --workspace --release --target $(TARGET) --all-targets -- -D warnings
-	shellcheck tools/*.sh tools/recon/*.sh tools/backup/*.sh tools/capture/*.sh profiles/glasshouse/*.sh profiles/privacy/*.sh profiles/privacy/lumen-privacy profiles/privacy/lumen-guard .githooks/pre-push
+	shellcheck tools/*.sh tools/recon/*.sh tools/backup/*.sh tools/capture/*.sh profiles/glasshouse/*.sh profiles/privacy/*.sh profiles/privacy/lumen-privacy profiles/privacy/lumen-guard takeover/*.sh takeover/lumen-home .githooks/pre-push
 
 check: lint test
 

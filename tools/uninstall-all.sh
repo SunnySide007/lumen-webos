@@ -7,10 +7,14 @@
 #   tools/uninstall-all.sh --glasshouse --yes      also undo Glasshouse
 #   tools/uninstall-all.sh --plx-native --yes      also remove plx-native
 #
-# Lumen's parts: the shell app, Lumen's boot hooks
-# (/var/lib/webosbrew/init.d/lumen-*), Lumen Guard's resolv.conf mount, nat
-# rules and process (profiles/privacy/guard-undo.sh), /var/lib/lumen, its kill
-# switch, the capture directory and its files in /tmp. --glasshouse runs
+# Lumen's parts: route D's key filter (takeover/filter-undo.sh) and its
+# default-home setting (takeover/undo.sh), both undone first, while Lumen's
+# app and saved values are still there; the shell app, kept if the default
+# home could not be set back, so the TV never has a Home that isn't
+# installed; Lumen's boot hooks (/var/lib/webosbrew/init.d/lumen-*), Lumen
+# Guard's resolv.conf mount, nat rules and process
+# (profiles/privacy/guard-undo.sh), /var/lib/lumen, its kill switch, the
+# capture directory and its files in /tmp. --glasshouse runs
 # Glasshouse's documented undo (tvwebctl restores, stop, its files and boot
 # hooks), then removes its app.
 #
@@ -58,12 +62,18 @@ trap 'exit 143' TERM
 # step KIND ROLE ARG: KIND is `remove` (an app id), `run` (a command on the
 # TV) or `script` (a file here, run on the TV). ROLE `restore` marks
 # Glasshouse's undo; `purge` steps delete its files and run only if every
-# restore succeeded, so a failed one can be retried.
+# restore succeeded, so a failed one can be retried. ROLE `home` marks the
+# default home's undo, and the `app` step, Lumen's removal, runs only if it
+# succeeded.
 step() {
     printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$steps"
 }
 
-step remove - "$LUMEN_APP"
+# Route D first: the key filter's saved list lives in /var/lib/lumen, and the
+# default home must be LG's again before Lumen's app goes.
+step script - "$ROOT/takeover/filter-undo.sh"
+step script home "$ROOT/takeover/undo.sh"
+step remove app "$LUMEN_APP"
 step run - "rm -f $INITD/lumen-*"
 # Guard's mount and rules first, then Guard, while its files are still there.
 step script - "$ROOT/profiles/privacy/guard-undo.sh"
@@ -104,6 +114,7 @@ if [ $yes -eq 0 ]; then
     while IFS=$tab read -r kind role arg; do
         note=
         [ "$role" = purge ] && note="   (only if the restores above succeeded)"
+        [ "$role" = app ] && note="   (only if the default home was set back)"
         if [ "$kind" = remove ]; then
             echo "  tools/tv.sh remove $arg$note"
         elif [ "$kind" = script ]; then
@@ -117,10 +128,15 @@ if [ $yes -eq 0 ]; then
     exit 0
 fi
 
-failed=0 restore_failed=0
+failed=0 restore_failed=0 home_failed=0
 while IFS=$tab read -r kind role arg; do
     if [ "$role" = purge ] && [ $restore_failed -eq 1 ]; then
         echo "> skipped (a Glasshouse restore failed): $kind $arg"
+        failed=$((failed + 1))
+        continue
+    fi
+    if [ "$role" = app ] && [ $home_failed -eq 1 ]; then
+        echo "> skipped (the default home was not set back): $kind $arg"
         failed=$((failed + 1))
         continue
     fi
@@ -129,6 +145,7 @@ while IFS=$tab read -r kind role arg; do
         echo "  (failed; going on)"
         failed=$((failed + 1))
         [ "$role" = restore ] && restore_failed=1
+        [ "$role" = home ] && home_failed=1
     fi
 done <"$steps"
 
@@ -137,5 +154,6 @@ if [ $failed -eq 0 ]; then
 else
     echo "$failed step(s) failed or were skipped; see above. An app that was not installed fails its remove step."
     [ $restore_failed -eq 0 ] || echo "Glasshouse's files were kept so its restores can be retried."
+    [ $home_failed -eq 0 ] || echo "Lumen's app was kept, since the TV's Home still names it: tools/takeover.sh undo, then run this again."
     exit 1
 fi
