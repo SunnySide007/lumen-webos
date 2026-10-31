@@ -45,15 +45,21 @@ pub struct Options {
     pub screenshot_when_settled: Option<PathBuf>,
     /// The look's features: all on unless the launch parameters say.
     pub look: Look,
+    /// What the launch parameters' `"look"` said that names no feature:
+    /// left out, and logged.
+    pub look_unknown: Vec<String>,
 }
 
 impl Options {
     /// Reads `--exit-after <seconds>`, `--windowed`, `--gles`,
     /// `--screenshot <path>`, `--screenshot-at <seconds>`, `--keys <list>`,
-    /// `--fixed-dt <seconds>` and `--screenshot-when-settled <path>`. Anything
-    /// else is ignored: webOS passes the app's launch parameters as a JSON
-    /// argument. A bad `--keys`, `--fixed-dt` or `--screenshot-at` is an
-    /// error, since only automation uses them.
+    /// `--fixed-dt <seconds>` and `--screenshot-when-settled <path>`, and
+    /// the launch parameters, which webOS passes as a JSON argument: their
+    /// `"look"`, such as `{"look":"plain"}` or `{"look":"-dither,-tilt"}`
+    /// (`Look::parse`). Anything else is ignored. A bad `--keys`,
+    /// `--fixed-dt` or `--screenshot-at` is an error, since only automation
+    /// uses them; a bad look is not, since it must never keep the TV's Home
+    /// from starting.
     pub fn from_args(args: &[String]) -> Result<Self, String> {
         let mut opts = Self {
             windowed: !on_tv(),
@@ -96,6 +102,21 @@ impl Options {
                     let path = it.next().ok_or("--screenshot-when-settled needs a path")?;
                     opts.screenshot_when_settled = Some(PathBuf::from(path));
                 }
+                json if json.starts_with('{') => {
+                    let said = serde_json::from_str::<serde_json::Value>(json)
+                        .ok()
+                        .and_then(|params| params.get("look").cloned());
+                    match said {
+                        Some(serde_json::Value::String(text)) => {
+                            (opts.look, opts.look_unknown) = Look::parse(&text);
+                        }
+                        Some(other) => {
+                            opts.look = Look::FULL;
+                            opts.look_unknown = vec![other.to_string()];
+                        }
+                        None => {}
+                    }
+                }
                 _ => {}
             }
         }
@@ -112,6 +133,10 @@ pub(crate) const fn on_tv() -> bool {
 /// line counts from.
 pub fn run(opts: Options, started: Instant) -> Result<(), String> {
     info!("options {opts:?}");
+    info!("look: {}", opts.look);
+    for word in &opts.look_unknown {
+        info!("look: {word:?} is not a feature; left out");
+    }
     let mut start = StartTimes::new(started);
     let sdl = Sdl::load()?;
     info!("SDL {}", sdl.version());
@@ -344,6 +369,41 @@ mod tests {
         assert_eq!(opts.exit_after, None);
         let negative = parse(&["--exit-after", "-1"]);
         assert_eq!(negative.exit_after, None);
+    }
+
+    #[test]
+    fn the_launch_parameters_look_turns_features_off() {
+        // LG's own parameters, as a Home press gives them: the full look.
+        let home = parse(&[r#"{"@system_native_app": true, "launchType": "homeKey", "nid": "x"}"#]);
+        assert_eq!((home.look, home.look_unknown.len()), (Look::FULL, 0));
+        assert_eq!(parse(&[r#"{"look":"plain"}"#]).look, Look::PLAIN);
+        let some = parse(&["--windowed", r#"{"look":"-dither,-tilt"}"#]);
+        assert_eq!(
+            some.look,
+            Look {
+                dither: false,
+                tilt: false,
+                ..Look::FULL
+            }
+        );
+        // A word that names nothing is left out, and kept for the log.
+        let typo = parse(&[r#"{"look":"plain hero sparkle"}"#]);
+        assert_eq!(
+            typo.look,
+            Look {
+                hero: true,
+                ..Look::PLAIN
+            }
+        );
+        assert_eq!(typo.look_unknown, ["sparkle"]);
+        // A look that is not text, or parameters that are not JSON, change
+        // nothing and stop nothing.
+        let number = parse(&[r#"{"look":3}"#]);
+        assert_eq!(
+            (number.look, number.look_unknown),
+            (Look::FULL, vec!["3".to_owned()])
+        );
+        assert_eq!(parse(&[r#"{"look":"plain""#]).look, Look::FULL);
     }
 
     #[test]

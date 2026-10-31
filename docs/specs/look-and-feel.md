@@ -273,6 +273,32 @@ the hero thread stopped: heroes load at once
   nothing fading. The budget is 24,000,000 bytes, 23,437 KB.
 * `tools/frame-stats.sh` summarises them in its "top shelf" section.
 
+#### The look's lines
+
+Proposed by lane J with the hero's lines. Each starts with
+`[<unix seconds>] ` like the others.
+
+```text
+look: hero <on|off>, dither <on|off>, tilt <on|off>, light <on|off>, parallax <on|off>; art <full|half> size
+look: "<word>" is not a feature; left out
+```
+
+* The first, once at start-up, before SDL starts: the Phase 4 features this
+  run has. All are on unless the launch parameters' `"look"` says otherwise,
+  in words applied in order: `{"look":"plain"}` turns every one off (the
+  home screen as before Phase 4), `{"look":"-dither,-tilt"}` those two,
+  `{"look":"plain,hero"}` leaves the hero alone on, `half` takes the heroes
+  from their 960 × 320 files, and `full` turns everything on again.
+  `tools/tv.sh launch <app id> '<json>'` passes them (close the shell
+  first: a running app is not started again); a Home press passes LG's
+  own, which have no `"look"`, so the full look. `tools/sim.ps1 -Look`
+  does the same on the PC.
+* The second, for each word that names no feature, or a `"look"` that is
+  not text: it changes nothing. A typo must never keep the TV's Home from
+  starting.
+* `tools/frame-stats.sh` repeats the first in its "top shelf" section, so
+  a report says which look it measured.
+
 ### What blocks measuring now
 
 * **Keys are explained** (6e28bb9, 2026-10-22; shell-mvp.md, "Measured on

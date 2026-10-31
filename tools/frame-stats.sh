@@ -130,7 +130,10 @@
 # or "front app com.webos.app.screensaver" line within 2 s before or after.
 #
 # Top Shelf hero lines, only from a shell with the look's hero on
-# (docs/specs/look-and-feel.md, "The Top Shelf hero's lines"):
+# (docs/specs/look-and-feel.md, "The Top Shelf hero's lines"), and the look
+# lines, from any shell since lane J ("The look's lines"):
+#   look: hero on, dither off, tilt on, light on, parallax on; art full size
+#   look: "sparkle" is not a feature; left out
 #   art-owner: art for 2 apps: com.webos.app.hdmi1, netflix
 #   art-owner/"hulu.png": 1920x1080; the owner's art is 1920x640 or 960x320; not used
 #   hero hero-plex: 1 layer, 4800 KB; decoded in 92.4 ms, uploaded in 11.0 ms
@@ -140,7 +143,9 @@
 #   crossfade hero-ambient to hero-plex: 42 frames; textures 22366 KB at most
 #   textures: 12992 KB in all (atlas 8192 KB, heroes 4800 KB); 22366 KB at most so far
 # The top shelf section follows the warm section, when the period holds such
-# lines: the owner's art (apps with art and files left out), the heroes
+# lines: the look the run had (the first look line, and with several runs
+# how many and whether they were alike) and the words it left out, the
+# owner's art (apps with art and files left out), the heroes
 # uploaded with the p50 and max of their decode and upload times and the most
 # KB one took, the heroes dropped, each one that failed (20 at most), those
 # over budget, the crossfades with the p50 and max of their frames and the most
@@ -388,8 +393,10 @@ function report_warm() {
 # The Top Shelf hero: the art, each hero put into textures, the crossfades
 # and the texture total, against the 24,000,000-byte budget (23437 KB).
 function report_shelf(   i, d, u, f, most) {
-    if (nhero + nhdrop + nhfail + nhover + nfade + ntex + noa + noaout == 0) return
-    print "top shelf (hero, crossfade, textures and art-owner lines):"
+    if (nlook + nlookout + nhero + nhdrop + nhfail + nhover + nfade + ntex + noa + noaout == 0) return
+    print "top shelf (look, hero, crossfade, textures and art-owner lines):"
+    if (nlook > 0) printf "  %-16s %s%s\n", "look", look_first, (nlook > 1) ? sprintf("; the first of %d runs, %s", nlook, look_differ ? "not all alike" : "all alike") : ""
+    if (nlookout > 0) printf "  %-16s %d left out, not features\n", "look words", nlookout
     if (noa + noaout > 0) printf "  %-16s %d apps with art, %d files left out\n", "owner art", oa_apps, noaout
     if (nhero > 0) {
         isort(hdec, nhero, d)
@@ -564,6 +571,18 @@ $2 == "warm:" && whole($3) && $4 == "glyphs," && whole($5) && $6 == "uploads," &
     }
     next
 }
+
+# The look (look-and-feel.md, the look lines), once at each start-up.
+# look: hero on, dither off, tilt on, light on, parallax on; art full size
+$2 == "look:" && $3 == "hero" && $5 == "dither" && $7 == "tilt" && $9 == "light" && $11 == "parallax" &&
+    $13 == "art" && $NF == "size" && NF == 15 {
+    s = rest(3)
+    if (++nlook == 1) look_first = s
+    else if (s != look_first) look_differ = 1
+    next
+}
+# look: "sparkle" is not a feature; left out
+$2 == "look:" && NF >= 9 && rest(NF - 5) == "is not a feature; left out" { nlookout++; next }
 
 # The Top Shelf hero (look-and-feel.md, the Top Shelf hero lines). Hero
 # names hold no spaces: hero-plex, art-owner/netflix, gradient.

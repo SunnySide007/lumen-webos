@@ -19,12 +19,17 @@
   mock apps it names to the front, onto row 0, and -Colors gives mock apps a
   webOS icon colour, as "id=rrggbb,id=rrggbb".
 
+  -Look passes the look as the TV's launch parameters would, as
+  {"look":"<look>"}: "plain" is the home screen without Phase 4's features,
+  "-dither,-tilt" every feature but those. All are on without it.
+
 .EXAMPLE
   pwsh tools/sim.ps1
   pwsh tools/sim.ps1 -ExitAfter 5      # smoke test: run five seconds, then quit
   pwsh tools/sim.ps1 -ExitAfter 3 -Screenshot frame.png
   pwsh tools/sim.ps1 -Keys "R,R,D" -FixedDt 0.016667 -ScreenshotWhenSettled row1.png
   pwsh tools/sim.ps1 -First com.webos.app.hdmi1 -Colors "spotify-beehive=1db954"
+  pwsh tools/sim.ps1 -Look plain
 #>
 param(
     [double]$ExitAfter = 0,
@@ -35,6 +40,7 @@ param(
     [string]$ScreenshotWhenSettled = '',
     [string]$First = '',
     [string]$Colors = '',
+    [string]$Look = '',
     [switch]$Release
 )
 
@@ -84,6 +90,12 @@ if ($Keys) { $cargoArgs += @('--keys', $Keys) }
 if ($FixedDt -gt 0) { $cargoArgs += @('--fixed-dt', "$FixedDt") }
 if ($ScreenshotWhenSettled) {
     $cargoArgs += @('--screenshot-when-settled', [System.IO.Path]::GetFullPath($ScreenshotWhenSettled))
+}
+if ($Look) {
+    if ($Look -notmatch '^[A-Za-z0-9 ,+-]+$') { throw "-Look takes feature names, such as plain or -dither,-tilt" }
+    # Quotes reach the shell as typed, as webOS passes its JSON argument.
+    $PSNativeCommandArgumentPassing = 'Standard'
+    $cargoArgs += '{"look":"' + $Look + '"}'
 }
 
 & cargo @cargoArgs

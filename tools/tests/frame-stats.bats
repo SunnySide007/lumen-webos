@@ -1437,6 +1437,7 @@ EOF
 @test "the top shelf section sums up the art, the heroes, the crossfades and the textures" {
     log="$BATS_TEST_TMPDIR/shelf.log"
     {
+        echo '[1792799999.000] look: hero on, dither on, tilt on, light on, parallax on; art full size'
         echo '[1792800000.000] art-owner/"hulu.png": 1920x1080; the owner'"'"'s art is 1920x640 or 960x320; not used'
         echo '[1792800000.001] art-owner: art for 2 apps: com.webos.app.hdmi1, netflix'
         echo '[1792800000.100] hero hero-ambient: 3 layers, 9375 KB; decoded in 140.2 ms, uploaded in 30.5 ms'
@@ -1450,7 +1451,8 @@ EOF
     } > "$log"
     run "$STATS" "$log"
     [ "$status" -eq 0 ]
-    expected='top shelf (hero, crossfade, textures and art-owner lines):
+    expected='top shelf (look, hero, crossfade, textures and art-owner lines):
+  look             hero on, dither on, tilt on, light on, parallax on; art full size
   owner art        2 apps with art, 1 files left out
   heroes           2; decode p50 92.4, max 140.2 ms; upload p50 11.0, max 30.5 ms
   hero textures    9375 KB the most for one hero
@@ -1462,6 +1464,34 @@ EOF
     [[ "$output" == *"$expected"* ]]
     # After the frame statistics.
     [[ "$output" == "bursts"*"top shelf ("* ]]
+}
+
+@test "the look line says which features a run had, and whether several runs were alike" {
+    log="$BATS_TEST_TMPDIR/look.log"
+    {
+        echo '[1792800000.000] look: hero off, dither off, tilt off, light off, parallax off; art full size'
+        echo '[1792800000.001] look: "sparkle" is not a feature; left out'
+        echo '[1792800000.002] look: "3" is not a feature; left out'
+        echo '[1792800000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 18.00 ms, 52 quads); idle'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 0 ]
+    expected='top shelf (look, hero, crossfade, textures and art-owner lines):
+  look             hero off, dither off, tilt off, light off, parallax off; art full size
+  look words       2 left out, not features'
+    [[ "$output" == *"$expected" ]]
+    # A second run, the same look, then another.
+    echo '[1792800100.000] look: hero off, dither off, tilt off, light off, parallax off; art full size' >> "$log"
+    run "$STATS" "$log"
+    [[ "$output" == *"  look             hero off, dither off, tilt off, light off, parallax off; art full size; the first of 2 runs, all alike"$'\n'* ]]
+    echo '[1792800200.000] look: hero on, dither off, tilt on, light on, parallax on; art half size' >> "$log"
+    run "$STATS" "$log"
+    [[ "$output" == *"; the first of 3 runs, not all alike"$'\n'* ]]
+    # A line that does not read right is no look.
+    printf '%s\n' '[1792800000.000] look: hero off, dither off; art full size' \
+        '[1792800000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 18.00 ms, 52 quads); idle' > "$log"
+    run "$STATS" "$log"
+    [[ "$output" != *"top shelf"* ]]
 }
 
 @test "a hero over the budget is counted and the budget says OVER" {
