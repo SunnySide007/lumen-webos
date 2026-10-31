@@ -8,8 +8,9 @@
 # /var/lib/lumen/guard/boot-hook. That copy is not in init.d, so a reboot
 # undoes everything; guard-undo.sh does without one. It follows the hook's log
 # (/tmp/lumen-guard.log) until the start-up ends, at most about five minutes,
-# then prints it, the nat rules and Guard's status file. Exit status 0 means
-# the TV's DNS goes through Guard. Safe to run twice. busybox sh.
+# then prints it, /etc/resolv.conf, the mount over connman's copy, the nat
+# rules and Guard's status file. Exit status 0 means the TV's DNS goes through
+# Guard. Safe to run twice. busybox sh.
 
 DIR=/var/lib/lumen/guard
 LOG=/tmp/lumen-guard.log
@@ -42,10 +43,13 @@ while [ "$i" -lt 330 ]; do
 done
 
 tail -n "+$from" "$LOG" 2>/dev/null
+echo "/etc/resolv.conf:"
+cat /etc/resolv.conf
+mount | grep resolv || echo "no mount over resolv.conf"
 iptables -t nat -L OUTPUT -n -v
 [ -f "$DIR/status" ] && cat "$DIR/status"
 case $outcome in
     on) echo "guard: running; guard-undo.sh or a reboot undoes it" ;;
-    off) echo "guard: not running, no nat rules"; exit 1 ;;
+    off) echo "guard: not running; resolv.conf is connman's, no nat rules"; exit 1 ;;
     *) echo "guard: still starting after $i s; see $LOG"; exit 1 ;;
 esac
