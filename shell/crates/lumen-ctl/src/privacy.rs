@@ -2,15 +2,16 @@
 //! did on this boot, read from the places privacy.md puts it.
 //!
 //! * The boot hook: whether `/var/lib/webosbrew/init.d/lumen-privacy` exists,
-//!   and the end of its log, `/tmp/lumen-privacy.log`.
+//!   and the end of this boot's log, `/var/lib/lumen/log/lumen-privacy.log`.
 //! * The rule rejecting tcp 11111: `iptables -L INPUT -n`.
 //! * LG's diagnostics jobs the hook stops: `initctl status <job>`.
 //! * Lumen Guard's counts: `/var/lib/lumen/guard/status`; `null` before
 //!   Guard has run.
 //!
-//! `/tmp` is shared with the apps' jails, so a file there is read only if it
-//! is a regular file owned by root, opened without following a link and
-//! without blocking on a pipe someone left in its place.
+//! Each file is read only if it is a regular file owned by root, opened
+//! without following a link and without blocking on a pipe someone left in
+//! its place: the hooks no longer write into `/tmp`, which the apps' jails
+//! share, but the check costs nothing.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
@@ -46,7 +47,7 @@ impl Paths {
     pub fn tv() -> Self {
         Self {
             hook: PathBuf::from("/var/lib/webosbrew/init.d/lumen-privacy"),
-            hook_log: PathBuf::from("/tmp/lumen-privacy.log"),
+            hook_log: PathBuf::from("/var/lib/lumen/log/lumen-privacy.log"),
             guard_status: PathBuf::from("/var/lib/lumen/guard/status"),
             owner: Some(0),
         }
