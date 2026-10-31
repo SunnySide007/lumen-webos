@@ -14,6 +14,7 @@ any of them is marked at the point of use with its origin and license.
 | [webos-galaxy-launcher](https://github.com/guntiss/webos-galaxy-launcher) | Reference for installing an `.ipk` over SSH (`tools/tv.sh install`) | not stated |
 | [SDL](https://github.com/libsdl-org/SDL) | Window, GL context and input; loaded at run time | zlib |
 | [libloading](https://github.com/nagisa/rust_libloading) | Loading SDL2 at run time | ISC |
+| [Inter](https://github.com/rsms/inter), through [Fontsource](https://github.com/fontsource/font-files) | The typeface of the Remote web front-end, bundled in `remote/ui` (variable, Latin subset) | OFL-1.1 |
 
 Trademarks (LG, webOS, Apple, tvOS, Netflix, Prime Video, Plex) belong to their
 owners. "Inspired by tvOS" describes a design direction only: Lumen ships no

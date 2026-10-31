@@ -1,0 +1,600 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Controls: buttons, the direction pad, option chips, sliders, fields and
+ * switches. Every press springs; nothing moves on its own. Targets are at
+ * least 44 px for a thumb.
+ */
+
+.pill-button,
+.round-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  background: rgb(255 255 255 / 0.08);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.13),
+    inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  transition:
+    transform var(--spring-ms) var(--spring),
+    background 200ms,
+    color 200ms,
+    box-shadow 250ms,
+    padding var(--spring-ms) var(--spring);
+}
+
+.pill-button {
+  min-height: 50px;
+  padding: 0 20px;
+  border-radius: 999px;
+  font-size: 15px;
+}
+
+.pill-button .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.round-button {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.round-button .icon {
+  width: 22px;
+  height: 22px;
+}
+
+.round-button.big {
+  width: 64px;
+  height: 64px;
+}
+
+.round-button.big .icon {
+  width: 26px;
+  height: 26px;
+}
+
+.round-button.small {
+  width: 40px;
+  height: 40px;
+}
+
+.round-button.small .icon {
+  width: 18px;
+  height: 18px;
+}
+
+:is(.pill-button, .round-button):hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.13);
+}
+
+:is(.pill-button, .round-button):is(:active, .pressed):not(:disabled) {
+  transform: scale(0.92);
+  background: rgb(255 255 255 / 0.2);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.2),
+    0 0 26px -6px color-mix(in oklab, var(--accent) 80%, transparent);
+  transition-duration: 70ms, 70ms, 200ms, 70ms, 200ms;
+}
+
+:is(.pill-button, .round-button):disabled {
+  opacity: 0.38;
+}
+
+.pill-button.accent {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 70%, white), var(--accent));
+  color: var(--ink);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.5),
+    0 10px 26px -12px var(--accent);
+}
+
+.pill-button.wide {
+  width: 100%;
+}
+
+.pill-button.danger {
+  color: #ffc9c9;
+}
+
+.pill-button.danger.armed {
+  background: linear-gradient(180deg, #ff7f7f, #e04848);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.4),
+    0 10px 30px -10px #ff5c5c;
+}
+
+/* ------------------------------------------------------------ the pad */
+
+.pad {
+  --size: min(76vw, 300px);
+  position: relative;
+  width: var(--size);
+  height: var(--size);
+  transform-style: preserve-3d;
+  transform: perspective(800px)
+    rotateX(calc(var(--tilt-x, 0deg) + var(--dev-x, 0deg) + var(--lean-x, 0deg)))
+    rotateY(calc(var(--tilt-y, 0deg) + var(--dev-y, 0deg) + var(--lean-y, 0deg)));
+  transition: transform var(--spring-soft-ms) var(--spring-soft);
+}
+
+.pad.tilting {
+  transition-duration: 140ms;
+}
+
+/* A press leans the disc toward it, like a rocker under a thumb. */
+.pad.lean-up {
+  --lean-x: 7deg;
+}
+.pad.lean-down {
+  --lean-x: -7deg;
+}
+.pad.lean-left {
+  --lean-y: -7deg;
+}
+.pad.lean-right {
+  --lean-y: 7deg;
+}
+
+.pad-disc {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+/* The groove between the arrows and OK. */
+.pad-disc::after {
+  content: "";
+  position: absolute;
+  inset: 27%;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 2px 6px rgb(0 0 0 / 0.5),
+    0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+.pad-arrow {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.pad-up {
+  top: 0;
+  left: 30%;
+  width: 40%;
+  height: 28%;
+}
+.pad-down {
+  bottom: 0;
+  left: 30%;
+  width: 40%;
+  height: 28%;
+}
+.pad-left {
+  left: 0;
+  top: 30%;
+  width: 28%;
+  height: 40%;
+}
+.pad-right {
+  right: 0;
+  top: 30%;
+  width: 28%;
+  height: 40%;
+}
+
+.pad-arrow .icon {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  stroke-width: 2.2;
+  transition:
+    transform var(--spring-ms) var(--spring),
+    color 200ms,
+    filter 200ms;
+}
+
+/* The light a press leaves, springing out from under the thumb. */
+.pad-arrow::before {
+  content: "";
+  position: absolute;
+  inset: 4%;
+  border-radius: 46%;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--accent) 60%, transparent), transparent);
+  opacity: 0;
+  transform: scale(0.5);
+  transition:
+    opacity 380ms,
+    transform var(--spring-ms) var(--spring);
+}
+
+.pad-arrow:is(:active, .pressed):not(:disabled)::before {
+  opacity: 1;
+  transform: scale(1);
+  transition-duration: 60ms;
+}
+
+.pad-arrow:is(:active, .pressed):not(:disabled) .icon {
+  color: #fff;
+  filter: drop-shadow(0 0 8px var(--accent));
+}
+
+.pad-up:is(:active, .pressed) .icon {
+  transform: translateY(-5px);
+}
+.pad-down:is(:active, .pressed) .icon {
+  transform: translateY(5px);
+}
+.pad-left:is(:active, .pressed) .icon {
+  transform: translateX(-5px);
+}
+.pad-right:is(:active, .pressed) .icon {
+  transform: translateX(5px);
+}
+
+.pad-arrow:hover:not(:disabled) .icon {
+  color: var(--accent);
+}
+
+.pad-arrow:disabled {
+  color: var(--dim);
+  opacity: 0.45;
+}
+
+.pad-ok {
+  position: absolute;
+  inset: 30.5%;
+  border: 0;
+  border-radius: 50%;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  background:
+    radial-gradient(circle at 50% 28%, rgb(255 255 255 / 0.3), rgb(255 255 255 / 0.04) 62%),
+    color-mix(in oklab, var(--ambient) 62%, #151b34);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    inset 0 -6px 14px rgb(0 0 0 / 0.25),
+    0 0 0 1px rgb(255 255 255 / 0.09),
+    0 14px 30px -10px rgb(0 0 0 / 0.8),
+    0 0 46px -8px color-mix(in oklab, var(--accent) 70%, transparent);
+  transform: translateZ(28px);
+  transition:
+    transform var(--spring-ms) var(--spring),
+    box-shadow 300ms,
+    background 1.4s;
+}
+
+.pad-ok:hover:not(:disabled) {
+  transform: translateZ(28px) scale(1.04);
+}
+
+.pad-ok:is(:active, .pressed):not(:disabled) {
+  transform: translateZ(28px) scale(0.88);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.4),
+    inset 0 -4px 10px rgb(0 0 0 / 0.2),
+    0 0 0 1px rgb(255 255 255 / 0.12),
+    0 6px 14px -6px rgb(0 0 0 / 0.8),
+    0 0 60px -4px var(--accent);
+  transition-duration: 70ms, 120ms, 1.4s;
+}
+
+.pad-ok:disabled {
+  opacity: 0.5;
+}
+
+/* ------------------------------------------------------------ option chips */
+
+.chips {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-option {
+  position: relative;
+  z-index: 1;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.06);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  color: color-mix(in oklab, var(--text) 78%, transparent);
+  font-weight: 550;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    color 250ms,
+    background 250ms,
+    transform var(--spring-ms) var(--spring);
+}
+
+.chip-option:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.11);
+}
+
+.chip-option:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.chip-option[aria-pressed="true"] {
+  color: var(--ink);
+  background: transparent;
+  box-shadow: none;
+  font-weight: 650;
+}
+
+.chip-option:disabled {
+  opacity: 0.45;
+}
+
+/* The selection is one shape that slides and stretches to the chosen chip. */
+.chip-glow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--gw, 0);
+  height: var(--gh, 0);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fff, color-mix(in oklab, var(--accent) 45%, white));
+  box-shadow:
+    inset 0 -2px 0 rgb(0 0 0 / 0.08),
+    0 8px 26px -8px var(--accent);
+  opacity: 0;
+  transform: translate(var(--gx, 0), var(--gy, 0));
+  transition:
+    transform var(--spring-ms) var(--spring),
+    width var(--spring-ms) var(--spring),
+    height var(--spring-ms) var(--spring),
+    opacity 200ms;
+}
+
+.chips.has-value .chip-glow {
+  opacity: 1;
+}
+
+/* ------------------------------------------------------------ sliders */
+
+input[type="range"] {
+  --fill: 0%;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+input[type="range"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) var(--fill), rgb(255 255 255 / 0.1) var(--fill));
+  box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.45);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 30px;
+  height: 30px;
+  margin-top: -9px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 30%, #fff, #dfe3ee);
+  box-shadow:
+    0 4px 14px rgb(0 0 0 / 0.45),
+    0 0 0 6px rgb(255 255 255 / 0.1);
+  transition: transform var(--spring-ms) var(--spring);
+}
+
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.2);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 12px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.1);
+}
+
+input[type="range"]::-moz-range-progress {
+  height: 12px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.45);
+}
+
+/* ------------------------------------------------------------ fields */
+
+.text-field,
+.type-field {
+  /* No intrinsic width: an input's default size would hold a phone's
+   * column open wider than the screen. */
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  height: 52px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.3);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.08),
+    inset 0 2px 6px rgb(0 0 0 / 0.35);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  transition: box-shadow 220ms;
+}
+
+.text-field::placeholder,
+.type-field::placeholder {
+  color: color-mix(in oklab, var(--dim) 75%, transparent);
+}
+
+.text-field:focus,
+.type-field:focus {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1.5px var(--accent),
+    0 0 0 4px color-mix(in oklab, var(--accent) 22%, transparent);
+}
+
+.text-field:disabled,
+.type-field:disabled {
+  opacity: 0.5;
+}
+
+.field-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dim);
+}
+
+.type-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--dim);
+  font-size: 13px;
+}
+
+.hint .icon {
+  width: 16px;
+  height: 16px;
+  color: var(--good);
+}
+
+.notice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: 18px;
+  background: rgb(255 198 92 / 0.08);
+  box-shadow: inset 0 0 0 1px rgb(255 198 92 / 0.22);
+  color: #ffe2a8;
+  font-size: 14px;
+}
+
+.notice .icon {
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+}
+
+/* ------------------------------------------------------------ switches */
+
+.switch {
+  width: 58px;
+  height: 34px;
+  padding: 3px;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.14);
+  box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.4);
+  cursor: pointer;
+  transition: background 260ms;
+}
+
+.switch-knob {
+  display: block;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.4);
+  transition:
+    transform var(--spring-ms) var(--spring),
+    width var(--spring-ms) var(--spring);
+}
+
+.switch:active:not(:disabled) .switch-knob {
+  width: 34px;
+}
+
+.switch[aria-checked="true"] {
+  background: var(--accent);
+}
+
+.switch[aria-checked="true"] .switch-knob {
+  transform: translateX(24px);
+}
+
+.switch[aria-checked="true"]:active:not(:disabled) .switch-knob {
+  transform: translateX(18px);
+}
+
+.switch:disabled {
+  opacity: 0.4;
+}
+
+/* ------------------------------------------------------------ the mute icon */
+
+.mute-icon .waves {
+  transform-origin: 12px 12px;
+  transition:
+    opacity 220ms,
+    transform var(--spring-ms) var(--spring);
+}
+
+.mute-icon .slash {
+  opacity: 0;
+  transform-origin: 18px 12px;
+  transform: scale(0.3) rotate(-45deg);
+  transition:
+    opacity 200ms,
+    transform var(--spring-ms) var(--spring);
+}
+
+:is(.muted, [aria-pressed="true"]) > .mute-icon .waves {
+  opacity: 0;
+  transform: scale(0.5);
+}
+
+:is(.muted, [aria-pressed="true"]) > .mute-icon .slash {
+  opacity: 1;
+  transform: none;
+}
