@@ -165,9 +165,9 @@ fn shelf(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
         return;
     }
     let art = view.shelf_art;
-    shelf_art(batch, r, art.base, 1.0, assets);
+    shelf_art(batch, r, art.base, 1.0, view.shelf_drift, assets);
     if let Some((over, alpha)) = art.over {
-        shelf_art(batch, r, over, alpha, assets);
+        shelf_art(batch, r, over, alpha, view.shelf_drift, assets);
     }
     let Some(title) = view.shelf_title else {
         return;
@@ -196,8 +196,16 @@ fn shelf(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
 
 /// One of the shelf's pictures at `alpha`: `hero`'s layers, back to front,
 /// or the placeholder gradient for `None` (and for a hero with no textures,
-/// which the home loop never shows).
-fn shelf_art(batch: &mut Batch, r: Rect, hero: Option<&Hero>, alpha: f32, assets: &Assets) {
+/// which the home loop never shows). A layered hero's layers drift by
+/// `drift` (`View::shelf_drift`).
+fn shelf_art(
+    batch: &mut Batch,
+    r: Rect,
+    hero: Option<&Hero>,
+    alpha: f32,
+    drift: [f32; 2],
+    assets: &Assets,
+) {
     let Some(layers) = hero.and_then(|hero| assets.heroes.get(hero)) else {
         batch.gradient_rect(
             r.x,
@@ -209,6 +217,10 @@ fn shelf_art(batch: &mut Batch, r: Rect, hero: Option<&Hero>, alpha: f32, assets
         );
         return;
     };
+    if layers.len() > 1 {
+        drifting_layers(batch, r, layers, alpha, drift);
+        return;
+    }
     let whole = Uv {
         u0: 0.0,
         v0: 0.0,
@@ -224,6 +236,48 @@ fn shelf_art(batch: &mut Batch, r: Rect, hero: Option<&Hero>, alpha: f32, assets
             r.w,
             bottom - top,
             whole,
+            WHITE.alpha(alpha),
+        );
+    }
+}
+
+/// A layered hero's layers, each moved `drift` times its own
+/// `style::PARALLAX_PX` against the last move. All are drawn alike a little
+/// larger than the shelf, about its middle, so the layers still line up at
+/// rest and none drifts far enough to show its edge: art at a fraction `a`
+/// of the shelf shows at `0.5 + (a - 0.5) k`, plus the layer's drift. Each
+/// quad is cut to the shelf, its texture window cut with it.
+fn drifting_layers(batch: &mut Batch, r: Rect, layers: &[HeroLayer], alpha: f32, drift: [f32; 2]) {
+    let most = style::PARALLAX_PX.iter().copied().fold(0.0, f32::max);
+    let k = r.h / (r.h - 2.0 * most);
+    // Along one side of the shelf (from `at`, `len` long): where art at a
+    // fraction shows, and which fraction shows at a place.
+    let place = |a: f32, at: f32, len: f32, off: f32| at + len * (0.5 + (a - 0.5) * k) + off;
+    let fraction = |p: f32, at: f32, len: f32, off: f32| 0.5 + ((p - at - off) / len - 0.5) / k;
+    for (layer, px) in layers.iter().zip(style::PARALLAX_PX) {
+        let (ox, oy) = (drift[0] * px, drift[1] * px);
+        let (rows0, rows1) = layer.rows;
+        let x0 = place(0.0, r.x, r.w, ox).max(r.x);
+        let x1 = place(1.0, r.x, r.w, ox).min(r.right());
+        let y0 = place(rows0, r.y, r.h, oy).max(r.y);
+        let y1 = place(rows1, r.y, r.h, oy).min(r.bottom());
+        if x1 <= x0 || y1 <= y0 {
+            continue;
+        }
+        let v = |y: f32| (fraction(y, r.y, r.h, oy) - rows0) / (rows1 - rows0);
+        let uv = Uv {
+            u0: fraction(x0, r.x, r.w, ox),
+            v0: v(y0),
+            u1: fraction(x1, r.x, r.w, ox),
+            v1: v(y1),
+        };
+        batch.image_from(
+            layer.texture,
+            x0,
+            y0,
+            x1 - x0,
+            y1 - y0,
+            uv,
             WHITE.alpha(alpha),
         );
     }
@@ -494,6 +548,53 @@ mod tests {
         super::home(&mut batch, &home.view(), &mut assets);
         assert_eq!(batch.leaning_quads(), 0);
         assert_eq!(batch.quad_count(), quads(&plain, &mut assets));
+    }
+
+    #[test]
+    fn the_ambient_heros_layers_drift_each_its_own_way_and_never_show_an_edge() {
+        let mut assets = assets();
+        let mut home = mock_home().with_look(Look::FULL);
+        let layers = [(0.0, 1.0), (0.0, 0.66), (0.71, 1.0)];
+        let textures = layers.map(|rows| HeroLayer {
+            texture: Texture::Own(7),
+            rows,
+        });
+        assets.heroes.insert(Hero::Ambient, textures.into());
+        home.show_hero(Some(Hero::Ambient));
+        home.settle_now();
+        let windows = |home: &Home, assets: &mut Assets| {
+            let mut batch = Batch::default();
+            super::home(&mut batch, &home.view(), assets);
+            batch.image_uvs()[..3].to_vec()
+        };
+        // At rest the three line up: one window, a little inside the art.
+        let rest = windows(&home, &mut assets);
+        assert!(rest.iter().all(|w| (w.0, w.2) == (rest[0].0, rest[0].2)));
+        assert!(rest[0].0 > 0.0 && rest[0].2 < 1.0, "{rest:?}");
+        // Mid drift, after Right, each window has moved right (the art left)
+        // by its layer's share, still inside the art.
+        let right = Press {
+            action: Action::Move(Dir::Right),
+            repeat: false,
+        };
+        assert_eq!(home.handle(right, Duration::ZERO), None);
+        home.advance_to(Duration::from_millis(70));
+        let moved = windows(&home, &mut assets);
+        let shift: Vec<f32> = moved.iter().zip(&rest).map(|(m, r)| m.0 - r.0).collect();
+        assert!(shift[0] > 0.0, "{shift:?}");
+        for (i, px) in style::PARALLAX_PX.iter().enumerate() {
+            let share = shift[i] / shift[0];
+            assert!(
+                (share - px / style::PARALLAX_PX[0]).abs() < 0.01,
+                "{shift:?}"
+            );
+        }
+        for w in &moved {
+            assert!(
+                w.0 >= 0.0 && w.1 >= 0.0 && w.2 <= 1.0 && w.3 <= 1.0,
+                "{moved:?}"
+            );
+        }
     }
 
     #[test]

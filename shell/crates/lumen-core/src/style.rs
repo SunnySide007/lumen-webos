@@ -194,6 +194,18 @@ pub const SWEEP_TIME: Duration = Duration::from_millis(450);
 pub const SWEEP_WIDTH: f32 = 0.45;
 /// The light at its brightest: white at this alpha.
 pub const SWEEP_STRENGTH: f32 = 0.2;
+/// How far the ambient hero's layers drift against a move at most, in px:
+/// back (the sky) least, front (the ridge) most, so the shelf reads as
+/// depth. Each is drawn 1.9% larger than the shelf, so a drift never shows
+/// an edge.
+pub const PARALLAX_PX: [f32; 3] = [1.0, 3.0, 6.0];
+/// The drift's spring, 1 at its farthest: it moves and settles with the
+/// tile's lean.
+pub const PARALLAX: Tuning = Tuning {
+    omega: TILT.omega,
+    epsilon: 0.005,
+    rest_speed: 0.05,
+};
 
 // Dither.
 

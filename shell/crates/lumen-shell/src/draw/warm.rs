@@ -50,6 +50,7 @@ fn paint_all(apps: &[App], assets: &mut Assets) {
                 shelf: layout::TOP_SHELF,
                 shelf_title: Some(&app.title),
                 shelf_art: ShelfView::PLACEHOLDER,
+                shelf_drift: [0.0; 2],
                 tiles: vec![TileView {
                     app: &plain,
                     rect: layout::lifted(layout::tile_rect(0), 1.0),

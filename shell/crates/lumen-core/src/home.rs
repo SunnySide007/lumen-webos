@@ -82,6 +82,10 @@ pub struct View<'a> {
     pub shelf_title: Option<&'a str>,
     /// The shelf's art: its hero, or the placeholder, and any crossfade.
     pub shelf_art: ShelfView<'a>,
+    /// How far a layered hero's layers have drifted against the last move,
+    /// across and down, 1 at most: each layer moves its own
+    /// `style::PARALLAX_PX` times this.
+    pub shelf_drift: [f32; 2],
     /// Tiles on screen, back to front: the focused tile comes last.
     pub tiles: Vec<TileView<'a>>,
     pub status: Option<&'a str>,
@@ -96,6 +100,8 @@ pub struct Home {
     lifts: Vec<Spring>,
     /// Each tile's lean, as `TileView::tilt`.
     tilts: Vec<[Spring; 2]>,
+    /// The layered hero's drift, as `View::shelf_drift`.
+    drift: [Spring; 2],
     sweep: Option<Sweep>,
     scroll: Spring,
     bump_x: Spring,
@@ -130,6 +136,7 @@ impl Home {
         Self {
             focus: GridFocus::new(apps.len(), layout::COLUMNS),
             tilts: vec![[upright; 2]; apps.len()],
+            drift: [Spring::new(0.0, style::PARALLAX); 2],
             sweep: None,
             apps,
             lifts,
@@ -249,6 +256,7 @@ impl Home {
         self.lifts[from].set_target(0.0);
         self.lifts[to].set_target(1.0);
         self.lean(to, dir);
+        self.drift(dir);
         if self.look.light {
             self.sweep = Some(Sweep {
                 tile: to,
@@ -289,7 +297,32 @@ impl Home {
         // A blocked tile leans too, as if it met the edge; focus stays, so
         // no light crosses it.
         self.lean(focused, dir);
+        self.drift(dir);
         self.dirty = true;
+    }
+
+    /// Drifts a layered hero's layers against a move toward `dir`, with
+    /// the tile's lean, and lets them spring back, if the look has parallax
+    /// and the shelf, on screen with row 0, shows such a hero. With the
+    /// lean's room, a held key never drifts them past their
+    /// `style::PARALLAX_PX`.
+    fn drift(&mut self, dir: Dir) {
+        let layered = self
+            .shelf
+            .target()
+            .is_some_and(|hero| hero.is_layered(&self.look));
+        if !self.look.tilt || !layered || self.focus.row() != 0 {
+            return;
+        }
+        let (axis, sign) = match dir {
+            Dir::Left => (0, 1.0),
+            Dir::Right => (0, -1.0),
+            Dir::Up => (1, 1.0),
+            Dir::Down => (1, -1.0),
+        };
+        let spring = &mut self.drift[axis];
+        let room = (1.0 - (spring.value() * sign).max(0.0)).max(0.0);
+        spring.set_velocity(sign * room * kick_for_peak(1.0, style::PARALLAX.omega));
     }
 
     /// Leans `tile` toward `dir` and lets it spring upright, if the look
@@ -387,6 +420,7 @@ impl Home {
         self.lifts
             .iter_mut()
             .chain(self.tilts.iter_mut().flatten())
+            .chain(&mut self.drift)
             .chain([&mut self.scroll, &mut self.bump_x, &mut self.bump_y])
     }
 
@@ -397,6 +431,7 @@ impl Home {
                 .lifts
                 .iter()
                 .chain(self.tilts.iter().flatten())
+                .chain(&self.drift)
                 .chain([&self.scroll, &self.bump_x, &self.bump_y])
                 .all(Spring::is_settled)
     }
@@ -484,6 +519,7 @@ impl Home {
             shelf: layout::TOP_SHELF.offset(0.0, -scroll),
             shelf_title: self.apps.get(self.shelf_index).map(|a| a.title.as_str()),
             shelf_art: self.shelf.view(&self.look),
+            shelf_drift: self.drift.map(|s| s.value()),
             tiles,
             status: self.status.as_ref().map(|(text, _)| text.as_str()),
             empty: self.apps.is_empty(),
@@ -1073,6 +1109,72 @@ mod tests {
         sim.press(LEFT);
         let (most, sweeps) = watch(&mut sim);
         assert!(most.iter().all(|m| *m == [0.0; 2]) && sweeps.is_empty());
+    }
+
+    /// Frames until settled, keeping the shelf's largest drift either way.
+    fn drifted(sim: &mut Sim) -> [f32; 2] {
+        let mut most = [0.0f32; 2];
+        loop {
+            for (most, drift) in most.iter_mut().zip(sim.home.view().shelf_drift) {
+                if drift.abs() > most.abs() {
+                    *most = drift;
+                }
+            }
+            if !sim.frame() {
+                return most;
+            }
+        }
+    }
+
+    #[test]
+    fn the_ambient_heros_layers_drift_against_a_move_on_row_0_and_settle() {
+        let mut sim = full(mock_apps());
+        sim.home.show_hero(Some(Hero::Ambient));
+        sim.settle();
+        // Right to Prime Video, whose hero is the ambient one too: the
+        // layers drift left, to their farthest and no further, and back.
+        sim.press(RIGHT);
+        let most = drifted(&mut sim);
+        assert!(most[0] < -0.95 && most[0] >= -1.0, "{most:?}");
+        assert_eq!(most[1], 0.0);
+        assert_eq!(sim.home.view().shelf_drift, [0.0; 2]);
+        assert!(sim.home.is_settled());
+        // Mashed Left and Right, never past 1.
+        for action in [LEFT, RIGHT].repeat(5) {
+            sim.press(action);
+            for _ in 0..4 {
+                sim.frame();
+                assert!(sim.home.view().shelf_drift[0].abs() <= 1.0001);
+            }
+        }
+        sim.settle();
+        // Down scrolls the shelf away: nothing drifts.
+        sim.press(DOWN);
+        assert_eq!(drifted(&mut sim), [0.0; 2]);
+    }
+
+    #[test]
+    fn a_flat_hero_or_a_look_without_parallax_or_tilt_never_drifts() {
+        let no_parallax = Look {
+            parallax: false,
+            ..Look::FULL
+        };
+        let no_tilt = Look {
+            tilt: false,
+            ..Look::FULL
+        };
+        for (look, hero) in [
+            (Look::FULL, PLEX),
+            (no_parallax, Hero::Ambient),
+            (no_tilt, Hero::Ambient),
+        ] {
+            let mut sim = full(mock_apps());
+            sim.home = Home::new(mock_apps(), BackAtTop::Exit).with_look(look);
+            sim.home.show_hero(Some(hero.clone()));
+            sim.settle();
+            sim.press(RIGHT);
+            assert_eq!(drifted(&mut sim), [0.0; 2], "{look:?} {hero:?}");
+        }
     }
 
     #[test]

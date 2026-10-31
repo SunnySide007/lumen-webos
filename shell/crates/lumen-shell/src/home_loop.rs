@@ -284,7 +284,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
                 warm_at.filter(|_| shell.visible),
                 // The hero: the loader's news, or focus having rested.
                 heroes
-                    .deadline(&shell.home, clock.now())
+                    .deadline(&shell.home, clock.now(), !shell.input.is_holding())
                     .filter(|_| shell.visible),
             ]
             .into_iter()
@@ -1226,6 +1226,25 @@ mod tests {
         assert_eq!(
             ran.frames.last().map(|f| &f.shelf),
             Some(&shows("hero-plex"))
+        );
+        // Netflix's hero loaded and went in at the idle passes after the
+        // first frame, before the first key at 0.5 s: nothing but the plan
+        // wakes a fixed clock for it (the fake's clock moves with frames).
+        let first_frame = ran
+            .acts
+            .iter()
+            .find_map(|act| match act {
+                Act::Swap(at) => Some(*at),
+                _ => None,
+            })
+            .expect("a frame");
+        let acts: Vec<_> = ran.hero_acts().into_iter().take(2).collect();
+        assert_eq!(
+            acts,
+            [
+                ('L', first_frame, "hero-ambient"),
+                ('U', first_frame, "hero-ambient")
+            ]
         );
     }
 }

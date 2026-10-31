@@ -304,29 +304,36 @@ impl HeroPlan {
         }
     }
 
-    /// When a settled screen must look again: at once when a crossfade has
-    /// settled (its line, and the textures it left to free), soon while the
-    /// loader works, or once focus has rested long enough for the wanted
-    /// hero to load.
-    pub(super) fn deadline(&self, home: &Home, now: Duration) -> Option<Duration> {
+    /// When a settled screen must look again. At once, if `can_act` (no key
+    /// held, so `idle` will run), when a crossfade has settled (its line, and
+    /// the textures it left to free) or the wanted hero waits decoded, in
+    /// textures or due to load; soon while the loader works; or once focus
+    /// has rested long enough for the wanted hero to load. Nothing else need
+    /// wake the loop: under a fixed clock nothing else would.
+    pub(super) fn deadline(&self, home: &Home, now: Duration, can_act: bool) -> Option<Duration> {
         if !self.on {
             return None;
         }
         let target = home.shelf_target();
         let unused = |hero: &Hero| target != Some(hero) && home.wanted_hero() != Some(hero);
         let settled = self.fading.is_some() && !home.is_fading();
-        if settled || self.uploaded.iter().any(|(hero, _)| unused(hero)) {
+        if can_act && (settled || self.uploaded.iter().any(|(hero, _)| unused(hero))) {
             return Some(now);
         }
         if !self.listed || self.loading.is_some() {
             return Some(now + HERO_POLL);
         }
         let wanted = home.wanted_hero()?;
-        let to_load = home.shelf_target() != Some(wanted)
-            && !self.failed.contains(wanted)
-            && !self.is_decoded(wanted)
-            && !self.is_uploaded(wanted);
-        (to_load && self.due > now).then_some(self.due)
+        if target == Some(wanted) {
+            return None;
+        }
+        if self.failed.contains(wanted) {
+            return (can_act && target.is_some()).then_some(now);
+        }
+        if self.is_decoded(wanted) || self.is_uploaded(wanted) || self.due <= now {
+            return can_act.then_some(now);
+        }
+        Some(self.due)
     }
 
     /// Whether the shelf will change by itself: the settled screenshot
