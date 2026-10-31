@@ -7,14 +7,65 @@
 #
 # docs/safety.md: it does nothing while the kill switch exists, returns at
 # once, and its background work ends by itself within ten minutes.
-# Log: /tmp/lumen-privacy.log. Install, check or remove it with
-# tools/privacy-hook.sh; tools/uninstall-all.sh removes it too.
+# Log: /var/lib/lumen/log/lumen-privacy.log, and the run before in
+# lumen-privacy.log.1 (log_to, below). With no safe log folder it does its
+# work unlogged, and tools/privacy-hook.sh status says "no log". Install,
+# check or remove it with tools/privacy-hook.sh; tools/uninstall-all.sh
+# removes it too.
 
 KILL=/var/luna/preferences/lumen_disable
-LOG=/tmp/lumen-privacy.log
+LOGDIR=/var/lib/lumen/log
+LOG=$LOGDIR/lumen-privacy.log
+ROOT_UID=0
 
 [ -e "$KILL" ] && exit 0
 
+# folder_ok FOLDER...: each is a real folder, not a link, owned by root and
+# writable by no one else.
+folder_ok() {
+    for d in "$@"; do
+        if [ -L "$d" ] || [ ! -d "$d" ]; then
+            echo "$d is not a real folder"
+            return 1
+        fi
+        # ls -ln is POSIX, and stat is not: its mode and owner, split into words.
+        # shellcheck disable=SC2046,SC2012
+        set -- $(ls -ldn "$d")
+        case $1 in
+            d????[!w]??[!w]*) ;;
+            *)
+                echo "$d is writable by others ($1)"
+                return 1
+                ;;
+        esac
+        if [ "$3" != "$ROOT_UID" ]; then
+            echo "$d is owned by uid $3, not root"
+            return 1
+        fi
+    done
+}
+
+# log_to: starts this run's log and prints where its output goes. Root writes
+# nothing into /tmp, which every app's jail shares: a link put there before a
+# boot hook runs would send root's writes wherever it points. So the log is
+# $LOG, in a folder made with umask 077 and used only once it and
+# /var/lib/lumen pass folder_ok. The last run's log moves to $LOG.1 first,
+# which keeps one earlier boot, and the new one is made before the hook goes
+# into the background. A folder that fails gets no log: the hook does its
+# work all the same, with its output to /dev/null, and says why on stderr.
+log_to() {
+    mkdir -p "${LOGDIR%/*}"
+    if folder_ok "${LOGDIR%/*}" >&2 && (umask 077 && mkdir -p "$LOGDIR") &&
+        folder_ok "$LOGDIR" >&2 && { [ ! -e "$LOG" ] || mv -f "$LOG" "$LOG.1"; } &&
+        : >"$LOG"; then
+        echo "$LOG"
+    else
+        echo "no log: this run's output goes to /dev/null" >&2
+        echo /dev/null
+    fi
+}
+
+OUT=$(log_to)
 (
     echo "$(date -u) lumen-privacy: start"
     if iptables -L INPUT -n | grep -q 'tcp dpt:11111'; then
@@ -44,4 +95,4 @@ LOG=/tmp/lumen-privacy.log
         sleep 10
     done
     echo "$(date -u) lumen-privacy: done"
-) </dev/null >>"$LOG" 2>&1 &
+) </dev/null >>"$OUT" 2>&1 &

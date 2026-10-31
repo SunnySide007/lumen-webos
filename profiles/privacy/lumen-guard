@@ -18,12 +18,18 @@
 # the mount gone, or three names in a row without an answer, and it fails
 # open: connman's resolv.conf back, the rules out, Guard stopped, in that
 # order.
-# Log: /tmp/lumen-guard.log. tools/guard.sh installs, checks and removes it;
+# Log: /var/lib/lumen/log/lumen-guard.log, and the run before in
+# lumen-guard.log.1 (log_to, below). With no safe log folder Guard starts all
+# the same, unlogged, and tools/guard.sh status says "no log". A by-hand run
+# while a Guard runs moves that Guard's log, which its watchdog goes on
+# writing, to lumen-guard.log.1. tools/guard.sh installs, checks and removes it;
 # profiles/privacy/guard-apply.sh runs it by hand from the copy tools/guard.sh
 # push leaves in /var/lib/lumen/guard; guard-undo.sh stops Guard now.
 
 KILL=/var/luna/preferences/lumen_disable
-LOG=/tmp/lumen-guard.log
+LOGDIR=/var/lib/lumen/log
+LOG=$LOGDIR/lumen-guard.log
+ROOT_UID=0
 DIR=/var/lib/lumen/guard
 BIN=$DIR/lumen-guard
 PIDFILE=$DIR/lumen-guard.pid
@@ -135,6 +141,52 @@ running() {
     echo "$p"
 }
 
+# folder_ok FOLDER...: each is a real folder, not a link, owned by root and
+# writable by no one else.
+folder_ok() {
+    for d in "$@"; do
+        if [ -L "$d" ] || [ ! -d "$d" ]; then
+            echo "$d is not a real folder"
+            return 1
+        fi
+        # ls -ln is POSIX, and stat is not: its mode and owner, split into words.
+        # shellcheck disable=SC2046,SC2012
+        set -- $(ls -ldn "$d")
+        case $1 in
+            d????[!w]??[!w]*) ;;
+            *)
+                echo "$d is writable by others ($1)"
+                return 1
+                ;;
+        esac
+        if [ "$3" != "$ROOT_UID" ]; then
+            echo "$d is owned by uid $3, not root"
+            return 1
+        fi
+    done
+}
+
+# log_to: starts this run's log and prints where its output goes. Root writes
+# nothing into /tmp, which every app's jail shares: a link put there before a
+# boot hook runs would send root's writes wherever it points. So the log is
+# $LOG, in a folder made with umask 077 and used only once it and
+# /var/lib/lumen pass folder_ok. The last run's log moves to $LOG.1 first,
+# which keeps one earlier boot, and the new one is made before the hook goes
+# into the background. A folder that fails gets no log: the hook does its
+# work all the same, with its output to /dev/null, and says why on stderr.
+log_to() {
+    mkdir -p "${LOGDIR%/*}"
+    if folder_ok "${LOGDIR%/*}" >&2 && (umask 077 && mkdir -p "$LOGDIR") &&
+        folder_ok "$LOGDIR" >&2 && { [ ! -e "$LOG" ] || mv -f "$LOG" "$LOG.1"; } &&
+        : >"$LOG"; then
+        echo "$LOG"
+    else
+        echo "no log: this run's output goes to /dev/null" >&2
+        echo /dev/null
+    fi
+}
+
+OUT=$(log_to)
 (
     # No hangup when the SSH session that ran guard-apply.sh closes.
     trap '' HUP
@@ -240,4 +292,4 @@ running() {
         fi
     done
     fail_open "Guard exited"
-) </dev/null >>"$LOG" 2>&1 &
+) </dev/null >>"$OUT" 2>&1 &

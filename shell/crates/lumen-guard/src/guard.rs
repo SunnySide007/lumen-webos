@@ -1,6 +1,6 @@
 //! What the UDP and TCP loops share: the configuration, the rules, the lookup
 //! log and the counts, and Guard's own messages on stderr (which the boot hook
-//! sends to /tmp/lumen-guard.log).
+//! sends to /var/lib/lumen/log/lumen-guard.log).
 
 use std::fmt;
 use std::sync::{Mutex, MutexGuard};
