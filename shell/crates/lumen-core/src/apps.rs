@@ -135,7 +135,7 @@ impl Default for MockLauncher {
             ("netflix", "Netflix", A),
             ("amazon", "Prime Video", A),
             ("youtube.leanback.v4", "YouTube", A),
-            ("plx-native", "Plex", A),
+            ("com.beb.plxnative", "Plex", A),
             ("com.disney.disneyplus-prod", "Disney+", A),
             ("com.apple.appletv", "Apple TV", A),
             ("spotify-beehive", "Spotify", A),
@@ -253,7 +253,7 @@ mod tests {
         assert_eq!(icon("netflix"), Some(dir.join("play.png")));
         assert_eq!(icon("com.webos.app.hdmi2"), Some(dir.join("input.png")));
         assert_eq!(icon("com.palm.app.settings"), Some(dir.join("gear.png")));
-        assert_eq!(icon("plx-native"), None, "a letter tile");
+        assert_eq!(icon("com.beb.plxnative"), None, "a letter tile");
         assert_eq!(icon("com.disney.disneyplus-prod"), None, "a letter tile");
         assert_eq!(apps.iter().filter(|a| a.icon.is_some()).count(), 10);
     }

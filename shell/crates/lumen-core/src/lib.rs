@@ -9,6 +9,7 @@
 
 pub mod anim;
 pub mod apps;
+pub mod art;
 pub mod focus;
 pub mod home;
 pub mod input;

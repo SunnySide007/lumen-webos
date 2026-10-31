@@ -7,6 +7,8 @@
 //! stays in `layout`; `layout` and `home` keep their old names for these
 //! values as aliases.
 
+use std::time::Duration;
+
 use crate::anim::Tuning;
 
 /// A colour, each channel 0 to 1, alpha straight (not premultiplied).
@@ -154,6 +156,23 @@ pub const BUMP: Tuning = Tuning {
 pub const BUMP_PEAK: f32 = 14.0;
 /// How far Select dips the focused tile's lift.
 pub const PRESS_DIP: f32 = 0.5;
+
+// The Top Shelf hero (docs/specs/look-and-feel.md, "Phase 4 features").
+
+/// A colour whose channels spread less than this (0 to 1) has no hue to
+/// pick a palette hero by, so its app takes the ambient hero, as black,
+/// white and greys do.
+pub const HERO_MIN_CHROMA: f32 = 0.12;
+/// How long focus rests, the screen settled, before the hero for the tile
+/// the shelf shows loads: a run along row 0 loads nothing for the tiles
+/// passed over.
+pub const HERO_REST: Duration = Duration::from_millis(200);
+/// The crossfade to a new hero, 0 to 1.
+pub const HERO_FADE: Tuning = Tuning {
+    omega: 12.0,
+    epsilon: 0.002,
+    rest_speed: 0.02,
+};
 
 #[cfg(test)]
 mod tests {
