@@ -1,14 +1,21 @@
 #!/bin/sh
 # Surveys the TV, read-only, and saves a redacted report.
 #
-#   tools/recon.sh
+#   tools/recon.sh              the device survey (tools/recon/remote.sh)
+#   tools/recon.sh --privacy    the privacy and exposure survey (tools/recon/privacy.sh)
 #
-# What runs on the TV is tools/recon/remote.sh, which only reads; review it
-# before the first run. The raw output stays in tools/out/ (git ignores it), and
-# the redacted copy goes to docs/device/ for review before anything is committed.
+# Both scripts that run on the TV only read; review them before the first run.
+# The raw output stays in tools/out/ (git ignores it), and the redacted copy
+# goes to docs/device/ for review before anything is committed.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+
+case "${1:-}" in
+    '') survey=remote; name=recon ;;
+    --privacy) survey=privacy; name=privacy ;;
+    *) echo "usage: tools/recon.sh [--privacy]" >&2; exit 2 ;;
+esac
 
 python=""
 for candidate in python3 python; do
@@ -35,10 +42,10 @@ redact() {
 
 stamp=$(date -u +%Y%m%d-%H%M%S)
 mkdir -p "$ROOT/tools/out" "$ROOT/docs/device"
-raw=tools/out/recon-$stamp.raw.txt
-out=docs/device/recon-$stamp.txt
+raw=tools/out/$name-$stamp.raw.txt
+out=docs/device/$name-$stamp.txt
 
-"$ROOT/tools/tv.sh" script "$ROOT/tools/recon/remote.sh" > "$ROOT/$raw"
+"$ROOT/tools/tv.sh" script "$ROOT/tools/recon/$survey.sh" > "$ROOT/$raw"
 redact "$raw" "$out"
 
 echo "raw (private):  $raw"
