@@ -2,7 +2,10 @@
 # Route D on the TV (takeover/README.md): Lumen as the B9's Home through LG's
 # own setting, the boot hook that closes LG's Home after boot, and the
 # long-Home key filter. The TV runs takeover/*.sh through tools/tv.sh script,
-# the same files tools/uninstall-all.sh runs.
+# the same files tools/uninstall-all.sh runs. The hook and the filter go to
+# the TV inside the script that installs them, with the PC's SHA-256, and are
+# staged in root's /var/lib/lumen/stage, never in /tmp, which every app's
+# jail shares.
 #
 #   tools/takeover.sh status          the default home, Lumen's app, the saved
 #                                     value, LG's Home, the hook and the key
@@ -41,8 +44,8 @@ HOOK=$ROOT/takeover/lumen-home
 FILTER=$ROOT/takeover/filters/lumen-home.js
 DIR=/var/lib/lumen/takeover
 DEST=/var/lib/webosbrew/init.d/lumen-home
-STAGE=/tmp/lumen-home.new
-FILTER_STAGE=/tmp/lumen-home-filter.js
+# Ends the here-document a generated script carries its file in.
+END_MARK=LUMEN_STAGED_FILE_END
 
 usage() {
     sed -n '2,/^set -eu$/{/^set -eu$/d;s/^# \{0,1\}//;p;}' "$0"
@@ -121,24 +124,59 @@ cmd_undo() {
     "$TV" script "$ROOT/takeover/undo.sh" </dev/null
 }
 
-# The hook's inert copy, checked, then moved into place whole.
-cmd_hook_push() {
-    "$TV" push "$HOOK" "$STAGE"
+# generate TEMPLATE PAYLOAD [NAME=VALUE...]: the TV script TEMPLATE, after
+# WANT, the PC's SHA-256 of PAYLOAD, each NAME=VALUE, and staged_copy, which
+# prints PAYLOAD from a quoted here-document (the shell expands nothing in
+# it). The TV writes its root-only stage from staged_copy and checks it
+# against WANT before it uses it, so the file and the sum the TV trusts both
+# come in the script, never from a file a jail could reach, and a copy that
+# differs by a byte installs nothing.
+generate() {
+    template=$1 payload=$2
+    shift 2
+    [ -z "$(tail -c 1 "$payload")" ] || die "$payload does not end in a newline"
+    if grep -qx "$END_MARK" "$payload"; then
+        die "$payload holds the line $END_MARK"
+    fi
+    printf 'WANT=%s\n' "$(sha "$payload")"
+    for assignment in "$@"; do
+        printf '%s\n' "$assignment"
+    done
+    printf "staged_copy() {\n    cat <<'%s'\n" "$END_MARK"
+    cat "$payload"
+    printf '%s\n}\n' "$END_MARK"
+    cat "$template"
+}
+
+# hook_put INITD: the hook to its by-hand copy, and with INITD 1 into init.d,
+# through takeover/hook-install.sh; each copy's SHA-256 is compared again.
+hook_put() {
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    generate "$ROOT/takeover/hook-install.sh" "$HOOK" "INITD=$1" >"$work/hook-install.sh"
+    out=$("$TV" script "$work/hook-install.sh" </dev/null) || {
+        printf '%s\n' "$out"
+        die "the hook was not put on the TV"
+    }
+    printf '%s\n' "$out"
     want=$(sha "$HOOK")
-    got=$("$TV" run "set -e; sh -n $STAGE; mkdir -p $DIR; cp $STAGE $DIR/boot-hook.tmp; mv $DIR/boot-hook.tmp $DIR/boot-hook; rm -f $STAGE; sha256sum < $DIR/boot-hook | cut -d' ' -f1" </dev/null)
+    got=$(printf '%s\n' "$out" | sed -n 's/^boot-hook: //p')
     [ "$got" = "$want" ] || die "the hook's copy on the TV ($got) is not this checkout's ($want)"
-    echo "pushed the hook to $DIR/boot-hook ($want), inert there:"
+    if [ "$1" = 1 ]; then
+        got=$(printf '%s\n' "$out" | sed -n 's/^init\.d: //p')
+        [ "$got" = "$want" ] || die "the installed hook's SHA-256 ($got) is not this checkout's ($want)"
+    fi
+}
+
+cmd_hook_push() {
+    hook_put 0
+    echo "pushed the hook to $DIR/boot-hook, inert there:"
     echo "tools/tv.sh script takeover/home-apply.sh runs it by hand"
 }
 
 cmd_hook_install() {
-    cmd_hook_push
-    "$TV" push "$HOOK" "$STAGE"
-    # Checked, then moved into place whole, so a boot never meets half a file.
-    got=$("$TV" run "sh -n $STAGE && cp $STAGE $DEST.tmp && chmod 755 $DEST.tmp && mv $DEST.tmp $DEST && rm -f $STAGE && sha256sum < $DEST | cut -d' ' -f1" </dev/null)
-    want=$(sha "$HOOK")
-    [ "$got" = "$want" ] || die "the installed hook's SHA-256 ($got) is not this checkout's ($want)"
-    echo "installed $DEST ($want); it runs from the next boot"
+    hook_put 1
+    echo "installed $DEST; it runs from the next boot"
     echo "(tools/tv.sh script takeover/home-apply.sh runs it now)"
 }
 
@@ -165,16 +203,14 @@ cmd_filter_apply() {
     tmp=$work/lumen-home.js
     build_filter "$tmp" "$noop"
     check_filter "$tmp"
-    sha "$tmp" >"$tmp.sha256"
     if [ "$noop" = 1 ]; then
-        echo "the no-op build ($(cat "$tmp.sha256")): it times Home presses and logs, and acts on nothing"
+        echo "the no-op build ($(sha "$tmp")): it times Home presses and logs, and acts on nothing"
     else
-        echo "the filter ($(cat "$tmp.sha256")): a long Home press opens LG's Home"
+        echo "the filter ($(sha "$tmp")): a long Home press opens LG's Home"
     fi
     echo "tools/backup.sh comes first. configd keeps the list across reboots: tools/takeover.sh filter undo takes it out."
-    "$TV" push "$tmp" "$FILTER_STAGE"
-    "$TV" push "$tmp.sha256" "$FILTER_STAGE.sha256"
-    "$TV" script "$ROOT/takeover/filter-apply.sh" </dev/null
+    generate "$ROOT/takeover/filter-apply.sh" "$tmp" >"$work/filter-apply.sh"
+    "$TV" script "$work/filter-apply.sh" </dev/null
 }
 
 case ${1:-} in

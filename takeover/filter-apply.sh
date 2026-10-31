@@ -7,10 +7,13 @@
 #
 #   tools/takeover.sh filter apply [--noop]
 #
-# which checks the file on the PC and pushes it, with its SHA-256, to
-# /tmp/lumen-home-filter.js. Here the copy's SHA-256 is checked, the TV's
-# node 0.12 compiles it without running it, the list as it is (without any
-# Lumen entry) is saved to /var/lib/lumen/takeover/keyFilters.before once,
+# which checks the file on the PC and sends this script with the file in
+# staged_copy and the PC's SHA-256 of it in WANT. Nothing passes through
+# /tmp, which every app's jail shares: the file is written to
+# /var/lib/lumen/stage, a folder only root may change, and checked against
+# WANT before anything uses it; the staged copy is removed on every exit.
+# Then the TV's node 0.12 compiles it without running it, the list as it is
+# (without any Lumen entry) is saved to /var/lib/lumen/takeover/keyFilters.before once,
 # the file goes to /var/lib/lumen/takeover/lumen-home.js, and the list is
 # written with Lumen's entry just before LG's handleSystemKeys, then read
 # back; a read-back that differs puts the old list back. Nothing is
@@ -21,7 +24,10 @@
 DIR=/var/lib/lumen/takeover
 FILTER=$DIR/lumen-home.js
 HANDLER=lumenHomeKeys
-STAGED=/tmp/lumen-home-filter.js
+STAGE=/var/lib/lumen/stage
+STAGED=$STAGE/lumen-home.js
+ROOT_UID=0
+WANT=${WANT:-}
 CONFIG=com.webos.service.config
 NAME=com.webos.surfacemanager.keyFilters
 GET='{"configNames":["com.webos.surfacemanager.keyFilters"]}'
@@ -103,12 +109,49 @@ refuse() {
     exit 1
 }
 
+# stage_ok FOLDER...: each is a real folder, not a link, owned by root and
+# writable by no one else, so nothing in an app's jail can put a file there
+# or change one. The folder above the stage is checked before the stage is
+# made in it, and the stage before anything is written there.
+stage_ok() {
+    for d in "$@"; do
+        if [ -L "$d" ] || [ ! -d "$d" ]; then
+            echo "takeover: $d is not a real folder"
+            return 1
+        fi
+        # ls -ln is POSIX, and stat is not: its mode and owner, split into words.
+        # shellcheck disable=SC2046,SC2012
+        set -- $(ls -ldn "$d")
+        case $1 in
+            d????[!w]??[!w]*) ;;
+            *)
+                echo "takeover: $d is writable by others ($1)"
+                return 1
+                ;;
+        esac
+        if [ "$3" != "$ROOT_UID" ]; then
+            echo "takeover: $d is owned by uid $3, not root"
+            return 1
+        fi
+    done
+}
+
 [ ! -e /var/luna/preferences/lumen_disable ] || refuse "/var/luna/preferences/lumen_disable exists"
-if [ ! -f "$STAGED" ] || [ ! -f "$STAGED.sha256" ]; then
-    refuse "no $STAGED; run tools/takeover.sh filter apply"
-fi
-want=$(cat "$STAGED.sha256")
-[ "$(sha "$STAGED")" = "$want" ] || refuse "$STAGED is not the file the PC checked"
+case $WANT in
+    *[!0-9a-f]* | '') refuse "no SHA-256 from the PC: run tools/takeover.sh filter apply" ;;
+esac
+[ ${#WANT} -eq 64 ] || refuse "no SHA-256 from the PC: run tools/takeover.sh filter apply"
+command -v staged_copy >/dev/null 2>&1 || refuse "no file from the PC: run tools/takeover.sh filter apply"
+
+mkdir -p "$DIR" "${STAGE%/*}" || refuse "could not make $DIR"
+stage_ok "${STAGE%/*}" || refuse "${STAGE%/*} is not safe to stage in"
+(umask 077 && mkdir -p "$STAGE") || refuse "could not make $STAGE"
+stage_ok "$STAGE" || refuse "$STAGE is not safe to stage in"
+umask 077
+trap 'rm -f "$STAGED"' EXIT
+rm -f "$STAGED"
+staged_copy >"$STAGED" || refuse "could not write $STAGED"
+[ "$(sha "$STAGED")" = "$WANT" ] || refuse "the staged filter is not the one the PC checked"
 command -v node >/dev/null 2>&1 || refuse "no node on the TV to check the file and the list"
 # new Function compiles the file without running any of it.
 F=$STAGED node -e 'new Function(require("fs").readFileSync(process.env.F, "utf8"));' ||
@@ -123,7 +166,7 @@ new=$(chain insert "$current") || refuse "the list has no handleSystemKeys entry
 
 if [ -f "$DIR/keyFilters.before" ]; then
     echo "takeover filter: kept the earlier save, $DIR/keyFilters.before"
-elif mkdir -p "$DIR" && printf '%s\n' "$before" >"$DIR/keyFilters.before.tmp" &&
+elif printf '%s\n' "$before" >"$DIR/keyFilters.before.tmp" &&
     mv "$DIR/keyFilters.before.tmp" "$DIR/keyFilters.before"; then
     echo "takeover filter: saved the list to $DIR/keyFilters.before"
 else
@@ -132,10 +175,9 @@ else
 fi
 
 # The file is in place before any entry names it.
-if mkdir -p "$DIR" && cp "$STAGED" "$FILTER.tmp" && mv "$FILTER.tmp" "$FILTER" &&
-    [ "$(sha "$FILTER")" = "$want" ]; then
-    rm -f "$STAGED" "$STAGED.sha256"
-    echo "takeover filter: $FILTER is in place ($want)"
+if cp "$STAGED" "$FILTER.tmp" && chmod 644 "$FILTER.tmp" && mv "$FILTER.tmp" "$FILTER" &&
+    [ "$(sha "$FILTER")" = "$WANT" ]; then
+    echo "takeover filter: $FILTER is in place ($WANT)"
 else
     rm -f "$FILTER.tmp"
     echo "takeover filter: FAILED to put $FILTER in place; the list is unchanged"
