@@ -400,16 +400,32 @@ def door_environment(cfg):
 
 
 def door_remote_forward(cfg, timeout):
-    argv = ssh_argv(cfg, '-N', '-o', 'ExitOnForwardFailure=yes',
+    """The TV must never grant a -R forward, and ssh -v says when it does: the
+    port it allocated, or the forward's success. A refusal ends ssh; silence
+    counts as never granted, since without the reply ssh can't learn the
+    port. The B9's dropbear 2022.83 answers nothing (2026-10-31: ssh waited,
+    and no new port listened on the TV)."""
+    argv = ssh_argv(cfg, '-v', '-N', '-o', 'ExitOnForwardFailure=yes',
                     '-R', '127.0.0.1:0:127.0.0.1:9', forwards=True)
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                             stderr=subprocess.PIPE)
     try:
         _, err = proc.communicate(timeout=timeout)
+        waited = False
     except subprocess.TimeoutExpired:
         stop(proc)
-        return False, f'ssh still held the forward after {timeout:.0f} s'
-    return proc.returncode != 0, f'ssh exit {proc.returncode}: {last_line(err)}'
+        _, err = proc.communicate()
+        waited = True
+    lines = err.decode('utf-8', errors='replace').splitlines()
+    granted = [line for line in lines if 'Allocated port' in line or 'remote forward success' in line]
+    if granted:
+        return False, f'the TV granted it: {granted[0].strip()}'
+    if not any(line.startswith('Authenticated to ') for line in lines):
+        return False, f'ssh never got in, so nothing was checked: {last_line(err)}'
+    if waited:
+        return True, f'never granted: the TV did not answer the request in {timeout:.0f} s'
+    refused = [line for line in lines if 'forwarding failed' in line]
+    return True, f'ssh exit {proc.returncode}: {(refused or [last_line(err)])[0].strip()}'
 
 
 def door_local_forward(cfg, timeout):

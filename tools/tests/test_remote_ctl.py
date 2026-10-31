@@ -28,12 +28,28 @@ import json, os, socket, sys, time
 argv = sys.argv[1:]
 with open(os.environ['FAKE_SSH_LOG'], 'a') as f:
     f.write(json.dumps(argv) + '\\n')
-forwards_ok = os.environ.get('FAKE_SSH_FORWARDS') == 'ok'
+forwards = os.environ.get('FAKE_SSH_FORWARDS', '')
+forwards_ok = forwards == 'ok'
 
+# -R, as ssh -v tells it: granted, refused, never answered (the B9's
+# dropbear), or no way in at all.
 if '-R' in argv:
+    if forwards == 'noauth':
+        sys.stderr.write('root@tv.example: Permission denied (publickey).\\n')
+        sys.exit(255)
+    sys.stderr.write('debug1: Remote connections from 127.0.0.1:0 forwarded to local address 127.0.0.1:9\\n'
+                     'Authenticated to tv.example ([tv.example]:2222) using "publickey".\\n'
+                     'debug1: ssh_init_forwarding: expecting replies for 1 forwards\\n')
+    sys.stderr.flush()
     if forwards_ok:
+        sys.stderr.write('debug1: remote forward success for: listen 0, connect 127.0.0.1:9\\n'
+                         'Allocated port 40001 for remote forward to 127.0.0.1:9\\n')
+        sys.stderr.flush()
         time.sleep(60)
-    sys.stderr.write('Error: remote port forwarding failed for listen port 0\\n')
+    if forwards == 'silent':
+        time.sleep(60)
+    sys.stderr.write('Error: remote port forwarding failed for listen port 0\\n'
+                     'debug1: Exit status 255\\n')
     sys.exit(255)
 if '-L' in argv:
     port = int(argv[argv.index('-L') + 1].split(':')[1])
@@ -319,13 +335,14 @@ class SessionTest(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         self.assertIn('door 1/4: `ssh ... sh` gets lumen-ctl: ok', out)
         self.assertIn("door 2/4: the client's environment stays out: ok", out)
-        self.assertIn('door 3/4: a remote forward (-R) is refused: ok', out)
-        self.assertIn('remote port forwarding failed', out)
+        self.assertIn('door 3/4: a remote forward (-R) is refused: ok (ssh exit 255: '
+                      'Error: remote port forwarding failed for listen port 0)', out)
         self.assertIn('door 4/4: a local forward (-L) is refused: ok', out)
         calls = self.calls()
         self.assertEqual(calls[0][-1], 'sh')
         self.assertIn(f'SetEnv=LD_PRELOAD={ctl.PRELOAD}', calls[1])
         self.assertIn('-R', calls[2])
+        self.assertIn('-v', calls[2])
         self.assertIn('ExitOnForwardFailure=yes', calls[2])
         self.assertIn('-L', calls[3])
         for argv in calls[2:]:
@@ -335,8 +352,21 @@ class SessionTest(unittest.TestCase):
         code, out, _ = self.run_ctl('--timeout', '1', 'check-door', FAKE_SSH_FORWARDS='ok')
         self.assertEqual(code, 1)
         self.assertIn('door 1/4: `ssh ... sh` gets lumen-ctl: ok', out)
-        self.assertIn('door 3/4: a remote forward (-R) is refused: FAILED', out)
+        self.assertIn('door 3/4: a remote forward (-R) is refused: FAILED (the TV granted it: '
+                      'debug1: remote forward success for: listen 0, connect 127.0.0.1:9)', out)
         self.assertIn("door 4/4: a local forward (-L) is refused: FAILED (the forward reached the TV: b'SSH-2.0", out)
+
+    def test_check_door_takes_a_tv_that_never_answers_the_forward_as_never_granting_it(self):
+        code, out, err = self.run_ctl('--timeout', '1', 'check-door', FAKE_SSH_FORWARDS='silent')
+        self.assertEqual(code, 0, out + err)
+        self.assertIn('door 3/4: a remote forward (-R) is refused: ok (never granted: '
+                      'the TV did not answer the request in 1 s)', out)
+
+    def test_check_door_fails_the_forward_check_when_ssh_never_gets_in(self):
+        code, out, _ = self.run_ctl('check-door', FAKE_SSH_FORWARDS='noauth')
+        self.assertEqual(code, 1)
+        self.assertIn('door 3/4: a remote forward (-R) is refused: FAILED (ssh never got in, '
+                      'so nothing was checked: root@tv.example: Permission denied (publickey).)', out)
 
     def test_check_door_fails_when_the_tv_takes_the_clients_environment(self):
         code, out, _ = self.run_ctl('check-door', FAKE_SSH_ENV='passed')
