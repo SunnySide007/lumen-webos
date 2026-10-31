@@ -1,0 +1,30 @@
+{
+  "name": "lumen-mock-ctl",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A mock of lumen-ctl: the Remote protocol over a WebSocket, with a fake TV",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "mock": "node src/main.ts",
+    "demo": "node src/main.ts --demo",
+    "build": "tsc --noEmit",
+    "lint": "eslint . && tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "@types/ws": "8.18.2",
+    "eslint": "10.12.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.2",
+    "vitest": "5.0.5"
+  }
+}
