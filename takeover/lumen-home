@@ -1,0 +1,136 @@
+#!/bin/sh
+# Route D's boot hook (takeover/README.md), for Homebrew Channel:
+# /var/lib/webosbrew/init.d/lumen-home (run-parts allows no dot in the name).
+# With Lumen as the TV's Home, LG's Home still starts at boot (preloaded on
+# snapshot boots, and on SAM's keep-alive list) and runs unseen, as root,
+# calling LG's servers. This hook closes it the way LG's home_launcher.sh
+# closes the home it doesn't use: applicationManager/closeByAppId with
+# forceMode. It never chooses the home: when settingsservice's
+# defaultApps.home is not Lumen's id, it says so and does nothing.
+# Only tools/takeover.sh apply, by hand, sets that.
+#
+# In the background: it waits for SAM to answer (at most a minute), then
+# once a minute for about four minutes reads the default home and, while it
+# is Lumen, closes LG's Home if it runs and isn't in front, and logs SAM's
+# running list 10 s later, which shows whether keep-alive brought it back.
+#
+# docs/safety.md: it does nothing while the kill switch exists, returns at
+# once, and its background work ends by itself within five minutes. It
+# writes only its log. Nothing it does outlasts the next boot: LG's Home
+# starts again then. Not persistent until installed: tools/takeover.sh hook
+# push leaves an inert copy that takeover/home-apply.sh runs by hand, and
+# tools/takeover.sh hook install, after that run and the owner's yes,
+# installs it. Log: /tmp/lumen-home.log; tools/uninstall-all.sh removes it.
+
+KILL=/var/luna/preferences/lumen_disable
+LOG=/tmp/lumen-home.log
+ID=io.github.sunnyside007.lumen.shell
+LG=com.webos.app.home
+AM=com.webos.applicationManager
+# Seconds after the start by which the last round begins. A round is at most
+# five luna calls of 5 s and a 10 s wait, so all is over by 295 s.
+DEADLINE=260
+
+[ -e "$KILL" ] && exit 0
+
+(
+    say() {
+        echo "$(date -u) $*"
+    }
+
+    # Seconds since boot: the wall clock jumps when the TV sets it.
+    uptime_s() {
+        read -r up _ </proc/uptime
+        echo "${up%%.*}"
+    }
+
+    # busybox before 1.30 wants `timeout -t SECS`; coreutils wants
+    # `timeout SECS`.
+    if timeout -t 1 true >/dev/null 2>&1; then
+        TIMEOUT="timeout -t 5"
+    elif timeout 1 true >/dev/null 2>&1; then
+        TIMEOUT="timeout 5"
+    else
+        TIMEOUT=""
+    fi
+
+    # ask METHOD PAYLOAD: luna's answer on one line, empty when none.
+    ask() {
+        # shellcheck disable=SC2086 # $TIMEOUT is a command and its argument
+        $TIMEOUT luna-send -n 1 "luna://$1" "$2" </dev/null 2>/dev/null
+    }
+
+    default_home() {
+        ask com.webos.settingsservice/getSystemSettings '{"category":"general","key":"defaultApps"}' |
+            sed -n 's/.*"defaultApps"[[:space:]]*:[[:space:]]*{[^{}]*"home"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+    }
+
+    # The ids in SAM's running list, on one line.
+    running_ids() {
+        ask "$AM/running" '{}' | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' |
+            sed 's/.*"\([^"]*\)"$/\1/' | tr '\n' ' '
+    }
+
+    lg_running() {
+        case " $(running_ids) " in
+            *" $LG "*) return 0 ;;
+        esac
+        return 1
+    }
+
+    lg_in_front() {
+        ask "$AM/getForegroundAppInfo" '{}' | grep -q "\"appId\"[[:space:]]*:[[:space:]]*\"$LG\""
+    }
+
+    ok() {
+        printf '%s\n' "$1" | grep -q '"returnValue"[[:space:]]*:[[:space:]]*true'
+    }
+
+    start=$(uptime_s)
+    say "lumen-home: start"
+
+    tries=0
+    until ok "$(ask "$AM/running" '{}')"; do
+        tries=$((tries + 1))
+        if [ "$tries" -ge 6 ] || [ -e "$KILL" ]; then
+            say "SAM never answered; nothing done"
+            say "lumen-home: done"
+            exit 0
+        fi
+        sleep 5
+    done
+    say "SAM answers"
+
+    round=0
+    while [ ! -e "$KILL" ]; do
+        round=$((round + 1))
+        home=$(default_home)
+        if [ "$home" != "$ID" ]; then
+            say "the default home is ${home:-unreadable}, not Lumen; nothing done"
+            break
+        fi
+        if ! lg_running; then
+            say "round $round: LG Home is not running"
+        elif lg_in_front; then
+            say "round $round: LG Home is in front; left alone"
+        else
+            answer=$(ask "$AM/closeByAppId" "{\"id\":\"$LG\",\"forceMode\":true}")
+            if ok "$answer"; then
+                say "round $round: closed LG Home"
+            else
+                say "round $round: FAILED to close LG Home: ${answer:-no answer}"
+            fi
+            sleep 10
+            ids=$(running_ids)
+            case " $ids " in
+                *" $LG "*) say "round $round: LG Home is back 10 s later; running: $ids" ;;
+                *) say "round $round: LG Home stayed closed 10 s later; running: $ids" ;;
+            esac
+        fi
+        # The next round only if it can start by the deadline.
+        [ "$round" -lt 5 ] || break
+        [ $(($(uptime_s) - start + 60)) -le "$DEADLINE" ] || break
+        sleep 60
+    done
+    say "lumen-home: done"
+) </dev/null >>"$LOG" 2>&1 &
