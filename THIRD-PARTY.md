@@ -15,6 +15,7 @@ any of them is marked at the point of use with its origin and license.
 | [SDL](https://github.com/libsdl-org/SDL) | Window, GL context and input; loaded at run time | zlib |
 | [libloading](https://github.com/nagisa/rust_libloading) | Loading SDL2 at run time | ISC |
 | [libc](https://github.com/rust-lang/libc) | The C calls `std` lacks in Lumen Guard: the DSCP mark, `poll`, SIGTERM, the local date | MIT or Apache-2.0 |
+| [Inter](https://github.com/rsms/inter), through [Fontsource](https://github.com/fontsource/font-files) | The typeface of the Remote web front-end, bundled in `remote/ui` (variable, Latin subset) | OFL-1.1 |
 
 Trademarks (LG, webOS, Apple, tvOS, Netflix, Prime Video, Plex) belong to their
 owners. "Inspired by tvOS" describes a design direction only: Lumen ships no
