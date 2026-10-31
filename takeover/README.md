@@ -54,6 +54,9 @@ closes the home it doesn't use: `applicationManager/closeByAppId` with
   does nothing while the kill switch exists, returns at once, writes only
   `/tmp/lumen-home.log`, and is over within five minutes, timed by
   `/proc/uptime` because the wall clock jumps when the TV sets it.
+* Every luna call it makes is time-boxed (`timeout -t 5`, busybox's, or
+  `timeout 5`). With neither working it logs `no timeout command; nothing
+  done` and stops: a boot hook that could hang is not run at all.
 * Nothing it does outlasts a reboot: LG's Home is SAM's to start again.
 
 ```sh
@@ -63,6 +66,20 @@ tools/takeover.sh hook status                # its later rounds
 tools/takeover.sh hook install               # after that run and the owner's yes: from the next boot
 tools/takeover.sh hook remove
 ```
+
+**How a file reaches the TV**, for `hook push`, `hook install` and
+`filter apply`. Nothing goes through `/tmp`, which every app's jail shares.
+`tools/takeover.sh` writes a one-off script: the PC's SHA-256 of the file
+in `WANT`, the file itself in a quoted here-document, then the TV-side
+template (`hook-install.sh` or `filter-apply.sh`), and runs it with
+`tools/tv.sh script`. On the TV the template writes the file to
+`/var/lib/lumen/stage`, made with `umask 077` and refused unless it and the
+folder above it are real folders (not links) owned by root and writable by
+no one else. It checks the staged copy against `WANT` before anything uses
+it; a copy that differs by a byte is deleted and nothing changes. Only then
+is it copied into place (`boot-hook`, init.d, the filter's path), each copy
+moved in whole. The staged copy is removed on every exit, and the PC checks
+the SHA-256 the TV prints for each copy.
 
 ## The LG Home tile (once the shell is on `main`)
 
@@ -106,8 +123,8 @@ action. The no-op build (`--noop`) does all of this but acts on nothing:
 it logs `would open LG Home` and hands every key on.
 
 **Applying it.** `tools/takeover.sh filter apply [--noop]` checks the file
-on the PC (no syntax newer than ES5; `node --check`) and pushes it with its
-SHA-256. On the TV, `filter-apply.sh` checks that SHA-256, compiles the file
+on the PC (no syntax newer than ES5; `node --check`) and sends it as above.
+On the TV, `filter-apply.sh` stages it and checks its SHA-256, compiles it
 with the TV's node 0.12 (`new Function`, which runs nothing), saves the
 chain without Lumen's entry to `/var/lib/lumen/takeover/keyFilters.before`
 once, puts the file at `/var/lib/lumen/takeover/lumen-home.js`, writes the
@@ -178,6 +195,13 @@ its `try`. The no-op trial answers both. The ways back, in order:
    Home; a short press opens Lumen; every other key as before.
 7. The drill: `tools/takeover.sh filter undo` over SSH and a reboot; held
    Home does nothing again and every key works.
+
+**A suggestion, not built:** a dead man's switch for steps 3 and 5,
+`filter apply --revert-after 300`, would leave `filter-undo.sh` waiting on
+the TV for five minutes until `filter keep` cancels it, so a TV with broken
+keys and no SSH puts the chain back by itself. It would write configd from
+the background as root, and it doesn't cover a reboot, which is why the
+trial checks every key live first.
 
 ## Escape hatches
 
