@@ -19,7 +19,10 @@ manager's opening prompt are in
 (git-ignored). In flight at the hand-off: lane A's second round, the Guard
 boot hook rebuilt around a `resolv.conf` bind mount (item 6); it landed,
 was merged, and passed by hand on the TV the same afternoon. Lanes F
-(item 8) and G (item 13) started on 2026-10-31 at about 15:20 UTC.
+(item 8) and G (item 13) started on 2026-10-31 at about 15:20 UTC and
+were reviewed and merged the same day, F in three rounds (the last moved
+every boot hook's log out of `/tmp`, which the app jails share and where
+`fs.protected_symlinks` is 0 on the B9).
 
 ## Where it stands
 
@@ -139,7 +142,7 @@ git-ignored), **here** means the project manager off the TV.
 | 10 | **Original Top Shelf and tile art** for Lumen's own tiles and the inputs, made by code from the studio's scenes and the tile palette; no image model | lane E | 7 (the studio merge) | PNGs that fit the look-and-feel tokens and pass their own luminance and banding tests, CC BY-SA 4.0, no brand marks |
 | 11 | Phase 4 on the merged shell: the Control Center over `settingsservice` with the Privacy panel (lane I); focus light and tilt, the Top Shelf hero with 10's art, frosted glass B, the dither (lane J); editing | lanes I and J, one at a time on the shell | 7, 10 | look-and-feel.md's three checks |
 | 12 | Guard G2 with the address rules (lane H, after a week of G1's log), Guard G3 (lane K, after P4), senders G4 (TV, one job per check) | lanes H and K, TV | 6 | privacy.md |
-| 13 | **`lumen-ctl`** (Remote R2): the root control binary behind an SSH forced command, two bus implementations behind one trait, `tools/remote.sh`, a PC driver | lane G, then TV | 4 (done) | remote.md R2's "done when" on the B9 |
+| 13 | **`lumen-ctl`** (Remote R2): the root control binary behind an SSH forced command, two bus implementations behind one trait, `tools/remote.sh`, a PC driver | lane G, then TV | 4 (done) | remote.md R2's "done when" on the B9. **Built and merged 2026-10-31** (2df8600; remote.md R2, "Built on"): the crate, the command and library buses, `tools/remote.sh` with a staged, hash-checked install and its `authorized_keys` line, `tools/remote/ctl.py`. Not yet run on the TV; its first TV steps are `remote.sh install`, `probe` and `ctl.py check-door` (the client's environment must not reach the forced command) |
 
 Lanes F (parts 1, 2 and 4) and G can start now; E after the studio merge;
 F's tile, I and J after the shell merge; H after a week of Guard's log; K
