@@ -1,0 +1,21 @@
+[package]
+name = "lumen-ctl"
+description = "Lumen Remote's control binary: fixed verbs over JSON lines, behind an SSH forced command on rooted LG webOS TVs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+# Only in src/sys/os.rs: SIGTERM and SIGHUP, _exit, and getauxval for the TV.
+libc.workspace = true
+# Only in src/sys/luna.rs: libluna-service2, loaded at run time as the shell does.
+libloading.workspace = true
+serde_json.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

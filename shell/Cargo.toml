@@ -1,8 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["crates/lumen-shell", "crates/lumen-guard"]
-# lumen-guard builds for Linux only, so a plain `cargo run` or `cargo build` on
-# the PC (tools/sim.ps1) means the shell; make passes --workspace.
+members = ["crates/lumen-shell", "crates/lumen-guard", "crates/lumen-ctl"]
+# lumen-guard and lumen-ctl build for Linux only, so a plain `cargo run` or
+# `cargo build` on the PC (tools/sim.ps1) means the shell; make passes
+# --workspace.
 default-members = ["crates/lumen-shell"]
 
 [workspace.package]
@@ -14,6 +15,8 @@ rust-version = "1.99"
 [workspace.dependencies]
 libc = "0.2"
 libloading = "0.9"
+# As claude/shell-timing has it, so the two merge into one line.
+serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
 
 [profile.release]
 opt-level = 3
