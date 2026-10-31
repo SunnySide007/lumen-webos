@@ -2,28 +2,39 @@
 # Lumen Guard, stage G1 (docs/specs/privacy.md, "Lumen Guard"), as a Homebrew
 # Channel boot hook: /var/lib/webosbrew/init.d/lumen-guard (run-parts allows no
 # dot in the name). At each boot it starts lumen-guard, a DNS forwarder that
-# logs every lookup to /var/lib/lumen/guard/lookups.log, and once Guard
-# answers, sends the TV's lookups through it with two nat rules (udp, tcp).
-# When Guard exits, for any reason, the rules go and lookups go straight to the
-# router again: it fails open. Nothing it does outlasts the next boot.
+# logs every lookup it gets to /var/lib/lumen/guard/lookups.log, and once Guard
+# answers it points the TV's resolver at it: a file naming 127.0.0.2 is bind
+# mounted over connman's /var/lib/misc/resolv.conf, which /etc/resolv.conf
+# links to. Two nat rules also send Guard the lookups programs make to other
+# resolvers (hard-coded ones), leaving connman's forwards to the router alone.
+# Nothing it does outlasts the next boot.
 #
 # docs/safety.md: it does nothing while the kill switch exists and returns at
-# once. Its start-up is over within about five minutes, with the rules in
-# place or with Guard stopped and no rules; after that only this shell is left,
-# asleep until Guard exits, to remove the rules.
+# once. Its start-up ends within about five minutes, with Guard in place or
+# nothing changed. Then it stays as Guard's watchdog: every 5 s it checks
+# that Guard lives and the kill switch is absent, and every 60 s it asks
+# Guard for a real name. Guard gone, the kill switch, or three names in a row
+# without an answer, and it fails open: connman's resolv.conf back, the rules
+# out, Guard stopped, in that order.
 # Log: /tmp/lumen-guard.log. tools/guard.sh installs, checks and removes it;
 # profiles/privacy/guard-apply.sh runs it by hand from the copy tools/guard.sh
 # push leaves in /var/lib/lumen/guard; guard-undo.sh stops Guard now.
 
 KILL=/var/luna/preferences/lumen_disable
 LOG=/tmp/lumen-guard.log
-PIDFILE=/tmp/lumen-guard.pid
 DIR=/var/lib/lumen/guard
 BIN=$DIR/lumen-guard
+PIDFILE=$DIR/lumen-guard.pid
+# Guard's resolv.conf, and connman's, which /etc/resolv.conf links to.
+OURS=$DIR/resolv.conf
+RESOLV=/var/lib/misc/resolv.conf
 LISTEN=127.0.0.2:53
 # Guard marks the packets it sends upstream with this DSCP value, and the
 # rules leave those alone, so Guard's own lookups are not sent back to it.
 DSCP=7
+# On the allowlist, and asked of the router: Guard sends nothing back when
+# the router doesn't answer, so an answer proves both.
+CHECK=us.lgtvsdp.com
 
 [ -e "$KILL" ] && exit 0
 
@@ -45,27 +56,59 @@ upstream() {
     fi
 }
 
-# rule -A|-D udp|tcp
+# rule -A udp|tcp UPSTREAM: lookups to any resolver but loopback and the
+# router go to Guard. connman's forwards to the router must pass: its
+# sockets are bound to wlan0, so it never takes a reply from loopback.
+# iptables takes one -d a rule, so loopback is left out by its interface.
 rule() {
-    iptables -t nat "$1" OUTPUT -p "$2" --dport 53 ! -d 127.0.0.0/8 \
+    iptables -t nat "$1" OUTPUT -p "$2" --dport 53 ! -o lo ! -d "$3" \
         -m dscp ! --dscp "$DSCP" -j DNAT --to-destination "$LISTEN"
 }
 
-# Every copy, so none is left over from an earlier run.
+# Every rule that sends lookups to Guard, deleted by the spec iptables prints
+# for it, so it needs no upstream.
 remove_rules() {
-    for proto in udp tcp; do
-        n=0
-        while [ "$n" -lt 10 ] && rule -D "$proto" 2>/dev/null; do
-            n=$((n + 1))
-        done
+    n=0
+    while :; do
+        spec=$(iptables -t nat -S OUTPUT |
+            sed -n "s/^-A \(OUTPUT .* --to-destination $LISTEN\)\$/\1/p" | head -n 1)
+        [ -n "$spec" ] || return 0
+        [ "$n" -lt 10 ] || return 1
+        # shellcheck disable=SC2086 # the spec's words; none has a space
+        iptables -t nat -D $spec || return 1
+        n=$((n + 1))
     done
 }
 
-# Guard's pid, if the pid file names a running lumen-guard.
+# Guard's file shows at connman's path, or a mount over it is listed.
+mounted() {
+    # shellcheck disable=SC3013 # busybox's test has -ef
+    [ "$RESOLV" -ef "$OURS" ] || grep -q " $RESOLV " /proc/mounts 2>/dev/null
+}
+
+# Every copy of the mount, until connman's file shows again.
+unmount() {
+    n=0
+    while mounted; do
+        [ "$n" -lt 10 ] || return 1
+        umount "$RESOLV" || sleep 1
+        n=$((n + 1))
+    done
+}
+
+# Whether $pid runs; a zombie still answers kill -0.
+alive() {
+    kill -0 "$pid" 2>/dev/null &&
+        ! grep -q '^State:[[:space:]]*Z' "/proc/$pid/status" 2>/dev/null
+}
+
+# Guard's pid, if the pid file names a running Guard. The file outlives a
+# reboot, so its pid may belong to anything by now, this hook's shell too.
 running() {
     p=$(cat "$PIDFILE" 2>/dev/null) || return 1
     case $p in '' | *[!0-9]*) return 1 ;; esac
-    grep -q lumen-guard "/proc/$p/cmdline" 2>/dev/null || return 1
+    tr '\0' ' ' 2>/dev/null <"/proc/$p/cmdline" |
+        grep -q "lumen-guard --listen $LISTEN" || return 1
     echo "$p"
 }
 
@@ -87,7 +130,7 @@ running() {
     up=$(upstream)
     case $up in
         '' | *[!0-9.]* | 127.* | 0.*)
-            say "no upstream resolver ('$up'); Guard not started, no rules (fail open)"
+            say "no upstream resolver ('$up'); Guard not started, nothing changed (fail open)"
             exit 0
             ;;
     esac
@@ -98,12 +141,24 @@ running() {
     echo "$pid" >"$PIDFILE"
     say "Guard started (pid $pid), upstream $up:53"
 
-    give_up() {
-        say "$1; Guard stopped, no rules (fail open)"
-        remove_rules
-        kill "$pid" 2>/dev/null
+    # Back to connman, in this order: its resolv.conf, the rules, then Guard
+    # (SIGTERM, so it writes its status; SIGKILL after 5 s).
+    fail_open() {
+        state="resolv.conf is connman's, no nat rules"
+        unmount || state="FAILED to unmount $RESOLV"
+        remove_rules || state="$state; FAILED to remove a nat rule"
+        if alive; then
+            kill "$pid" 2>/dev/null
+            i=0
+            while alive && [ "$i" -lt 5 ]; do
+                sleep 1
+                i=$((i + 1))
+            done
+            alive && kill -KILL "$pid" 2>/dev/null
+        fi
         wait "$pid"
         rm -f "$PIDFILE"
+        say "$1; $state, Guard stopped (fail open)"
         exit 0
     }
 
@@ -112,35 +167,42 @@ running() {
     tries=0
     until "$BIN" --probe "$LISTEN" 2>/dev/null; do
         tries=$((tries + 1))
-        kill -0 "$pid" 2>/dev/null || give_up "Guard exited"
-        [ "$tries" -lt 40 ] || give_up "Guard did not answer"
-        [ ! -e "$KILL" ] || give_up "the kill switch appeared"
+        alive || fail_open "Guard exited"
+        [ "$tries" -lt 40 ] || fail_open "Guard did not answer"
+        [ ! -e "$KILL" ] || fail_open "the kill switch appeared"
         sleep 5
     done
 
+    printf '# Lumen Guard\nnameserver 127.0.0.2\n' >"$OURS" ||
+        fail_open "FAILED to write $OURS"
+    unmount || fail_open "FAILED to unmount an earlier mount over $RESOLV"
+    mount --bind "$OURS" "$RESOLV" || fail_open "FAILED to mount $OURS over $RESOLV"
+    grep -qx 'nameserver 127.0.0.2' /etc/resolv.conf ||
+        fail_open "/etc/resolv.conf does not name 127.0.0.2 after the mount"
+    "$BIN" --probe "$LISTEN" --name "$CHECK" 2>/dev/null ||
+        fail_open "no answer for $CHECK through Guard"
     remove_rules
-    if ! { rule -A udp && rule -A tcp; }; then
-        give_up "FAILED to add the nat rules"
+    if ! { rule -A udp "$up" && rule -A tcp "$up"; }; then
+        fail_open "FAILED to add the nat rules"
     fi
-    # The rules must bring connman's own lookups to Guard too, which a probe
-    # to Guard can't show (connman binds its sockets to the network
-    # interface): a new name asked through connman must turn up in Guard's log.
-    name=lumen-check-$pid-$(date +%s).invalid
-    "$BIN" --probe 127.0.0.1:53 --name "$name" 2>/dev/null
-    seen=0
-    for _ in 1 2 3 4 5; do
-        if grep -qF " $name " "$DIR/lookups.log" 2>/dev/null; then
-            seen=1
-            break
-        fi
-        sleep 1
-    done
-    [ "$seen" = 1 ] || give_up "a lookup through connman did not reach Guard"
-    say "Guard answers and connman's lookups reach it: the TV's DNS goes through Guard"
+    say "Guard answers and resolv.conf names it: the TV's DNS goes through Guard"
 
-    wait "$pid"
-    code=$?
-    remove_rules
-    rm -f "$PIDFILE"
-    say "Guard exited ($code); nat rules removed, lookups go to the router again"
+    misses=0
+    tick=0
+    while alive; do
+        [ ! -e "$KILL" ] || fail_open "the kill switch appeared"
+        sleep 5
+        tick=$((tick + 1))
+        [ "$tick" -ge 12 ] || continue
+        tick=0
+        alive || break
+        if "$BIN" --probe "$LISTEN" --name "$CHECK" 2>/dev/null; then
+            misses=0
+        else
+            misses=$((misses + 1))
+            say "heartbeat: no answer for $CHECK ($misses of 3)"
+            [ "$misses" -lt 3 ] || fail_open "three heartbeats in a row got no answer"
+        fi
+    done
+    fail_open "Guard exited"
 ) </dev/null >>"$LOG" 2>&1 &
