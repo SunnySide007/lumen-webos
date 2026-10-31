@@ -4,8 +4,10 @@
 # Build the binary first: tools/dev.sh make guard
 #
 #   tools/guard.sh status    whether the hook and binary are installed and
-#                            current, Guard's pid, the nat rules, its status
-#                            file and what the hook logged
+#                            current, Guard's pid, the resolver the TV uses and
+#                            the mount over connman's resolv.conf, the nat
+#                            rules, Guard's status file and what the hook
+#                            logged
 #   tools/guard.sh push      copy the binary, the rules and the hook (inert
 #                            there) to /var/lib/lumen/guard/, nothing else: the
 #                            by-hand path is then
@@ -13,9 +15,10 @@
 #   tools/guard.sh install   push, then the hook to /var/lib/webosbrew/init.d/,
 #                            and run it once. Take a backup first
 #                            (tools/backup.sh): this persists
-#   tools/guard.sh remove    delete the hook, then remove the nat rules and stop
-#                            Guard (profiles/privacy/guard-undo.sh). The log
-#                            stays in /var/lib/lumen/guard/ for `log`
+#   tools/guard.sh remove    delete the hook, then unmount Guard's resolv.conf,
+#                            remove the nat rules and stop Guard
+#                            (profiles/privacy/guard-undo.sh). The log stays in
+#                            /var/lib/lumen/guard/ for `log`
 #   tools/guard.sh log       copy lookups.log* to tools/out/guard/ and print the
 #                            names by count and verdict as a Markdown table
 set -eu
@@ -93,8 +96,10 @@ cmd_status() {
     "$TV" run 'hook=/var/lib/webosbrew/init.d/lumen-guard dir=/var/lib/lumen/guard
         if [ -f $hook ]; then echo "on the TV:    hook $(sha256sum < $hook | cut -d" " -f1)"; else echo "on the TV:    hook not installed"; fi
         if [ -f $dir/lumen-guard ]; then echo "on the TV:    binary $(sha256sum < $dir/lumen-guard | cut -d" " -f1)"; else echo "on the TV:    no binary"; fi
-        pid=$(cat /tmp/lumen-guard.pid 2>/dev/null)
-        if [ -n "$pid" ] && grep -q lumen-guard /proc/$pid/cmdline 2>/dev/null; then echo "Guard: running, pid $pid"; else echo "Guard: not running"; fi
+        pid=$(cat $dir/lumen-guard.pid 2>/dev/null)
+        if [ -n "$pid" ] && tr "\0" " " 2>/dev/null </proc/$pid/cmdline | grep -q "lumen-guard --listen"; then echo "Guard: running, pid $pid"; else echo "Guard: not running"; fi
+        grep -H "^nameserver" /etc/resolv.conf || echo "/etc/resolv.conf names no nameserver"
+        mount | grep resolv || echo "no mount over resolv.conf"
         iptables -t nat -L OUTPUT -n -v | grep "to:127.0.0.2:53" || echo "no nat rules to 127.0.0.2:53"
         cat $dir/status 2>/dev/null || echo "no status file"
         ls -l $dir/lookups.log* 2>/dev/null || echo "no lookup log"
