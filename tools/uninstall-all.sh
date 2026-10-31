@@ -8,11 +8,11 @@
 #   tools/uninstall-all.sh --plx-native --yes      also remove plx-native
 #
 # Lumen's parts: the shell app, Lumen's boot hooks
-# (/var/lib/webosbrew/init.d/lumen-*), Lumen Guard's nat rules and process
-# (profiles/privacy/guard-undo.sh), /var/lib/lumen, its kill switch, the
-# capture directory and its files in /tmp. --glasshouse runs Glasshouse's
-# documented undo (tvwebctl restores, stop, its files and boot hooks), then
-# removes its app.
+# (/var/lib/webosbrew/init.d/lumen-*), Lumen Guard's resolv.conf mount, nat
+# rules and process (profiles/privacy/guard-undo.sh), /var/lib/lumen, its kill
+# switch, the capture directory and its files in /tmp. --glasshouse runs
+# Glasshouse's documented undo (tvwebctl restores, stop, its files and boot
+# hooks), then removes its app.
 #
 # It never touches Homebrew Channel, root, the SSH key or
 # /var/luna/preferences/webosbrew_*. Every step runs even if an earlier one
@@ -65,7 +65,7 @@ step() {
 
 step remove - "$LUMEN_APP"
 step run - "rm -f $INITD/lumen-*"
-# Guard's rules first, then Guard, while its files are still there.
+# Guard's mount and rules first, then Guard, while its files are still there.
 step script - "$ROOT/profiles/privacy/guard-undo.sh"
 step run - "rm -rf /var/lib/lumen"
 step run - "rm -f /var/luna/preferences/lumen_disable"

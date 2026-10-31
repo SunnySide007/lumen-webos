@@ -3,45 +3,88 @@
 #
 #   tools/tv.sh script profiles/privacy/guard-undo.sh
 #
-# Removes the nat rules first, so lookups go straight to the router again,
-# then stops Guard: SIGTERM, so it writes its status, and SIGKILL after 5 s.
-# Its files and log stay in /var/lib/lumen/guard. A reboot does the same
-# unless the boot hook is installed, which tools/guard.sh remove deletes
-# before it runs this; tools/uninstall-all.sh runs it too. Safe to run twice.
-# busybox sh.
+# In the hook's fail-open order: unmounts Guard's resolv.conf (every copy),
+# so lookups go through connman to the router again, then removes the nat
+# rules, then stops Guard: SIGTERM, so it writes its status, and SIGKILL
+# after 5 s. Prints connman's file afterwards. Guard's files and log stay in
+# /var/lib/lumen/guard. A reboot does the same unless the boot hook is
+# installed, which tools/guard.sh remove deletes before it runs this;
+# tools/uninstall-all.sh runs it too. Safe to run twice. busybox sh.
 
-PIDFILE=/tmp/lumen-guard.pid
+DIR=/var/lib/lumen/guard
+PIDFILE=$DIR/lumen-guard.pid
+OURS=$DIR/resolv.conf
+RESOLV=/var/lib/misc/resolv.conf
 LISTEN=127.0.0.2:53
-DSCP=7
 
-rule() {
-    iptables -t nat "$1" OUTPUT -p "$2" --dport 53 ! -d 127.0.0.0/8 \
-        -m dscp ! --dscp "$DSCP" -j DNAT --to-destination "$LISTEN"
-}
-
-for proto in udp tcp; do
+# Every rule that sends lookups to Guard, deleted by the spec iptables prints
+# for it, so it needs no upstream.
+remove_rules() {
     n=0
-    while [ "$n" -lt 10 ] && rule -D "$proto" 2>/dev/null; do
+    while :; do
+        spec=$(iptables -t nat -S OUTPUT |
+            sed -n "s/^-A \(OUTPUT .* --to-destination $LISTEN\)\$/\1/p" | head -n 1)
+        [ -n "$spec" ] || return 0
+        [ "$n" -lt 10 ] || return 1
+        # shellcheck disable=SC2086 # the spec's words; none has a space
+        iptables -t nat -D $spec || return 1
         n=$((n + 1))
     done
-done
-if iptables -t nat -L OUTPUT -n | grep -q "to:$LISTEN"; then
+}
+
+# Guard's file shows at connman's path, or a mount over it is listed.
+mounted() {
+    # shellcheck disable=SC3013 # busybox's test has -ef
+    [ "$RESOLV" -ef "$OURS" ] || grep -q " $RESOLV " /proc/mounts 2>/dev/null
+}
+
+# Every copy of the mount, until connman's file shows again.
+unmount() {
+    n=0
+    while mounted; do
+        [ "$n" -lt 10 ] || return 1
+        umount "$RESOLV" || sleep 1
+        n=$((n + 1))
+    done
+}
+
+# Whether $pid runs; a zombie still answers kill -0.
+alive() {
+    kill -0 "$pid" 2>/dev/null &&
+        ! grep -q '^State:[[:space:]]*Z' "/proc/$pid/status" 2>/dev/null
+}
+
+# Guard's pid, if the pid file names a running Guard. The file outlives a
+# reboot, so its pid may belong to anything by now, this hook's shell too.
+running() {
+    p=$(cat "$PIDFILE" 2>/dev/null) || return 1
+    case $p in '' | *[!0-9]*) return 1 ;; esac
+    tr '\0' ' ' 2>/dev/null <"/proc/$p/cmdline" |
+        grep -q "lumen-guard --listen $LISTEN" || return 1
+    echo "$p"
+}
+
+if unmount; then
+    echo "guard undo: nothing mounted over $RESOLV"
+else
+    echo "guard undo: $RESOLV is still mounted:"
+    grep " $RESOLV " /proc/mounts
+fi
+if remove_rules; then
+    echo "guard undo: no nat rules to $LISTEN"
+else
     echo "guard undo: a nat rule to $LISTEN is still there:"
     iptables -t nat -L OUTPUT -n --line-numbers
-else
-    echo "guard undo: no nat rules to $LISTEN"
 fi
 
-pid=$(cat "$PIDFILE" 2>/dev/null)
-case $pid in '' | *[!0-9]*) pid= ;; esac
-if [ -n "$pid" ] && grep -q lumen-guard "/proc/$pid/cmdline" 2>/dev/null; then
+if pid=$(running); then
     kill -TERM "$pid"
     i=0
-    while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 5 ]; do
+    while alive && [ "$i" -lt 5 ]; do
         sleep 1
         i=$((i + 1))
     done
-    if kill -0 "$pid" 2>/dev/null; then
+    if alive; then
         kill -KILL "$pid"
         echo "guard undo: Guard (pid $pid) killed"
     else
@@ -51,3 +94,5 @@ else
     echo "guard undo: Guard not running"
 fi
 rm -f "$PIDFILE"
+echo "guard undo: /etc/resolv.conf now reads:"
+cat /etc/resolv.conf
