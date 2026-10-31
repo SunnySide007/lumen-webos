@@ -20,7 +20,7 @@
 
 use std::ffi::c_void;
 
-use lumen_core::style::Color;
+use lumen_core::style::{self, Color};
 
 use crate::atlas::{ATLAS_H, ATLAS_W, Upload, Uv};
 use crate::gl::{self, Gl};
@@ -403,6 +403,7 @@ attribute vec2 a_local;
 attribute vec4 a_shape;
 attribute float a_kind;
 uniform vec2 u_screen;
+varying vec2 v_pos;
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec2 v_local;
@@ -410,6 +411,7 @@ varying vec4 v_shape;
 varying float v_kind;
 void main() {
     gl_Position = vec4(a_pos.x / u_screen.x * 2.0 - 1.0, 1.0 - a_pos.y / u_screen.y * 2.0, 0.0, 1.0);
+    v_pos = a_pos;
     v_uv = a_uv;
     v_color = a_color;
     v_local = a_local;
@@ -420,6 +422,19 @@ void main() {
 
 // Highp where the GPU has it: mediump is 16-bit on Mali, too coarse for
 // distances across a 300 px pill or texels in a 2048 px atlas.
+//
+// Flat and shape quads are dithered when `u_dither` is above 0: a 4x4 Bayer
+// threshold from the pixel's place, centred, times `u_dither` (peak to
+// peak) and the pixel's alpha, so the 8-bit framebuffer's rounding breaks a
+// gradient's bands into a pattern finer than the eye resolves. Images, the
+// heroes and the atlas, are left as they are.
+//
+// The place is `v_pos`, the design-space position, which on the TV is the
+// framebuffer's pixel: a varying takes the shader's highp, where GLSL ES
+// declares `gl_FragCoord` mediump. In 16-bit floats a position past 1024
+// holds only even pixel centres, which would leave 8 levels in x and bias
+// the pattern in y; `tests` work the arithmetic both ways. Mod 4 is
+// p - 4 floor(p / 4), exact for whole numbers either way.
 const FRAGMENT_SHADER: &str = "
 #ifdef GL_ES
 #ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -429,21 +444,34 @@ precision mediump float;
 #endif
 #endif
 uniform sampler2D u_atlas;
+uniform float u_dither;
+varying vec2 v_pos;
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec2 v_local;
 varying vec4 v_shape;
 varying float v_kind;
+float bayer2(vec2 a) {
+    a = floor(a);
+    return fract(dot(a, vec2(0.5, a.y * 0.75)));
+}
 void main() {
     vec4 c = vec4(v_color.rgb * v_color.a, v_color.a);
     if (v_kind > 1.5) {
         gl_FragColor = texture2D(u_atlas, v_uv) * c;
+        return;
     } else if (v_kind > 0.5) {
         vec2 q = abs(v_local) - v_shape.xy + v_shape.z;
         float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - v_shape.z;
         gl_FragColor = c * (1.0 - smoothstep(-v_shape.w, v_shape.w, d));
     } else {
         gl_FragColor = c;
+    }
+    if (u_dither > 0.0) {
+        vec2 p = floor(v_pos);
+        p -= 4.0 * floor(p * 0.25);
+        float t = bayer2(p * 0.5) * 0.25 + bayer2(p);
+        gl_FragColor.rgb += (t - 15.0 / 32.0) * u_dither * gl_FragColor.a;
     }
 }
 ";
@@ -465,6 +493,9 @@ pub struct Renderer {
     texture: u32,
     attributes: [u32; ATTRIBUTES.len()],
     u_screen: i32,
+    u_dither: i32,
+    /// The dither's peak to peak, 0 for none.
+    dither: f32,
 }
 
 impl Renderer {
@@ -480,14 +511,15 @@ impl Renderer {
                 .map_err(|_| format!("shader is missing {}", name.to_string_lossy()))?;
         }
         // SAFETY: as above.
-        let (u_screen, u_atlas) = unsafe {
+        let (u_screen, u_atlas, u_dither) = unsafe {
             (
                 (gl.get_uniform_location)(program, c"u_screen".as_ptr()),
                 (gl.get_uniform_location)(program, c"u_atlas".as_ptr()),
+                (gl.get_uniform_location)(program, c"u_dither".as_ptr()),
             )
         };
-        if u_screen < 0 || u_atlas < 0 {
-            return Err("shader is missing u_screen or u_atlas".to_owned());
+        if u_screen < 0 || u_atlas < 0 || u_dither < 0 {
+            return Err("shader is missing u_screen, u_atlas or u_dither".to_owned());
         }
         let (mut vbo, mut texture) = (0, 0);
         // SAFETY: `vbo` and `texture` are valid out-pointers for one name each;
@@ -525,11 +557,18 @@ impl Renderer {
             texture,
             attributes,
             u_screen,
+            u_dither,
+            dither: 0.0,
         })
     }
 
     pub fn gl(&self) -> &Gl {
         &self.gl
+    }
+
+    /// Dithers flat and shape quads by `style::DITHER` if `on`.
+    pub fn set_dither(&mut self, on: bool) {
+        self.dither = if on { style::DITHER } else { 0.0 };
     }
 
     /// Copies newly placed atlas pixels into the texture.
@@ -578,6 +617,7 @@ impl Renderer {
             (gl.viewport)(x, y, w, h);
             (gl.use_program)(self.program);
             (gl.uniform2f)(self.u_screen, SCREEN_W, SCREEN_H);
+            (gl.uniform1f)(self.u_dither, self.dither);
             (gl.active_texture)(gl::TEXTURE0);
             (gl.bind_texture)(gl::TEXTURE_2D, self.texture);
             (gl.bind_buffer)(gl::ARRAY_BUFFER, self.vbo);
@@ -838,5 +878,80 @@ mod tests {
     fn rgb8_maps_bytes_to_unit_range() {
         assert_eq!(Rgba::rgb8(255, 0, 51), Rgba(1.0, 0.0, 0.2, 1.0));
         assert_eq!(Rgba::rgb8(0, 0, 0).alpha(0.5).3, 0.5);
+    }
+
+    /// `v` as a 16-bit float holds it, rounded to nearest, ties to even:
+    /// Mali's mediump.
+    fn half(v: f32) -> f32 {
+        if v == 0.0 {
+            return 0.0;
+        }
+        let ulp = 2f32.powi(v.abs().log2().floor() as i32 - 10);
+        (v / ulp).round_ties_even() * ulp
+    }
+
+    /// The fragment shader's dither threshold at pixel (x, y), each step
+    /// rounded by `r`: `half` for mediump, nothing for highp.
+    fn threshold(x: u32, y: u32, r: fn(f32) -> f32) -> f32 {
+        let bayer2 = |ax: f32, ay: f32| {
+            let (ax, ay) = (ax.floor(), ay.floor());
+            r(r(ax * 0.5) + r(ay * r(ay * 0.75))).fract()
+        };
+        // `v_pos` at the pixel's centre.
+        let p = |v: u32| {
+            let p = r(v as f32 + 0.5).floor();
+            r(p - r(4.0 * r(p * 0.25).floor()))
+        };
+        let (px, py) = (p(x), p(y));
+        r(r(bayer2(r(px * 0.5), r(py * 0.5)) * 0.25) + bayer2(px, py))
+    }
+
+    #[test]
+    fn the_dither_is_a_4x4_bayer_pattern_at_highp_and_mediump() {
+        // The shader holds the arithmetic these tests work.
+        for line in [
+            "return fract(dot(a, vec2(0.5, a.y * 0.75)));",
+            "vec2 p = floor(v_pos);",
+            "p -= 4.0 * floor(p * 0.25);",
+            "float t = bayer2(p * 0.5) * 0.25 + bayer2(p);",
+            "gl_FragColor.rgb += (t - 15.0 / 32.0) * u_dither * gl_FragColor.a;",
+        ] {
+            assert!(FRAGMENT_SHADER.contains(line), "{line}");
+        }
+        let block = |x0: u32, y0: u32, r: fn(f32) -> f32| {
+            let mut ts: Vec<f32> = (0..16)
+                .map(|i| threshold(x0 + i % 4, y0 + i / 4, r))
+                .collect();
+            ts.sort_by(f32::total_cmp);
+            ts
+        };
+        let sixteen: Vec<f32> = (0..16).map(|i| i as f32 / 16.0).collect();
+        let exact = |v: f32| v;
+        let mean = |ts: &[f32]| ts.iter().sum::<f32>() / ts.len() as f32;
+        // Highp, as on the B9: each of the 16 levels once in every 4x4
+        // block, all over the screen, centred on 15/32, so the dither adds
+        // nothing on average.
+        for (x0, y0) in [(0, 0), (4, 8), (1024, 0), (1916, 1076)] {
+            assert_eq!(block(x0, y0, exact), sixteen, "({x0}, {y0})");
+        }
+        assert_eq!(mean(&sixteen), 15.0 / 32.0);
+        // Mediump, on a GPU without highp: the same up to 1024 px.
+        for (x0, y0) in [(0, 0), (4, 8), (1016, 1016)] {
+            assert_eq!(block(x0, y0, half), sixteen, "({x0}, {y0})");
+        }
+        // Past 1024 a 16-bit float holds only even pixel centres. In x that
+        // leaves 8 levels, still centred; in y, the bottom 56 rows, the
+        // pattern leans dark by an eighth of a step, by three eighths where
+        // both are past it. Why the varying is highp.
+        let x_past = block(1024, 0, half);
+        let mut levels = x_past.clone();
+        levels.dedup();
+        assert_eq!(levels.len(), 8, "{x_past:?}");
+        assert_eq!(mean(&x_past), 15.0 / 32.0);
+        assert_eq!(mean(&block(0, 1024, half)), 11.0 / 32.0);
+        assert_eq!(mean(&block(1024, 1024, half)), 3.0 / 32.0);
+        // Half an 8-bit step either way, at most.
+        let reach = (15.0 / 32.0) * style::DITHER * 255.0;
+        assert!(reach <= 0.5, "{reach}");
     }
 }

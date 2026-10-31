@@ -334,6 +334,11 @@ These cost little or nothing per frame and do the most for the look:
    77 px. On an OLED in a dark room that can show as bands; it hasn't been
    looked at on the TV yet. Fix: an ordered dither of half a step in the
    fragment shader, a few instructions per pixel, measured with target 1.
+   Built by lane J (`claude/look`): a 4x4 Bayer pattern on flat and shape
+   quads, not on images, `style::DITHER` peak to peak. In the simulator's
+   settled start screen (1280x720) the background's longest run of one
+   colour fell from 22 px to 5 px. Its cost on the TV is not measured yet;
+   the `-dither` look switch turns it off.
 3. **Kerning.** Inter wasn't kerned: fontdue reads kerning only from a `kern`
    table, and Inter keeps it in GPOS. The 72 px shelf title shows it most.
    Done on 2026-10-23 (e823515): the pairs are pulled out of GPOS ahead of

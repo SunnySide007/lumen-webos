@@ -143,7 +143,8 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
         if vsync { "on" } else { "refused" }
     );
 
-    let renderer = Renderer::new(gl)?;
+    let mut renderer = Renderer::new(gl)?;
+    renderer.set_dither(opts.look.dither);
     start.mark(Phase::Renderer, Instant::now());
     // A fixed clock wants the same frames every run, so its icons load at once.
     let assets = if opts.fixed_dt.is_some() {

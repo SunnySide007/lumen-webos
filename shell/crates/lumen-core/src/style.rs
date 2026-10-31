@@ -174,6 +174,13 @@ pub const HERO_FADE: Tuning = Tuning {
     rest_speed: 0.02,
 };
 
+// Dither.
+
+/// The ordered dither on gradients and shapes, peak to peak, as a fraction
+/// of full scale: one 8-bit step, so half a step either way, enough to break
+/// a band's edge and too little to see as grain.
+pub const DITHER: f32 = 1.0 / 255.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
