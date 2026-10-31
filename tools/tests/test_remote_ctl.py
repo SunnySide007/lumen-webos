@@ -48,6 +48,12 @@ if '-L' in argv:
             time.sleep(1)
         conn.close()
 
+preload = [a.split('=', 2)[2] for a in argv if a.startswith('SetEnv=LD_PRELOAD=')]
+if preload and os.environ.get('FAKE_SSH_ENV') == 'passed':
+    sys.stderr.write("ERROR: ld.so: object '%s' from LD_PRELOAD cannot be preloaded: ignored.\\n"
+                     % preload[0])
+    sys.stderr.flush()
+
 mode = os.environ.get('FAKE_SSH_MODE', 'serve')
 if mode == 'exec':
     command = json.loads(os.environ['FAKE_SSH_EXEC'])
@@ -308,27 +314,35 @@ class SessionTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertFalse(self.log.exists())
 
-    def test_check_door_passes_when_the_tv_refuses_shell_and_forwards(self):
+    def test_check_door_passes_when_the_tv_refuses_shell_env_and_forwards(self):
         code, out, err = self.run_ctl('check-door')
         self.assertEqual(code, 0, out + err)
-        self.assertIn('door 1/3: `ssh ... sh` gets lumen-ctl: ok', out)
-        self.assertIn('door 2/3: a remote forward (-R) is refused: ok', out)
+        self.assertIn('door 1/4: `ssh ... sh` gets lumen-ctl: ok', out)
+        self.assertIn("door 2/4: the client's environment stays out: ok", out)
+        self.assertIn('door 3/4: a remote forward (-R) is refused: ok', out)
         self.assertIn('remote port forwarding failed', out)
-        self.assertIn('door 3/3: a local forward (-L) is refused: ok', out)
+        self.assertIn('door 4/4: a local forward (-L) is refused: ok', out)
         calls = self.calls()
         self.assertEqual(calls[0][-1], 'sh')
-        self.assertIn('-R', calls[1])
-        self.assertIn('ExitOnForwardFailure=yes', calls[1])
-        self.assertIn('-L', calls[2])
-        for argv in calls[1:]:
+        self.assertIn(f'SetEnv=LD_PRELOAD={ctl.PRELOAD}', calls[1])
+        self.assertIn('-R', calls[2])
+        self.assertIn('ExitOnForwardFailure=yes', calls[2])
+        self.assertIn('-L', calls[3])
+        for argv in calls[2:]:
             self.assertNotIn('ClearAllForwardings=yes', argv)
 
     def test_check_door_fails_when_a_forward_goes_through(self):
         code, out, _ = self.run_ctl('--timeout', '1', 'check-door', FAKE_SSH_FORWARDS='ok')
         self.assertEqual(code, 1)
-        self.assertIn('door 1/3: `ssh ... sh` gets lumen-ctl: ok', out)
-        self.assertIn('door 2/3: a remote forward (-R) is refused: FAILED', out)
-        self.assertIn("door 3/3: a local forward (-L) is refused: FAILED (the forward reached the TV: b'SSH-2.0", out)
+        self.assertIn('door 1/4: `ssh ... sh` gets lumen-ctl: ok', out)
+        self.assertIn('door 3/4: a remote forward (-R) is refused: FAILED', out)
+        self.assertIn("door 4/4: a local forward (-L) is refused: FAILED (the forward reached the TV: b'SSH-2.0", out)
+
+    def test_check_door_fails_when_the_tv_takes_the_clients_environment(self):
+        code, out, _ = self.run_ctl('check-door', FAKE_SSH_ENV='passed')
+        self.assertEqual(code, 1)
+        self.assertIn("door 2/4: the client's environment stays out: FAILED (the TV saw the LD_PRELOAD", out)
+        self.assertIn('door 3/4: a remote forward (-R) is refused: ok', out)
 
     @unittest.skipUnless(LUMEN_CTL.is_file(), 'cargo test --workspace builds lumen-ctl')
     def test_against_lumen_ctl_itself_on_its_fake_bus(self):

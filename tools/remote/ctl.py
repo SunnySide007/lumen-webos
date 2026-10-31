@@ -17,7 +17,8 @@ the request leaving here to its reply arriving, SSH both ways included.
 Events print as they come; --raw prints every line as lumen-ctl sent it.
 
 check-door runs R2's checks of the door: `ssh … sh` must get lumen-ctl's
-hello, and a remote (-R) and a local (-L) port forward must be refused.
+hello, an LD_PRELOAD the client sends must not reach it, and a remote (-R)
+and a local (-L) port forward must be refused.
 
 The TV's address and port come from .env (TV_HOST, TV_PORT) as tools/tv.sh
 reads them, or the file LUMEN_ENV_FILE names. The user is root; the key is
@@ -50,6 +51,8 @@ SNAPSHOT = ('power', 'volume', 'foreground', 'inputs', 'settings')
 HELLO_WAIT = 20.0
 SNAPSHOT_WAIT = 5.0
 MAX_LINE = 1 << 20
+# check-door's LD_PRELOAD: a path that exists on no TV.
+PRELOAD = '/nonexistent/lumen-door-check.so'
 HOST = re.compile(r'[A-Za-z0-9_.:%-]+')
 VERB = re.compile(r'[A-Za-z0-9_.-]+')
 NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
@@ -168,9 +171,10 @@ def compact(value):
 class Session:
     """One ssh to lumen-ctl serve, its lines read on a thread as they come."""
 
-    def __init__(self, argv):
+    def __init__(self, argv, stderr=None):
         try:
-            self.proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            self.proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                         stderr=stderr)
         except OSError as e:
             raise Failure(3, f'cannot run {argv[0]}: {e}') from None
         self.lines = queue.Queue()
@@ -380,6 +384,21 @@ def door_shell(cfg):
     return True, f"lumen-ctl answered ({data.get('server')})"
 
 
+def door_environment(cfg):
+    """A client's LD_PRELOAD would run its code as root before lumen-ctl's
+    main: the TV's dynamic loader names a missing one on stderr."""
+    argv = ssh_argv(cfg, '-o', f'SetEnv=LD_PRELOAD={PRELOAD}')
+    with Session(argv, stderr=subprocess.PIPE) as s:
+        try:
+            wait_hello(s, None)
+        except Failure as e:
+            return False, str(e)
+    err = s.proc.stderr.read()
+    if PRELOAD.encode() in err:
+        return False, f'the TV saw the LD_PRELOAD sent: {last_line(err)}'
+    return True, 'lumen-ctl answered, and the TV never saw the LD_PRELOAD sent'
+
+
 def door_remote_forward(cfg, timeout):
     argv = ssh_argv(cfg, '-N', '-o', 'ExitOnForwardFailure=yes',
                     '-R', '127.0.0.1:0:127.0.0.1:9', forwards=True)
@@ -427,6 +446,7 @@ def door_local_forward(cfg, timeout):
 
 def check_door(cfg, printer, timeout):
     checks = [('`ssh ... sh` gets lumen-ctl', lambda: door_shell(cfg)),
+              ("the client's environment stays out", lambda: door_environment(cfg)),
               ('a remote forward (-R) is refused', lambda: door_remote_forward(cfg, timeout)),
               ('a local forward (-L) is refused', lambda: door_local_forward(cfg, timeout))]
     failed = 0
