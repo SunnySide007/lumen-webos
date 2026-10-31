@@ -7,10 +7,12 @@
 #   tools/uninstall-all.sh --glasshouse --yes      also undo Glasshouse
 #   tools/uninstall-all.sh --plx-native --yes      also remove plx-native
 #
-# Lumen's parts: the shell app, /var/lib/lumen, Lumen's boot hooks
-# (/var/lib/webosbrew/init.d/lumen-*), its kill switch, the capture directory
-# and its files in /tmp. --glasshouse runs Glasshouse's documented undo
-# (tvwebctl restores, stop, its files and boot hooks), then removes its app.
+# Lumen's parts: the shell app, Lumen's boot hooks
+# (/var/lib/webosbrew/init.d/lumen-*), Lumen Guard's nat rules and process
+# (profiles/privacy/guard-undo.sh), /var/lib/lumen, its kill switch, the
+# capture directory and its files in /tmp. --glasshouse runs Glasshouse's
+# documented undo (tvwebctl restores, stop, its files and boot hooks), then
+# removes its app.
 #
 # It never touches Homebrew Channel, root, the SSH key or
 # /var/luna/preferences/webosbrew_*. Every step runs even if an earlier one
@@ -53,15 +55,18 @@ trap 'rm -f "$steps"' EXIT
 trap 'echo "interrupted; later steps not run" >&2; exit 130' INT
 trap 'exit 143' TERM
 
-# step KIND ROLE ARG: KIND is `remove` (an app id) or `run` (a command on the
-# TV). ROLE `restore` marks Glasshouse's undo; `purge` steps delete its files
-# and run only if every restore succeeded, so a failed one can be retried.
+# step KIND ROLE ARG: KIND is `remove` (an app id), `run` (a command on the
+# TV) or `script` (a file here, run on the TV). ROLE `restore` marks
+# Glasshouse's undo; `purge` steps delete its files and run only if every
+# restore succeeded, so a failed one can be retried.
 step() {
     printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$steps"
 }
 
 step remove - "$LUMEN_APP"
 step run - "rm -f $INITD/lumen-*"
+# Guard's rules first, then Guard, while its files are still there.
+step script - "$ROOT/profiles/privacy/guard-undo.sh"
 step run - "rm -rf /var/lib/lumen"
 step run - "rm -f /var/luna/preferences/lumen_disable"
 step run - "if [ -f /media/developer/temp/lumen-capture/lumen-capture.sh ]; then sh /media/developer/temp/lumen-capture/lumen-capture.sh clean; else rm -rf /media/developer/temp/lumen-capture; fi"
@@ -81,13 +86,19 @@ if [ $plx -eq 1 ]; then
     step remove - "$PLX_APP"
 fi
 
-# The last line of defence for rule 2's exceptions: nothing above may name
-# Homebrew Channel, its settings, root's SSH keys or the whole init.d.
-if grep -E 'webosbrew_|org\.webosbrew|authorized_keys|\.ssh|/home/root|rm -rf /var/lib/webosbrew|init\.d/\*|init\.d( |$)' "$steps" >/dev/null; then
+tab=$(printf '\t')
+
+# The last line of defence for rule 2's exceptions: nothing above, nor any
+# script it runs, may name Homebrew Channel, its settings, root's SSH keys or
+# the whole init.d.
+if {
+    cat "$steps"
+    while IFS=$tab read -r kind _ arg; do
+        if [ "$kind" = script ]; then cat "$arg"; fi
+    done <"$steps"
+} | grep -E 'webosbrew_|org\.webosbrew|authorized_keys|\.ssh|/home/root|rm -rf /var/lib/webosbrew|init\.d/\*|init\.d( |$)' >/dev/null; then
     die "a step touches something it must never touch; nothing was run"
 fi
-
-tab=$(printf '\t')
 if [ $yes -eq 0 ]; then
     echo "Dry run. With --yes, these run in order:"
     while IFS=$tab read -r kind role arg; do
@@ -95,6 +106,8 @@ if [ $yes -eq 0 ]; then
         [ "$role" = purge ] && note="   (only if the restores above succeeded)"
         if [ "$kind" = remove ]; then
             echo "  tools/tv.sh remove $arg$note"
+        elif [ "$kind" = script ]; then
+            echo "  tools/tv.sh script ${arg#"$ROOT"/}$note"
         else
             echo "  tools/tv.sh run '$arg'$note"
         fi

@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["crates/lumen-shell"]
+members = ["crates/lumen-shell", "crates/lumen-guard"]
+# lumen-guard builds for Linux only, so a plain `cargo run` or `cargo build` on
+# the PC (tools/sim.ps1) means the shell; make passes --workspace.
+default-members = ["crates/lumen-shell"]
 
 [workspace.package]
 version = "0.0.1"
@@ -9,6 +12,7 @@ license = "GPL-3.0-or-later"
 rust-version = "1.99"
 
 [workspace.dependencies]
+libc = "0.2"
 libloading = "0.9"
 
 [profile.release]

@@ -128,7 +128,7 @@ From the setting down to the wire; each catches what the one above misses.
 |---|---|---|---|---|
 | 1 | LG's switches | ACR, ad profiles, recommendations | LG Settings | done |
 | 2 | LG Home out of the way | launcher, beacon and promotion calls at their source | the shell as home (Phase 3) | measure with layer 3's log once the shell owns Home |
-| 3 | Names | telemetry, ads, AI, ThinQ, with suffix rules | Lumen Guard, below | proposed |
+| 3 | Names | telemetry, ads, AI, ThinQ, with suffix rules | Lumen Guard, below | G1 (log only) built, not yet run on the TV |
 | 4 | Senders | LG jobs that report | stop them at run time, one per check, from the list above; never `tvdataexchanger` or `alwaysready` | measured; four proposed for S1 |
 | 5 | Addresses | hard-coded endpoints, public resolvers | iptables `OUTPUT` rules; LG-owned addresses only, never AWS or CDN ranges (the store is on AWS: five us-west-2 addresses) | possible: netfilter measured |
 | 6 | Identifiers | the MAC inside the TV's IPv6 address | IPv6 off in LG's settings | done 2026-10-28: `ipv6Enable` false, no IPv6 address on `wlan0` |
@@ -146,35 +146,99 @@ little as possible.
 ## Lumen Guard
 
 A small DNS forwarder on the TV, written in Rust as a new binary in the shell
-workspace and built with the same armv7 toolchain.
+workspace (`shell/crates/lumen-guard`) and built with the same armv7
+toolchain (`tools/dev.sh make guard`, into `dist/guard/`). Stage G1, which
+only logs, was built on 2026-10-30 and has not yet run on the TV.
 
-- **Loopback only:** it listens on 127.0.0.2:53, UDP and TCP.
-- **Every lookup reaches it:** one nat rule sends every UDP and TCP packet
-  to port 53 that isn't for loopback to 127.0.0.2:53. That covers connman's
-  forwards and any program that asks a public resolver itself. Guard marks
-  its own upstream packets with a DSCP value the rule skips, since there is
-  no owner match. To be proved by hand first: DNAT to loopback for the
-  TV's own packets.
-- **Rules:** `allowlist.txt`, `required-blocks.txt` and the block list, with
-  the suffix and `=exact` rules `store-safe-check.sh` and `summarize.py`
-  already use. The allowlist wins. A blocked name gets 0.0.0.0 and ::, as
-  from the hosts file.
-- **Log:** one line per lookup (time, name, type, verdict) under
-  `/var/lib/lumen/guard/`, two files of at most 4 MB. Names only: after
-  connman's proxy Guard can't tell which program asked. It never leaves the
-  TV unless fetched over SSH. Started at every boot, it outlives a
-  power-off, which is what the capture lacked. tcpdump stays for addresses
-  used without a lookup.
-- **Fails open:** the boot hook's loop adds the nat rule once Guard
-  answers and deletes it when Guard exits, so lookups go straight to the
-  router as today. A reboot clears every rule anyway (P3).
-- **Started** by a boot hook in `/var/lib/webosbrew/init.d` that checks the
-  kill switch, runs in the background and is time-boxed (safety rules 4 and
-  5), installed only after it has run by hand (rule 3).
-- **Counts for the shell:** a small status file, so a Privacy panel can say
-  what was blocked today (Phase 4's Control Center).
-- **Small surface:** it reads only a query's question and passes answers
-  through untouched; no recursion and no cache to start with.
+```text
+lumen-guard --listen ADDR:PORT --upstream ADDR:PORT --rules DIR --log DIR --status FILE
+            [--mode log] [--dscp N] [--max-log-bytes N]
+lumen-guard --probe ADDR:PORT [--name NAME]
+```
+
+- **Loopback only:** it listens on 127.0.0.2:53, UDP and TCP. TCP takes one
+  query per connection (RFC 1035's two-byte length), 3 s to send it, at
+  most 32 connections at once. `--mode block` is G2 and refused for now.
+- **Every lookup reaches it:** one nat rule per protocol sends every packet
+  to port 53 that isn't for loopback to 127.0.0.2:53:
+
+  ```text
+  iptables -t nat -A OUTPUT -p udp --dport 53 ! -d 127.0.0.0/8 -m dscp ! --dscp 7 -j DNAT --to-destination 127.0.0.2:53
+  iptables -t nat -A OUTPUT -p tcp --dport 53 ! -d 127.0.0.0/8 -m dscp ! --dscp 7 -j DNAT --to-destination 127.0.0.2:53
+  ```
+
+  That covers connman's forwards and any program that asks a public
+  resolver itself. Since there is no owner match, Guard marks its own
+  upstream packets with DSCP 7 (`IP_TOS`, set before the first packet, the
+  TCP SYN included) and the rules skip them. 7 is from RFC 2474's pool for
+  local use and in the same priority class as unmarked packets. A fixed
+  source port exempted with `! --sport` was weighed and dropped: it would
+  need no `libc`, but `std` can't bind a TCP socket before connecting, so
+  Guard's TCP lookups would loop back to it, and one shared UDP port would
+  serialise queries or rewrite their IDs. To be proved by hand first: DNAT to
+  loopback for the TV's own packets. Upstream connman binds its server
+  sockets to the network interface, and whether a packet from such a socket
+  can be sent to loopback is not known, so the hook checks it (below).
+- **Passes bytes through:** it reads only the first question's name
+  (compression pointers followed, loops refused) and type. Each UDP query
+  goes upstream unchanged from a socket of its own, and the first answer
+  with its ID comes back unchanged; messages up to 4,096 bytes, TCP answers
+  streamed through in pieces of that size. No cache, no recursion. With no
+  answer within 3 s nothing is sent back, and the asker retries.
+- **Rules:** `allowlist.txt`, `required-blocks.txt` and `b9-aggressive.hosts`
+  as they are, read as `store-safe-check.sh` and `summarize.py` read them:
+  an allowlist `name` covers the name and every name under it, `=name` that
+  name only; required blocks and uncommented hosts lines with a sinkhole
+  address are exact blocks; commented hosts lines are candidates, not
+  blocks; the allowlist wins. G1 only logs the verdict; in G2 a blocked name
+  gets 0.0.0.0 and ::, as from the hosts file.
+- **Log:** `/var/lib/lumen/guard/lookups.log`, one line per lookup,
+  `<unix seconds> <type> <name> <verdict>` with verdict `allow` or
+  `would-block` (`block` in G2), moved to `lookups.log.1` at 4 MB
+  (`--max-log-bytes`), so two files at most. Names come off the wire in
+  lower case, any octet but a letter, digit, `-` or `_` written `\DDD`, so
+  a line can't be forged; a query whose question can't be read is logged
+  as `- -`. Names only, no addresses or answers: after connman's proxy Guard
+  can't tell which program asked, and what it counts is connman asking the
+  router, at least once per answer's lifetime. A line that can't be written
+  (a full disk) is dropped and counted. It never leaves the TV unless
+  fetched over SSH (`tools/guard.sh log`, which also summarises it). Started
+  at every boot, it outlives a power-off, which is what the capture lacked.
+  tcpdump stays for addresses used without a lookup.
+- **Counts for the shell:** `/var/lib/lumen/guard/status`, plain `key value`
+  lines rewritten whole every 10 s and when SIGTERM ends Guard: lookups and
+  would-blocks since start and since local midnight, the start time,
+  upstream, mode, DSCP and error counts. For `tools/guard.sh status` and a
+  Privacy panel that says what was blocked today (G5, Phase 4's Control
+  Center).
+- **Started** by `profiles/privacy/lumen-guard` in
+  `/var/lib/webosbrew/init.d`. It does nothing while the kill switch exists,
+  returns at once and logs to `/tmp/lumen-guard.log`. In the background it
+  finds the upstream (connman's newest `Nameservers=` line in
+  `/var/lib/connman/*/settings`, else an address the owner wrote to
+  `/var/lib/lumen/guard/upstream`, never loopback), starts Guard, and waits
+  up to about five minutes for `lumen-guard --probe 127.0.0.2:53` to get an
+  answer, from Guard and the router behind it. Then it adds the two rules,
+  asks connman for a new name (`lumen-check-<pid>-<time>.invalid`) and keeps
+  the rules only if that name turns up in Guard's log within 5 s.
+- **Fails open:** any of those steps failing stops Guard and leaves no rule.
+  Once they pass, the same shell sleeps in `wait` and removes the rules when
+  Guard exits, for any reason, so lookups go straight to the router as
+  today; a reboot clears every rule anyway (P3). That is how the hook keeps
+  safety rules 4 and 5: the start-up is time-boxed, and what is left after
+  it is one sleeping shell, not a loop. Guard isn't restarted if it dies.
+- **By hand first** (rule 3): `tools/guard.sh push` puts the binary, the
+  rules and an inert copy of the hook in `/var/lib/lumen/guard/`;
+  `tools/tv.sh script profiles/privacy/guard-apply.sh` runs that copy and
+  reports how the start went; `guard-undo.sh` (or a reboot) removes the rules
+  and stops Guard. Then `tools/guard.sh install` adds the hook, `remove`
+  takes it away, and `tools/uninstall-all.sh` runs `guard-undo.sh` before it
+  deletes `/var/lib/lumen`.
+- **Small surface:** about 1,400 lines of Rust besides its tests: `std`, and
+  the `libc` crate in one module (`sys.rs`: the DSCP mark, `poll`, SIGTERM,
+  the local date and the `getauxval` shim), with `unsafe` denied everywhere
+  else. Two threads, UDP and TCP; under 4 MB resident is the target, to be
+  measured on the TV.
 
 | | Glasshouse hosts | dnsmasq, static | Lumen Guard |
 |---|---|---|---|
@@ -184,7 +248,7 @@ workspace and built with the same armv7 toolchain.
 | Encrypted upstream | no | no | yes (G3) |
 | Counts for the shell | no | by parsing logs | yes |
 | Reads `allowlist.txt` as it is | through a converter | through a converter | yes |
-| New code running as root | none | none, but another C parser of network input | about 1,000 lines of Rust |
+| New code running as root | none | none, but another C parser of network input | about 1,400 lines of Rust |
 
 ## Stages
 
@@ -196,7 +260,7 @@ Each is undone by a reboot until it becomes a boot hook, and each ends with
 |---|---|---|
 | S0 | `tools/recon.sh --privacy`, the read-only survey | done: two runs on 2026-10-28 (above) |
 | S1 | Quick fixes. Owner, in LG Settings: IPv6 off. By hand over SSH, undone by a reboot: `initctl stop` for `uploadd`, `rdxd`, `crashreportd` and `remotelogger`; an `INPUT` rule rejecting tcp 11111 from the LAN; P9 and P10's answers. Then one boot hook for whatever passed. `nsu.lge.com` waits for Guard (G2) | each checked; the checklist passes, also after a cold boot with the hook. Applied by hand 2026-10-28 06:30 UTC with `profiles/privacy/s1-apply.sh` (undo: `s1-undo.sh` or a reboot): the four jobs stayed stopped, tcp 11111 no longer answers from the LAN, DIAL still does; the owner's checklist passed the same day. A full backup (`tools/backup.sh`) was taken at 06:52 UTC, before any boot hook. The boot hook (`profiles/privacy/lumen-privacy`, SHA-256 `35747be3…`) was installed with `tools/privacy-hook.sh install` at 07:00 UTC, the first persistent change. After a reboot at 07:03:49 UTC it added the rule and stopped all four jobs at 07:04:23, about 37 s into the boot; tcp 11111 again didn't answer from the LAN, and DIAL did. Still owed: the owner's quick check (Netflix, casting) after that boot |
-| G1 | Guard, log only: forwards everything | a week of names across power-offs, summarised like the capture |
+| G1 | Guard, log only: forwards everything | a week of names across power-offs, summarised like the capture. Built 2026-10-30 (`shell/crates/lumen-guard`, `profiles/privacy/lumen-guard`, `tools/guard.sh`), not yet run on the TV: first by hand with `guard-apply.sh`, then the hook |
 | G2 | Guard blocks: required hosts and the confirmed list | the store-safe check and the checklist pass, also after a cold boot |
 | G3 | Encrypted upstream (P4) | lookups leave the TV only to the chosen resolver |
 | G4 | Senders stopped, one job per check | each job's effect is recorded; the checklist passes |

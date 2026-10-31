@@ -1,0 +1,18 @@
+[package]
+name = "lumen-guard"
+description = "Lumen Guard: a log-only DNS forwarder for rooted LG webOS TVs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+# Only in src/sys.rs: DSCP marks, poll, SIGTERM and the local date.
+libc.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

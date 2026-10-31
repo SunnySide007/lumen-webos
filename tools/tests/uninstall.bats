@@ -24,6 +24,7 @@ EOF
     [[ "$output" == *"tools/tv.sh remove io.github.sunnyside007.lumen.shell"* ]]
     [[ "$output" == *"rm -rf /var/lib/lumen"* ]]
     [[ "$output" == *"rm -f /var/lib/webosbrew/init.d/lumen-*"* ]]
+    [[ "$output" == *"tools/tv.sh script profiles/privacy/guard-undo.sh"* ]]
     [[ "$output" == *"lumen-capture"* ]]
     [[ "$output" == *"Glasshouse is kept"* ]]
     [[ "$output" != *"tvwebctl"* ]]
@@ -58,8 +59,32 @@ EOF
     grep -qx 'remove|io.github.sunnyside007.lumen.shell' "$CALLS"
     grep -qx 'run|rm -rf /var/lib/lumen' "$CALLS"
     grep -qx 'remove|com.beb.plxnative' "$CALLS"
-    [ "$(wc -l <"$CALLS")" -eq 7 ]
+    [ "$(wc -l <"$CALLS")" -eq 8 ]
     [[ "$output" == *"Cold boot"* ]]
+}
+
+@test "Guard's rules and process go after its hook and before its files" {
+    run "$UNINSTALL" --yes
+    [ "$status" -eq 0 ]
+    hooks=$(grep -nxF 'run|rm -f /var/lib/webosbrew/init.d/lumen-*' "$CALLS" | cut -d: -f1)
+    guard=$(grep -nx 'script|.*/profiles/privacy/guard-undo.sh' "$CALLS" | cut -d: -f1)
+    files=$(grep -nx 'run|rm -rf /var/lib/lumen' "$CALLS" | cut -d: -f1)
+    [ -n "$hooks" ] && [ -n "$guard" ] && [ -n "$files" ]
+    [ "$hooks" -lt "$guard" ]
+    [ "$guard" -lt "$files" ]
+    # The script is this checkout's, and exists.
+    [ -f "$(sed -n 's/^script|//p' "$CALLS")" ]
+}
+
+@test "a script step that names Homebrew Channel's settings stops everything" {
+    root="$BATS_TEST_TMPDIR/root"
+    mkdir -p "$root/tools" "$root/profiles/privacy"
+    cp "$UNINSTALL" "$root/tools/"
+    printf 'rm -f /var/luna/preferences/webosbrew_failsafe\n' >"$root/profiles/privacy/guard-undo.sh"
+    run "$root/tools/uninstall-all.sh" --yes
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"must never touch"* ]]
+    [ ! -s "$CALLS" ]
 }
 
 @test "a failed step does not stop the rest, and fails the run" {
