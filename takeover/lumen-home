@@ -21,10 +21,15 @@
 # starts again then. Not persistent until installed: tools/takeover.sh hook
 # push leaves an inert copy that takeover/home-apply.sh runs by hand, and
 # tools/takeover.sh hook install, after that run and the owner's yes,
-# installs it. Log: /tmp/lumen-home.log; tools/uninstall-all.sh removes it.
+# installs it. Log: /var/lib/lumen/log/lumen-home.log, and the run before in
+# lumen-home.log.1 (log_to, below). With no safe log folder it does its work
+# unlogged, and tools/takeover.sh hook status says "no log".
+# tools/uninstall-all.sh removes the log with /var/lib/lumen.
 
 KILL=/var/luna/preferences/lumen_disable
-LOG=/tmp/lumen-home.log
+LOGDIR=/var/lib/lumen/log
+LOG=$LOGDIR/lumen-home.log
+ROOT_UID=0
 ID=io.github.sunnyside007.lumen.shell
 LG=com.webos.app.home
 AM=com.webos.applicationManager
@@ -34,6 +39,52 @@ DEADLINE=260
 
 [ -e "$KILL" ] && exit 0
 
+# folder_ok FOLDER...: each is a real folder, not a link, owned by root and
+# writable by no one else.
+folder_ok() {
+    for d in "$@"; do
+        if [ -L "$d" ] || [ ! -d "$d" ]; then
+            echo "$d is not a real folder"
+            return 1
+        fi
+        # ls -ln is POSIX, and stat is not: its mode and owner, split into words.
+        # shellcheck disable=SC2046,SC2012
+        set -- $(ls -ldn "$d")
+        case $1 in
+            d????[!w]??[!w]*) ;;
+            *)
+                echo "$d is writable by others ($1)"
+                return 1
+                ;;
+        esac
+        if [ "$3" != "$ROOT_UID" ]; then
+            echo "$d is owned by uid $3, not root"
+            return 1
+        fi
+    done
+}
+
+# log_to: starts this run's log and prints where its output goes. Root writes
+# nothing into /tmp, which every app's jail shares: a link put there before a
+# boot hook runs would send root's writes wherever it points. So the log is
+# $LOG, in a folder made with umask 077 and used only once it and
+# /var/lib/lumen pass folder_ok. The last run's log moves to $LOG.1 first,
+# which keeps one earlier boot, and the new one is made before the hook goes
+# into the background. A folder that fails gets no log: the hook does its
+# work all the same, with its output to /dev/null, and says why on stderr.
+log_to() {
+    mkdir -p "${LOGDIR%/*}"
+    if folder_ok "${LOGDIR%/*}" >&2 && (umask 077 && mkdir -p "$LOGDIR") &&
+        folder_ok "$LOGDIR" >&2 && { [ ! -e "$LOG" ] || mv -f "$LOG" "$LOG.1"; } &&
+        : >"$LOG"; then
+        echo "$LOG"
+    else
+        echo "no log: this run's output goes to /dev/null" >&2
+        echo /dev/null
+    fi
+}
+
+OUT=$(log_to)
 (
     say() {
         echo "$(date -u) $*"
@@ -137,4 +188,4 @@ DEADLINE=260
         sleep 60
     done
     say "lumen-home: done"
-) </dev/null >>"$LOG" 2>&1 &
+) </dev/null >>"$OUT" 2>&1 &
