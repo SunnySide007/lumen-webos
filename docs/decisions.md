@@ -150,17 +150,17 @@ the first two routes works, the pad needs a small root helper, and that
 helper needs a security review. Speed claims wait for measurements, because
 the B9 doesn't expose its clock speeds.
 
-## 8. The home loop behind adapters, tested through fakes (proposed)
+## 8. The home loop behind adapters, tested through fakes
 
-**Status.** Proposed on 2026-10-23, with the code that carries it out
-([specs/shell-mvp.md](specs/shell-mvp.md), "Home loop: deepening the
-loop"). It becomes accepted once `lumen-tv-check` on the B9 shows the same
-missed vsyncs, frame-3 times, key to frame and start-up as 3a89955. Run on
-2026-10-31, back to back with 3a89955: the missed vsyncs, frame-3 times
-and key to frame were the same; start-up was not compared like for like,
-since the two were launched over different apps ("Measured on the B9", 17,
-in specs/shell-mvp.md). Merged into `main` the same day; acceptance is the
-owner's call.
+**Status.** Accepted by the owner on 2026-10-31, after `lumen-tv-check`
+ran it on the B9 back to back with 3a89955: the missed vsyncs, frame-3
+times and key to frame were the same; start-up was not compared like for
+like, since the two were launched over different apps ("Measured on the
+B9", 17, in specs/shell-mvp.md). Proposed on 2026-10-23 with the code that
+carries it out ([specs/shell-mvp.md](specs/shell-mvp.md), "Home loop:
+deepening the loop"), to be accepted once that check showed the same
+missed vsyncs, frame-3 times, key to frame and start-up as 3a89955; merged
+into `main` on 2026-10-31.
 
 **Context.** The home loop (GLOSSARY.md) called SDL, GL and the clock from
 inside one 323-line function, and no test reached it. Three of the four bugs
