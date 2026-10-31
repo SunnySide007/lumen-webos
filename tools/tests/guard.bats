@@ -10,7 +10,8 @@ UDP_RULE='-p udp --dport 53 ! -o lo ! -d 192.0.2.1 -m dscp ! --dscp 7 -j DNAT --
 TCP_RULE='-p tcp --dport 53 ! -o lo ! -d 192.0.2.1 -m dscp ! --dscp 7 -j DNAT --to-destination 127.0.0.2:53'
 CONNMAN='nameserver 127.0.0.1'
 OURS='# Lumen Guard
-nameserver 127.0.0.2'
+nameserver 127.0.0.2
+nameserver 127.0.0.1'
 
 setup() {
     T="$BATS_TEST_TMPDIR"

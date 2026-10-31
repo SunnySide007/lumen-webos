@@ -3,9 +3,9 @@
 # Channel boot hook: /var/lib/webosbrew/init.d/lumen-guard (run-parts allows no
 # dot in the name). At each boot it starts lumen-guard, a DNS forwarder that
 # logs every lookup it gets to /var/lib/lumen/guard/lookups.log, and once Guard
-# answers it points the TV's resolver at it: a file naming 127.0.0.2 is bind
-# mounted over connman's /var/lib/misc/resolv.conf, which /etc/resolv.conf
-# links to. Two nat rules also send Guard the lookups programs make to other
+# answers it points the TV's resolver at it: a file naming 127.0.0.2, then
+# connman's 127.0.0.1, is bind mounted over connman's /var/lib/misc/resolv.conf,
+# which /etc/resolv.conf links to. Two nat rules also send Guard the lookups programs make to other
 # resolvers (hard-coded ones), leaving connman's forwards to the router alone.
 # Nothing it does outlasts the next boot.
 #
@@ -31,6 +31,14 @@ PIDFILE=$DIR/lumen-guard.pid
 OURS=$DIR/resolv.conf
 RESOLV=/var/lib/misc/resolv.conf
 LISTEN=127.0.0.2:53
+
+# Guard first, then connman's proxy. App jails copy resolv.conf at launch and
+# keep the copy, so after a fail-open an app launched under Guard still asks
+# 127.0.0.2; with nothing there glibc moves on to connman at once (measured
+# on the B9: privacy.md, P11).
+write_ours() {
+    printf '# Lumen Guard\nnameserver 127.0.0.2\nnameserver 127.0.0.1\n' >"$OURS"
+}
 # Guard marks the packets it sends upstream with this DSCP value, and the
 # rules leave those alone, so Guard's own lookups are not sent back to it.
 DSCP=7
@@ -188,8 +196,7 @@ running() {
         sleep 5
     done
 
-    printf '# Lumen Guard\nnameserver 127.0.0.2\n' >"$OURS" ||
-        fail_open "FAILED to write $OURS"
+    write_ours || fail_open "FAILED to write $OURS"
     unmount || fail_open "FAILED to unmount an earlier mount over $RESOLV"
     mount --bind "$OURS" "$RESOLV" || fail_open "FAILED to mount $OURS over $RESOLV"
     grep -qx 'nameserver 127.0.0.2' /etc/resolv.conf ||
@@ -217,8 +224,7 @@ running() {
         sleep 5
         mounted || fail_open "the mount over $RESOLV is gone"
         if ! grep -qx 'nameserver 127.0.0.2' /etc/resolv.conf 2>/dev/null; then
-            printf '# Lumen Guard\nnameserver 127.0.0.2\n' >"$OURS" ||
-                fail_open "FAILED to restore $OURS"
+            write_ours || fail_open "FAILED to restore $OURS"
             say "resolv.conf no longer named Guard (connman wrote it?); Guard's file restored"
         fi
         tick=$((tick + 1))

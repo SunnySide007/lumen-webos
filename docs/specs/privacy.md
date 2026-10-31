@@ -174,7 +174,8 @@ lumen-guard --probe ADDR:PORT [--name NAME]
     `wget` resolved through Guard in under a second. Homebrew's hosts-file
     sinkholes still applied first. The jail's copy stays when Guard stops,
     so an app launched while Guard ran keeps asking 127.0.0.2 after a
-    fail-open, until it is launched again (P11).
+    fail-open; Guard's file therefore names connman second (P11), and glibc
+    moves on to it at once when 127.0.0.2 refuses.
   - Not everything. glibc 2.24 reads `resolv.conf` when a process first
     resolves, not when the file changes. So processes started before the
     mount keep asking connman, and connman forwards to the router unlogged.
@@ -252,7 +253,11 @@ lumen-guard --probe ADDR:PORT [--name NAME]
   five minutes for `lumen-guard --probe 127.0.0.2:53` to get an answer.
   Guard sends nothing back when the router is silent, so an answer proves
   Guard and the router behind it. Then the hook:
-  1. writes `/var/lib/lumen/guard/resolv.conf` (`nameserver 127.0.0.2`);
+  1. writes `/var/lib/lumen/guard/resolv.conf`: `nameserver 127.0.0.2`,
+     then connman's `nameserver 127.0.0.1` (P11), so a program that kept a
+     copy still resolves through connman once nothing answers on 127.0.0.2.
+     A lookup Guard leaves unanswered for 5 s also goes on to connman,
+     unlogged;
   2. bind-mounts that file over `/var/lib/misc/resolv.conf`;
   3. checks that `/etc/resolv.conf` now names 127.0.0.2, makes the mount
      read-only if the kernel lets it (so connman's in-place rewrite of its
@@ -310,7 +315,7 @@ Each is undone by a reboot until it becomes a boot hook, and each ends with
 |---|---|---|
 | S0 | `tools/recon.sh --privacy`, the read-only survey | done: two runs on 2026-10-28 (above) |
 | S1 | Quick fixes. Owner, in LG Settings: IPv6 off. By hand over SSH, undone by a reboot: `initctl stop` for `uploadd`, `rdxd`, `crashreportd` and `remotelogger`; an `INPUT` rule rejecting tcp 11111 from the LAN; P9 and P10's answers. Then one boot hook for whatever passed. `nsu.lge.com` waits for Guard (G2) | each checked; the checklist passes, also after a cold boot with the hook. Applied by hand 2026-10-28 06:30 UTC with `profiles/privacy/s1-apply.sh` (undo: `s1-undo.sh` or a reboot): the four jobs stayed stopped, tcp 11111 no longer answers from the LAN, DIAL still does; the owner's checklist passed the same day. A full backup (`tools/backup.sh`) was taken at 06:52 UTC, before any boot hook. The boot hook (`profiles/privacy/lumen-privacy`, SHA-256 `35747be3…`) was installed with `tools/privacy-hook.sh install` at 07:00 UTC, the first persistent change. After a reboot at 07:03:49 UTC it added the rule and stopped all four jobs at 07:04:23, about 37 s into the boot; tcp 11111 again didn't answer from the LAN, and DIAL did. Still owed: the owner's quick check (Netflix, casting) after that boot |
-| G1 | Guard, log only: forwards everything | a week of names across power-offs, summarised like the capture. Built 2026-10-30 (`shell/crates/lumen-guard`, `profiles/privacy/lumen-guard`, `tools/guard.sh`). The redirect design was tried by hand on the B9 on 2026-10-31 and failed open as designed. The hook was rebuilt around `resolv.conf`, a design proven by hand the same day. The new hook passed its by-hand run on 2026-10-31 15:25 to 15:54 UTC: one read-only mount, both rules, 940 kB resident, Netflix's own resolver (8.8.8.8) caught by the rules, the kill switch failing open in 5 s, a Wi-Fi drop survived, a hung Guard failing open in 2 min 51 s, nothing left after `guard-undo.sh`. Next: P11, then `tools/backup.sh`, `tools/guard.sh install`, a cold boot and a week of log |
+| G1 | Guard, log only: forwards everything | a week of names across power-offs, summarised like the capture. Built 2026-10-30 (`shell/crates/lumen-guard`, `profiles/privacy/lumen-guard`, `tools/guard.sh`). The redirect design was tried by hand on the B9 on 2026-10-31 and failed open as designed. The hook was rebuilt around `resolv.conf`, a design proven by hand the same day. The new hook passed its by-hand run on 2026-10-31 15:25 to 15:54 UTC: one read-only mount, both rules, 940 kB resident, Netflix's own resolver (8.8.8.8) caught by the rules, the kill switch failing open in 5 s, a Wi-Fi drop survived, a hung Guard failing open in 2 min 51 s, nothing left after `guard-undo.sh`. P11 decided and tried by hand the same day; the hook now names connman second. Next: one more `guard-apply.sh` to see the new file, then `tools/backup.sh`, `tools/guard.sh install`, a cold boot and a week of log |
 | G2 | Guard blocks: required hosts and the confirmed list | the store-safe check and the checklist pass, also after a cold boot |
 | G3 | Encrypted upstream (P4) | lookups leave the TV only to the chosen resolver |
 | G4 | Senders stopped, one job per check | each job's effect is recorded; the checklist passes |
@@ -332,4 +337,4 @@ G1 replaces the Stage C capture of the runbook; G2 replaces Stages C7–D.
 | P8 | Run the second survey (listening programs, reporting jobs' start-up) | done 2026-10-28 |
 | P9 | Does anyone at home use AirPlay or HomeKit (an iPhone, iPad or Mac)? | if not, reject tcp 7000 and 35254 from the LAN |
 | P10 | Ports 3000 and 3001: does the family use LG ThinQ, a phone remote app or Web Video Caster? | if not, reject them; if so, keep them open, since the router hands out addresses and a rule per phone would need fixed ones |
-| P11 | After a fail-open, an app launched while Guard ran keeps asking 127.0.0.2 (its jail's copy of `resolv.conf`) and can't resolve until it is launched again. Accept that, or have Guard's file name connman's proxy second (`nameserver 127.0.0.2`, then `nameserver 127.0.0.1`), so glibc moves on to connman when nothing listens on 127.0.0.2 | name connman second, tried by hand first: a mount with both lines and no Guard, then a lookup that should come back through connman at once |
+| P11 | After a fail-open, an app launched while Guard ran keeps asking 127.0.0.2 (its jail's copy of `resolv.conf`) and can't resolve until it is launched again. Accept that, or have Guard's file name connman's proxy second (`nameserver 127.0.0.2`, then `nameserver 127.0.0.1`), so glibc moves on to connman when nothing listens on 127.0.0.2 | decided 2026-10-31: name connman second. Tried by hand first: with both lines mounted and nothing on 127.0.0.2, lookups by new processes took 0.10 and 0.11 s against 0.05 and 0.08 s with connman alone (b9.md, "Resolver") |
