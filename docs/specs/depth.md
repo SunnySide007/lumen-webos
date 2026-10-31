@@ -50,15 +50,16 @@ according to Hearth and OpenHome's users:
 
 | Route | How | Home press to Lumen | Costs and risks | Undo |
 |---|---|---|---|---|
+| **D. LG's own switch** (found in the look of 2026-10-31) | `defaultApps.home` in `settingsservice` (category `general`) set to Lumen's id, the way LG's `home_launcher.sh` selects its full-screen home; no file, mount or restart | The compositor's own `launch(..., {"launchType":"homeKey"})`, the same call LG's bar gets | Proven on 2026-10-31: the service took Lumen's id and a short Home press launched Lumen with `launchType: homeKey` (b9.md, "Home"). A long Home press does nothing until Lumen handles it; LG Home stays installed and is opened from Lumen or by setting the key back. LG Home may still be preloaded on snapshot boots (close it as LG's script does) | One `setSystemSettings` back to `com.webos.app.home` |
 | **A. Lumen as Home** | A RAM-only bind mount over `/usr/palm/applications/com.webos.app.home/appinfo.json` (or the folder) whose `main` is Lumen's binary, then the app manager restarted once at boot. The compositor's own Home handler then launches Lumen; `bootd` opens it at power-on; Back from an app returns to it | The compositor's launch of Home, the same path LG's bar uses. Lumen's own half is 11 ms (p50) after a focus gain | The boot animation stops playing (theboringtv). Hearth notes the TV's aspect-ratio setting goes dark while the stand-in is mounted; cause unknown. Whether SAM runs a native Home jailed, as root, or neither is unread. LG's bar is gone until undone, so the escape hatch becomes holding Home (a key filter of a few lines) and Homebrew's failsafe | Remove the hook, reboot: the mount lives in RAM |
 | **B. Stand-in and watcher** | A tiny black stand-in app bind-mounted over LG Home; a root watcher opens Lumen whenever the stand-in comes forward (Hearth's "script and SAM", OpenHome's `homestub.sh`) | A flash of black, then Lumen: tens of ms more than A | The watcher is one more process; the same aspect-ratio note | The same |
 | **C. Key filter** (the plan until now) | An ES5 handler in `com.webos.surfacemanager.keyFilters`, before `appLaunch.js`, that launches Lumen on a short Home press and lets a long press through | A luna launch of a backgrounded app: measured 170 ms from "restored" to first frame once, 2 to 13 ms when still in front | LG's Home still runs and still calls home (its launcher and beacon names). Glasshouse documents the mechanism on webOS 4; nothing else has shipped it | Delete the configd entry, reboot |
 
-**Recommendation:** a read-only look first (below), then route A if SAM
-will run Lumen's binary as Home, else B. Either one also answers privacy
-layer 2 (LG Home out of the way) and removes the need for the icon root
-copy, since Home can read `/usr/palm/applications` itself. C stays as the
-fallback. The look reads, and changes nothing:
+**Recommendation, after the look of 2026-10-31
+([b9.md, "Home"](../device/b9.md#home)):** route D, proven by hand on
+2026-10-31 (a backup, the one setting, Home opened Lumen). Lumen stays a jailed developer-mode app on
+every route, so the icon root copy stays. C is the fallback. The look read,
+and changed nothing:
 
 1. `/usr/palm/applications/com.webos.app.home/appinfo.json` whole, and
    `com.webos.app.homeconnect`'s.
@@ -73,8 +74,8 @@ fallback. The look reads, and changes nothing:
 5. Whether `restart sam` (or LG's name for it) is a plain upstart job, and
    what else is stopped with it.
 
-Done when b9.md has a "Home" section with those five answers and a chosen
-route.
+Done on 2026-10-31: b9.md's "Home" section has the five answers; the route
+is D, proven the same day.
 
 ## What already exists (so nothing is built twice)
 
@@ -116,10 +117,10 @@ git-ignored), **here** means this session off the TV.
 | 2 | **Lumen Guard G1**: the Rust forwarder, log only, with its hook and tooling, off the TV | lane A (Codex, GPT-6 Astra) | 1 | Unit and bats tests; a PC run forwards and logs real lookups; `tools/dev.sh make check` green |
 | 3 | `tools/frame-stats.sh` summarises the stage 3 lines (`vsyncs skipped`, `motion paced`, `warm`, `dropped`) | lane B (Codex, GPT-6.1 Sol) | Nothing | bats cases on real fixtures from `tools/out/archive/tv-check-20261023T024724Z` |
 | 4 | **Remote R0** as a read-only survey script, like `--privacy` | lane C (Codex, GPT-6.1 Sol) | Nothing | `tools/recon.sh --remote` with read-only guards in `recon.bats`; the run itself is a TV step |
-| 5 | The Home look (five reads above), YouTube AdFree, the owed post-boot check, the loop-pass TV check | TV | The owner | b9.md "Home" section; the route chosen; YouTube plays without ads or the IPK is removed; decision 8 accepted or not |
+| 5 | The Home look (done 2026-10-31: route D), route D proven by hand, YouTube AdFree, the owed post-boot check, the loop-pass TV check | TV | The owner | b9.md "Home" section; the route chosen; YouTube plays without ads or the IPK is removed; decision 8 accepted or not |
 | 6 | Guard G1 on the TV by hand, then as a hook; a week of log | TV | 2, 5 | privacy.md G1's "done when" |
 | 7 | `--no-ff` merge of `claude/shell-timing` (and `refactor/loop-pass` once checked) into `main`; the pull requests; the push | here | 5, the owner's call | CI green; `v0.3.0` waits for the takeover |
-| 8 | **`takeover/`** on the chosen route: hook, stand-in or appinfo, hold-Home escape, watchdog, `uninstall-all.sh` coverage | lane (Codex, Astra) after 5, then TV | 5, 7 | Home opens Lumen in under 150 ms on the B9; every escape hatch works; a reboot without the hook restores LG |
+| 8 | **`takeover/`** on route D: a long Home press that opens LG's Home (or Lumen's own recents), the setting applied by `tools/takeover.sh` with its undo, `uninstall-all.sh` restoring `defaultApps.home`, LG Home closed after boot as LG's own script does | lane (Codex, Astra) after 5, then TV | 5, 7 | Home opens Lumen in under 150 ms on the B9; every escape hatch works; a reboot without the hook restores LG |
 | 9 | **Lumen Remote front-end** against a mock `lumen-ctl` (R3's web UI, the shared front-end) | lane D (Gemini 4 Argon) | Nothing: remote.md approved 2026-10-31 | A bundled TypeScript UI with the verbs of remote.md, no CDN, a demo recording |
 | 10 | **Original Top Shelf and tile art** for Lumen's own tiles and the inputs | lane E (Gemini, image generation) | Nothing | PNGs that fit the look-and-feel tokens, CC BY-SA 4.0, no brand marks |
 | 11 | Phase 4 on the merged shell: focus light and tilt, the Top Shelf hero with 10's art, frosted glass B, the Control Center (with OpenHome's key map as a reference), editing; the dither | here and lanes, after 7 | 7, 10 | look-and-feel.md's three checks |
@@ -142,7 +143,7 @@ owner's limit, and the README says how each comes back.
 | | Question | Recommendation |
 |---|---|---|
 | D1 | Commit the privacy work on `main` now (your post-boot check first, or trust the 2026-10-28 log and check later) | Done 2026-10-30: commits 354d989 to 655518b, pushed |
-| D2 | Home: run the five-read look next time at the TV | Yes; then route A if SAM runs a native Home from a developer path, else B |
+| D2 | Home: route D proven on 2026-10-31. Keep the setting on, or set LG's Home back until Lumen handles a long Home press | Kept on, the owner's choice the same day: Lumen is the B9's Home. Undo: one setSystemSettings back to com.webos.app.home |
 | D3 | YouTube AdFree through Homebrew Channel | Yes, after the look says which copy SAM picks; one IPK, reversible |
 | D4 | Lanes: A Guard (Astra high), B frame-stats (Sol high), C remote survey (Sol high), D remote front-end (Argon high, after remote.md), E art (Gemini image generation) | Start A, B and C after D1; E any time; D when remote.md is approved |
 | D5 | remote.md: approve as drafted on 2026-10-28, with your D1 to D13 answers | Approved 2026-10-31, merged into `main` |
