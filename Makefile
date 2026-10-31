@@ -4,6 +4,7 @@
 #   tools/dev.sh make check    # formatting, lints and tests
 #   tools/dev.sh make capture-tools   # tcpdump for the TV (dist/capture/)
 #   tools/dev.sh make guard    # Lumen Guard for the TV (dist/guard/)
+#   tools/dev.sh make ctl      # lumen-ctl for Lumen Remote (dist/ctl/)
 #
 # Talking to the TV (install, launch, logs, recon) is tools/tv.sh, which runs on
 # the host so it can use your SSH key.
@@ -14,9 +15,10 @@ VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' shell/Cargo.toml | head -
 TARGET  := armv7-unknown-linux-gnueabi
 BIN     := shell/target/$(TARGET)/release/lumen-shell
 GUARD   := shell/target/$(TARGET)/release/lumen-guard
+CTL     := shell/target/$(TARGET)/release/lumen-ctl
 STAGE   := dist/stage/$(APP_ID)
 
-.PHONY: all build-tv ipk capture-tools guard test lint check clean
+.PHONY: all build-tv ipk capture-tools guard ctl test lint check clean
 
 all: ipk
 
@@ -35,6 +37,14 @@ guard:
 	install -m 0755 $(GUARD) dist/guard/lumen-guard
 	@ls -l dist/guard/lumen-guard
 
+# The remote's control binary for the TV (tools/remote.sh install); not part
+# of check, which builds and tests it with the rest of the workspace.
+ctl:
+	cd shell && cargo build --release --target $(TARGET) -p lumen-ctl
+	mkdir -p dist/ctl
+	install -m 0755 $(CTL) dist/ctl/lumen-ctl
+	@ls -l dist/ctl/lumen-ctl
+
 # ares-package (LG's packager) writes the control fields the webosbrew
 # repository checks for, which a hand-made .ipk would lack.
 ipk: build-tv
@@ -48,7 +58,8 @@ ipk: build-tv
 	rm -rf dist/stage
 	@ls -l dist/*.ipk
 
-# --workspace: lumen-guard is not a default member (shell/Cargo.toml).
+# --workspace: lumen-guard and lumen-ctl are not default members
+# (shell/Cargo.toml).
 test:
 	cd shell && cargo test --workspace
 	python3 -I -m unittest discover -s tools/tests -p 'test_*.py'
@@ -58,7 +69,7 @@ lint:
 	cd shell && cargo fmt --all --check
 	cd shell && cargo clippy --workspace --all-targets -- -D warnings
 	cd shell && cargo clippy --workspace --release --target $(TARGET) --all-targets -- -D warnings
-	shellcheck tools/*.sh tools/recon/*.sh tools/backup/*.sh tools/capture/*.sh profiles/glasshouse/*.sh profiles/privacy/*.sh profiles/privacy/lumen-privacy profiles/privacy/lumen-guard .githooks/pre-push
+	shellcheck tools/*.sh tools/recon/*.sh tools/backup/*.sh tools/capture/*.sh profiles/glasshouse/*.sh profiles/privacy/*.sh profiles/remote/*.sh profiles/privacy/lumen-privacy profiles/privacy/lumen-guard .githooks/pre-push
 
 check: lint test
 
