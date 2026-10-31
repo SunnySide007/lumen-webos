@@ -205,25 +205,27 @@ fn launcher() -> Box<dyn Launcher> {
     }
 }
 
-/// The simulator's apps, with its placeholder icons if `LUMEN_MOCK_ICONS`
-/// names their folder (`tools/sim.ps1` sets it). The folder is resolved
-/// first, since an icon is read only at a path that resolves to itself.
+/// The simulator's apps and LG Home's tile, as the TV's launcher adds it,
+/// with its placeholder icons if `LUMEN_MOCK_ICONS` names their folder
+/// (`tools/sim.ps1` sets it). The folder is resolved first, since an icon is
+/// read only at a path that resolves to itself.
 fn mock_launcher() -> MockLauncher {
     let dir = std::env::var_os("LUMEN_MOCK_ICONS")
         .map(PathBuf::from)
         .map(|dir| std::fs::canonicalize(&dir).unwrap_or(dir));
+    let mock = MockLauncher::default().with_lg_home();
     match dir {
         Some(dir) if dir.is_dir() => {
             info!("mock apps, icons from {}", dir.display());
-            MockLauncher::default().with_icons_in(&dir)
+            mock.with_icons_in(&dir)
         }
         Some(dir) => {
             info!("mock apps; no icons at {}: letter tiles", dir.display());
-            MockLauncher::default()
+            mock
         }
         None => {
             info!("mock apps, letter tiles");
-            MockLauncher::default()
+            mock
         }
     }
 }

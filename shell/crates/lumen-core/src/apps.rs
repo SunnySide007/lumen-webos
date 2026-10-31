@@ -96,6 +96,12 @@ impl<L: Launcher + ?Sized> Launcher for Box<L> {
     }
 }
 
+/// LG's own Home. Lumen is the TV's Home in its place (takeover/README.md),
+/// and its tile is the way back: LG's launch points leave it out.
+pub const LG_HOME: &str = "com.webos.app.home";
+/// That tile's title. LG's is "Home", which is Lumen now.
+pub const LG_HOME_TITLE: &str = "LG Home";
+
 /// The longest title kept, in characters. On the TV titles come from other
 /// apps' appinfo, and fitting one to a tile takes time in its length; LG's
 /// own run to about 30.
@@ -171,6 +177,21 @@ impl MockLauncher {
                 _ => continue,
             };
             app.icon = Some(dir.join(format!("{icon}.png")));
+        }
+        self
+    }
+
+    /// Adds LG's Home last among the apps, as the TV's launcher does, unless
+    /// the list has it. The simulator shows it; tests keep the twelve.
+    pub fn with_lg_home(mut self) -> Self {
+        if !self.apps.iter().any(|app| app.id.as_str() == LG_HOME) {
+            let at = self
+                .apps
+                .iter()
+                .rposition(|app| app.kind == AppKind::App)
+                .map_or(0, |i| i + 1);
+            let lg_home = App::new(LG_HOME, LG_HOME_TITLE, AppKind::App);
+            self.apps.insert(at, lg_home);
         }
         self
     }
@@ -268,6 +289,38 @@ mod tests {
         assert!(err.to_string().contains("amazon"));
         assert!(mock.launch(&AppId::new("nope")).is_err());
         assert!(mock.launched().is_empty());
+    }
+
+    #[test]
+    fn lg_home_comes_last_among_the_apps_once() {
+        let mut mock = MockLauncher::default().with_lg_home().with_lg_home();
+        let apps = mock.list().unwrap();
+        assert_eq!(apps.len(), 13);
+        // The mock's last entry is an app, Settings, so LG Home follows it.
+        let last = apps.last().unwrap();
+        assert_eq!(
+            (last.id.as_str(), last.title.as_str(), last.kind),
+            (LG_HOME, LG_HOME_TITLE, AppKind::App)
+        );
+        assert!(mock.launch(&AppId::new(LG_HOME)).is_ok());
+
+        // Ahead of the inputs that follow the last app, and not added twice.
+        let inputs_last = MockLauncher::with_apps(vec![
+            App::new("netflix", "Netflix", AppKind::App),
+            App::new("com.webos.app.hdmi1", "HDMI 1", AppKind::Input),
+        ]);
+        let ids: Vec<String> = inputs_last
+            .with_lg_home()
+            .list()
+            .unwrap()
+            .iter()
+            .map(|a| a.id.to_string())
+            .collect();
+        assert_eq!(ids, ["netflix", LG_HOME, "com.webos.app.hdmi1"]);
+        let listed = MockLauncher::with_apps(vec![App::new(LG_HOME, "Home", AppKind::App)]);
+        let apps = listed.with_lg_home().list().unwrap();
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].title, "Home", "LG's own entry is kept");
     }
 
     #[test]

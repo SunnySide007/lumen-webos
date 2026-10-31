@@ -5,10 +5,11 @@
 #
 #   /bin/sh /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-icons.sh
 #
-# Everything it copies it finds itself, in luna's listLaunchPoints and LG's
-# input icon folder, and every path is checked before it is read: one of four
-# fixed roots, a valid app ID, no link out of the app's folder, a regular file
-# that starts as a PNG, and caps on size and count. It writes only inside
+# Everything it copies it finds itself, in luna's listLaunchPoints, LG's
+# input icon folder and at LG Home's icon path, and every path is checked
+# before it is read: one of four fixed roots, a valid app ID, no link out of
+# the app's folder, a regular file that starts as a PNG, and caps on size and
+# count. It writes only inside
 # Lumen's folder. Undo: rm -rf <that folder>/lg-icons*; uninstalling Lumen
 # removes it too.
 #
@@ -28,6 +29,10 @@ LAUNCH_POINTS=luna://com.webos.applicationManager/listLaunchPoints
 DIRECT=/media/developer/
 # Where getAllInputStatus points every input on the B9.
 INPUTS=/usr/palm/plugins/inputapps/assets/small
+# LG's Home, which the shell shows as a tile of its own: no launch point
+# names it (its appinfo says visible: false), so its icon is named here, as
+# listApps gives it on the B9: its folderPath and its icon, assets/icon.png.
+LG_HOME_ICON=/usr/palm/applications/com.webos.app.home/assets/icon.png
 # The shell's own limit (icons.rs).
 MAX_FILE=1048576
 MAX_TOTAL=8388608
@@ -232,9 +237,15 @@ refused=0
 : >"$WORK/plan"
 
 # Every "icon" and "largeIcon" string in the reply. A value with an escape in
-# it ends at the backslash, which no path may hold.
-grep -oE '"(icon|largeIcon)" *: *"[^"]*"' "$reply" |
-    sed -e 's/^[^:]*: *"//' -e 's/"$//' | sort -u >"$WORK/paths"
+# it ends at the backslash, which no path may hold. Then LG Home's icon, if
+# there is anything at its path, checked like the others.
+{
+    grep -oE '"(icon|largeIcon)" *: *"[^"]*"' "$reply" |
+        sed -e 's/^[^:]*: *"//' -e 's/"$//'
+    if [ -e "$PREFIX$LG_HOME_ICON" ] || [ -L "$PREFIX$LG_HOME_ICON" ]; then
+        echo "$LG_HOME_ICON"
+    fi
+} | sort -u >"$WORK/paths"
 n=0
 while IFS= read -r path; do
     case $path in

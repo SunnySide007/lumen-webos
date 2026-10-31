@@ -136,6 +136,15 @@ POSIX sh for the TV's busybox, shellcheck-clean, `set -eu`, umask 022.
 
    At most 128 app icons are planned; paths that fail a check do not count
    against that.
+
+   LG Home's icon is planned with them. No launch point names it (its
+   appinfo says `visible: false`), but the shell shows LG Home as a tile of
+   its own, the way back to it with Lumen as the TV's Home
+   (takeover/README.md). So the script adds one fixed path,
+   `/usr/palm/applications/com.webos.app.home/assets/icon.png`, where
+   `listApps` puts it on the B9 (its `folderPath` and its `icon`), if
+   anything is at that path, and checks it like the others. A launch point
+   that names it too gives one copy.
 6. **Plans the input icons:** each regular `.png` in
    `/usr/palm/plugins/inputapps/assets/small`, LG's own folder on the
    read-only system image (where `getAllInputStatus` points every input on
@@ -183,6 +192,8 @@ now tries two places, in order:
    in it cannot lead out).
 
 Inputs are confined to `/usr/palm/plugins/inputapps`, then to its mirror.
+LG Home's tile takes its icon from its `listApps` entry (`largeIcon`, else
+`icon`, in its `folderPath`), confined the same two ways.
 `icons.rs` is unchanged: a copy's path resolves to itself, and the loader's
 limits (a regular file, at most 1 MB, 512 px a side, opened without
 blocking) still apply. No Rust code reads anything the script wrote except
@@ -301,6 +312,9 @@ Each is a step in the check list.
    hand; 7.7 s through the jailed shell's `exec` (above).
 7. That the script's own `</dev/null` lets a run over SSH succeed without
    one from outside.
+8. That the copy holds LG Home's icon,
+   `lg-icons/usr/palm/applications/com.webos.app.home/assets/icon.png`
+   (one more copied than before), and that the LG Home tile draws it.
 
 ## Known limits
 

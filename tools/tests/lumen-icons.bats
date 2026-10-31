@@ -145,6 +145,54 @@ usr/palm/plugins/inputapps/assets/small/HDMI_4.png" ]
     ! grep -rq "a secret" "$OUT"
 }
 
+@test "LG Home's icon is copied though no launch point names it, where listApps puts it" {
+    LG_ICON=/usr/palm/applications/com.webos.app.home/assets/icon.png
+    # The shell finds the copy by the path the B9's listApps gives.
+    apps="$BATS_TEST_DIRNAME/../../shell/crates/lumen-shell/fixtures/luna/b9-apps.json"
+    run python3 -I -c 'import json, sys
+home = [a for a in json.load(open(sys.argv[1]))["apps"] if a["id"] == "com.webos.app.home"][0]
+for key in ("largeIcon", "icon"):
+    print(home["folderPath"] + "/" + home[key])' "$apps"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$LG_ICON
+$LG_ICON" ]
+    png "$ROOT$LG_ICON" "LG Home"
+    points
+    run sh "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "lumen-icons: changed, 1 copied, 0 refused" ]
+    [ "$(copied_files)" = ".sum
+status
+usr/palm/applications/com.webos.app.home/assets/icon.png" ]
+    cmp "$OUT$LG_ICON" "$ROOT$LG_ICON"
+}
+
+@test "LG Home's icon is checked like any other, and copied once" {
+    LG_ICON=/usr/palm/applications/com.webos.app.home/assets/icon.png
+    png "$ROOT$LG_ICON"
+    points "$LG_ICON"
+    run sh "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "lumen-icons: changed, 1 copied, 0 refused" ]
+    # A link out of its folder is refused, as a launch point's would be.
+    rm "$ROOT$LG_ICON"
+    png "$ROOT/etc/secret.png" "a secret"
+    ln -s ../../../../../etc/secret.png "$ROOT$LG_ICON"
+    [ -f "$ROOT$LG_ICON" ]
+    points
+    run sh "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "lumen-icons: changed, 0 copied, 1 refused" ]
+    [ ! -e "$OUT$LG_ICON" ]
+    run grep -rq "a secret" "$OUT"
+    [ "$status" -eq 1 ]
+    # Nothing at its path is nothing to plan: the same plan, so no change.
+    rm "$ROOT$LG_ICON"
+    run sh "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [ "$output" = "lumen-icons: unchanged" ]
+}
+
 @test "an icon replaced where it was is copied again" {
     png "$ROOT/usr/palm/applications/a/i.png" old
     points /usr/palm/applications/a/i.png
