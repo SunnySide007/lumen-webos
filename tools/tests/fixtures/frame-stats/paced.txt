@@ -1,0 +1,27 @@
+[1792723993.841] start: sdl 227, gl 297, renderer 346, assets 506, apps 573, first frame 616 ms
+[1792723993.841] drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 39 quads); idle
+[1792723993.851] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms
+[1792723993.883] drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 49 quads); 0 vsyncs skipped; idle
+[1792723994.095] warm: 137 glyphs, 134 uploads, 769 KB in 156.5 ms
+[1792723994.937] key 79: shown after 2 ms
+[1792723994.977] slow frame 3: 30.67 ms = loop 0.04 + batch 0.28 + upload 0.00 + submit 29.95 + swap 0.40 ms; 0 uploads, 0 KB, 0 glyphs; faults 1 minor, 0 major
+[1792723995.076] slow frame 8: 32.54 ms = loop 0.04 + batch 0.28 + upload 0.00 + submit 31.79 + swap 0.43 ms; 0 uploads, 0 KB, 0 glyphs; faults 0 minor, 0 major
+[1792723995.086] key 79: shown after 9 ms
+[1792723995.118] slow frame 10: 32.40 ms = loop 0.12 + batch 0.28 + upload 0.00 + submit 31.52 + swap 0.47 ms; 0 uploads, 0 KB, 0 glyphs; faults 0 minor, 0 major
+[1792723995.418] drew 28 frames in 482 ms (avg 17.83 ms, worst 32.54 ms, 45 quads); first 9.42, 30.67, 16.46 ms; 2 vsyncs skipped; idle
+[1792723995.571] key 81: shown after 1 ms
+[1792723995.610] slow frame 3: 29.16 ms = loop 0.04 + batch 0.24 + upload 0.00 + submit 28.52 + swap 0.36 ms; 0 uploads, 0 KB, 0 glyphs; faults 0 minor, 0 major
+[1792723996.127] drew 34 frames in 555 ms (avg 16.83 ms, worst 29.16 ms, 39 quads); first 9.26, 29.16, 16.79 ms; 0 vsyncs skipped; idle
+[1792723996.167] drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 49 quads); 0 vsyncs skipped; idle
+[1792723996.878] key 81: shown after 1 ms
+[1792723996.918] slow frame 3: 31.65 ms = loop 0.04 + batch 0.30 + upload 0.00 + submit 31.02 + swap 0.29 ms; 0 uploads, 0 KB, 0 glyphs; faults 0 minor, 0 major
+[1792723997.385] drew 31 frames in 507 ms (avg 16.90 ms, worst 31.65 ms, 44 quads); first 8.65, 31.65, 16.54 ms; 0 vsyncs skipped; idle
+[1792723997.420] drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 49 quads); 0 vsyncs skipped; idle
+[1792723997.684] key 80: shown after 1 ms
+[1792723997.726] slow frame 3: 33.45 ms = loop 0.04 + batch 0.33 + upload 0.00 + submit 32.73 + swap 0.35 ms; 0 uploads, 0 KB, 0 glyphs; faults 0 minor, 0 major
+[1792723998.027] drew 21 frames in 343 ms (avg 17.13 ms, worst 33.45 ms, 52 quads); first 8.79, 33.45, 16.67 ms; 0 vsyncs skipped; idle
+[1792723998.043] key 81: shown after 6 ms
+[1792723998.077] slow frame 2: 33.63 ms = loop 0.11 + batch 0.38 + upload 0.00 + submit 32.62 + swap 0.51 ms; 0 uploads, 0 KB, 0 glyphs; faults 0 minor, 0 major
+[1792723998.510] key 81: shown after 16 ms
+[1792723999.010] drew 58 frames in 967 ms (avg 16.96 ms, worst 33.63 ms, 46 quads); first 33.63, 16.14, 16.79 ms; 0 vsyncs skipped; idle
+[1792723999.034] drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 51 quads); 0 vsyncs skipped; idle

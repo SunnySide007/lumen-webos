@@ -1004,3 +1004,429 @@ EOF
     [[ "$output" == *"  heartbeats       1 lines; longest no input for 30 s at 1792636000.600; 0 of 1 focused yes"* ]]
     [[ "$output" != *$'\r'* ]]
 }
+
+# Stage 3's lines (docs/specs/look-and-feel.md, "Log lines"): a burst's "<K> vsyncs
+# skipped", "motion paced", "warm" and a dropped launch. paced.txt is the first 48
+# lines of the stage 3 run on the B9 (3a89955, 2026-10-23) without its raw events:
+# bursts of 28, 34, 31, 21 and 58 frames, the first with 2 vsyncs skipped, and four
+# one-frame bursts. before-stage3.txt is lines of the hardware-float run (9456516)
+# from just before it, with no stage 3 line; before-stage3.expected is what the
+# script printed for it before it read them. launch.txt has that run's real
+# launches and three dropped ones in the documented format, since no log holds a
+# real one yet. The numbers below were worked out by hand from the fixtures.
+
+@test "help lists the stage 3 lines" {
+    run "$STATS" help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"52 quads); first 8.79, 33.45, 16.67 ms; 0 vsyncs skipped; idle"* ]]
+    [[ "$output" == *"motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms"* ]]
+    [[ "$output" == *"warm: 137 glyphs, 134 uploads, 769 KB in 156.5 ms"* ]]
+    [[ "$output" == *"launch <id>: dropped: the window was hidden"* ]]
+    [[ "$output" != *"set -eu"* ]]
+}
+
+@test "the paced run prints the whole summary" {
+    run "$STATS" "$FIX/paced.txt"
+    [ "$status" -eq 0 ]
+    "$STATS" "$FIX/paced.txt" > "$BATS_TEST_TMPDIR/paced.out"
+    cmp "$FIX/paced.expected" "$BATS_TEST_TMPDIR/paced.out"
+}
+
+@test "a log from before stage 3 prints what it printed before, and none of the stage 3 statements" {
+    "$STATS" "$FIX/before-stage3.txt" > "$BATS_TEST_TMPDIR/before.out"
+    cmp "$FIX/before-stage3.expected" "$BATS_TEST_TMPDIR/before.out"
+    for fix in hello-gles shell timing slow input before-stage3; do
+        run "$STATS" "$FIX/$fix.txt"
+        [[ "$output" != *"skip count"* ]]
+        [[ "$output" != *"paced ("* ]]
+        [[ "$output" != *"warm ("* ]]
+        [[ "$output" != *"dropped"* ]]
+    done
+}
+
+@test "the skip count gives the bursts that carry it, the vsyncs skipped, the rate and the worst burst" {
+    run "$STATS" "$FIX/paced.txt"
+    [ "$status" -eq 0 ]
+    # Five bursts of 2 or more frames. The 2 vsyncs skipped are the first burst's
+    # (28 frames). The five took 482 + 555 + 507 + 343 + 967 = 2854 ms, so 2 in
+    # 2.854 s is 7.01 in 10 s.
+    [[ "$output" == *"  skip count       5 of 5 bursts carry it"$'\n'* ]]
+    [[ "$output" == *"  vsyncs skipped   2 in all, in 1 of 5 bursts"$'\n'* ]]
+    [[ "$output" == *"  per 10 s         7.01 over 2.9 s of motion"$'\n'* ]]
+    [[ "$output" == *"  worst burst      2 skipped, 28 frames at 1792723995.418"$'\n'* ]]
+    # They close the burst section, after its quads.
+    [[ "$output" == *"  quads            39 to 52"$'\n'"  skip count "* ]]
+    [[ "$output" == *"at 1792723995.418"$'\n'"note: "* ]]
+}
+
+@test "the stage 3 lines change no number that the old format printed" {
+    run "$STATS" "$FIX/paced.txt"
+    [ "$status" -eq 0 ]
+    new=$(printf '%s\n' "$output" |
+        sed -E -e '/^  (skip count|vsyncs skipped|per 10 s|worst burst) /d' \
+            -e '/^paced \(/,/^  read in /d' -e '/^warm \(/,/^  took /d')
+    # The same run as a log of the format before stage 3: no skip parts, no
+    # motion paced or warm line.
+    sed -E -e 's/; [0-9]+ vsyncs skipped; idle$/; idle/' -e '/\] (motion paced|warm):/d' \
+        "$FIX/paced.txt" > "$BATS_TEST_TMPDIR/old-format.log"
+    run "$STATS" "$BATS_TEST_TMPDIR/old-format.log"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$new" ]
+    # The numbers the script printed for these lines before it read the field.
+    [[ "$output" == *"bursts (drew ... idle): 5, 172 frames, 2.9 s"* ]]
+    [[ "$output" == *"average frame    17.08 ms (58.5 fps)"* ]]
+    [[ "$output" == *"worst frame      33.63 ms"* ]]
+    [[ "$output" == *"burst worst      p50 32.54  p95 33.63  p99 33.63 ms"* ]]
+    [[ "$output" == *"burst average    p50 16.96  p95 17.83  p99 17.83 ms"* ]]
+    [[ "$output" == *"missed vsync     5 of 5 bursts had a frame over 25 ms"* ]]
+    [[ "$output" == *"quads            39 to 52"* ]]
+    # The first frames are read from lines with the field as from lines without.
+    [[ "$output" == *"first frames: in 5 bursts with first times, frame 2 over 25 ms in 1, frame 3 in 4, frame 4 in 0"* ]]
+}
+
+@test "a run with a warm line but no pacer says it was not paced" {
+    # The stage 3 run with the pacer's line and parts taken out: no burst has the
+    # count, and the warm line (real clock only) shows the run is stage 3's.
+    sed -E -e 's/; [0-9]+ vsyncs skipped; idle$/; idle/' -e '/\] motion paced:/d' \
+        "$FIX/paced.txt" > "$BATS_TEST_TMPDIR/unpaced.log"
+    run "$STATS" "$BATS_TEST_TMPDIR/unpaced.log"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"  skip count       none of the 5 bursts carries it; the run was not paced"$'\n'* ]]
+    [[ "$output" != *"vsyncs skipped"* ]]
+    [[ "$output" != *"per 10 s"* ]]
+    [[ "$output" == *"paced (motion paced: lines): no motion paced line in this period"$'\n'* ]]
+    [[ "$output" == *"warm (warm: lines): 1"$'\n'* ]]
+}
+
+@test "when only some bursts carry the skip count, those are counted over their own time" {
+    log="$BATS_TEST_TMPDIR/mixed.log"
+    {
+        echo '[1792636000.000] drew 11 frames in 170 ms (avg 17.00 ms, worst 20.00 ms, 36 quads); first 9.00, 17.00, 17.00 ms; idle'
+        echo '[1792636001.000] drew 21 frames in 340 ms (avg 17.00 ms, worst 40.00 ms, 36 quads); first 9.00, 40.00, 17.00 ms; 3 vsyncs skipped; idle'
+        # No first part: the count is read from the end of the line.
+        echo '[1792636002.000] drew 41 frames in 680 ms (avg 17.00 ms, worst 35.00 ms, 36 quads); 1 vsyncs skipped; idle'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 0 ]
+    # 3 bursts, 2 with the count: 3 + 1 = 4 in 340 + 680 = 1020 ms, 39.22 in 10 s.
+    [[ "$output" == *"bursts (drew ... idle): 3, 73 frames, "* ]]
+    [[ "$output" == *"  skip count       2 of 3 bursts carry it"$'\n'* ]]
+    [[ "$output" == *"  vsyncs skipped   4 in all, in 2 of 2 bursts"$'\n'* ]]
+    [[ "$output" == *"  per 10 s         39.22 over 1.0 s of motion"$'\n'* ]]
+    [[ "$output" == *"  worst burst      3 skipped, 21 frames at 1792636001.000"$'\n'* ]]
+    # The first part is read with the count after it, and without a count.
+    [[ "$output" == *"first frames: in 2 bursts with first times, frame 2 over 25 ms in 0, frame 3 in 1, frame 4 in 0"* ]]
+}
+
+@test "bursts that skipped no vsync say 0 and name no worst burst" {
+    # The stage 3 run after its first burst: 34, 31, 21 and 58 frames, in
+    # 555 + 507 + 343 + 967 = 2372 ms.
+    run "$STATS" --since 1792723996 "$FIX/paced.txt"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"  skip count       4 of 4 bursts carry it"$'\n'* ]]
+    [[ "$output" == *"  vsyncs skipped   0 in all, in 0 of 4 bursts"$'\n'* ]]
+    [[ "$output" == *"  per 10 s         0.00 over 2.4 s of motion"$'\n'* ]]
+    [[ "$output" != *"worst burst"* ]]
+}
+
+@test "of equal bursts the first is the worst" {
+    log="$BATS_TEST_TMPDIR/ties.log"
+    {
+        echo '[1792636000.000] drew 5 frames in 66 ms (avg 16.60 ms, worst 17.00 ms, 36 quads); 2 vsyncs skipped; idle'
+        echo '[1792636001.000] drew 9 frames in 133 ms (avg 16.60 ms, worst 17.00 ms, 36 quads); 2 vsyncs skipped; idle'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"  vsyncs skipped   4 in all, in 2 of 2 bursts"$'\n'* ]]
+    # 40 in 0.199 s is 201.01 in 10 s.
+    [[ "$output" == *"  per 10 s         201.01 over 0.2 s of motion"$'\n'* ]]
+    [[ "$output" == *"  worst burst      2 skipped, 5 frames at 1792636000.000"$'\n'* ]]
+}
+
+@test "a one-frame burst is no burst for the skip count, but shows the pacer was on" {
+    log="$BATS_TEST_TMPDIR/one.log"
+    {
+        echo '[1792636000.000] drew 1 frames in 0 ms (avg 0.00 ms, worst 0.00 ms, 49 quads); 0 vsyncs skipped; idle'
+        echo '[1792636001.000] drew 5 frames in 66 ms (avg 16.60 ms, worst 17.00 ms, 36 quads); idle'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"bursts (drew ... idle): 1, 5 frames, "* ]]
+    # Said without claiming the run was not paced: its first burst may have come before the pacer.
+    [[ "$output" == *"  skip count       none of the 1 bursts carries it"$'\n'* ]]
+    [[ "$output" != *"not paced"* ]]
+}
+
+@test "skip parts that do not read right are left out, and the bursts still count" {
+    log="$BATS_TEST_TMPDIR/bad-skip.log"
+    burst='drew 3 frames in 33 ms (avg 16.60 ms, worst 17.00 ms, 36 quads)'
+    {
+        echo "[1792636000.000] $burst; 2 vsync skipped; idle"
+        echo "[1792636000.100] $burst; many vsyncs skipped; idle"
+        echo "[1792636000.200] $burst; -1 vsyncs skipped; idle"
+        echo "[1792636000.300] $burst; 2 vsyncs skipped"
+        echo "[1792636000.400] $burst; 2 vsyncs skipped; idle now"
+        echo "[1792636000.500] $burst; 2 skipped; idle"
+        echo "[1792636000.600] $burst; vsyncs skipped; idle"
+        echo "[1792636000.700] $burst; first 17.00, 16.60 ms; 2 vsyncs skipped idle"
+        echo "[1792636000.800] $burst; first 17.00, 16.60 ms; soon vsyncs skipped; idle"
+        echo "[1792636000.900] $burst; 2.5 vsyncs skipped; idle"
+        echo "$burst; 2 vsyncs skipped; idle"
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"bursts (drew ... idle): 10, 30 frames, "* ]]
+    [[ "$output" != *"skip count"* ]]
+    [[ "$output" != *"paced ("* ]]
+    [[ "$output" != *"warm ("* ]]
+    [[ "$output" != *"first frames"* ]]
+
+    # The same line, right, is read, and its first part with it.
+    echo "[1792636001.000] $burst; first 17.00, 16.60 ms; 2 vsyncs skipped; idle" >> "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"bursts (drew ... idle): 11, 33 frames, "* ]]
+    [[ "$output" == *"  skip count       1 of 11 bursts carry it"$'\n'* ]]
+    [[ "$output" == *"  vsyncs skipped   2 in all, in 1 of 1 bursts"$'\n'* ]]
+    [[ "$output" == *"first frames: in 1 bursts with first times, frame 2 over 25 ms in 0, frame 3 in 0, frame 4 in 0"* ]]
+}
+
+@test "the paced section gives the period, where it came from, what each SDL call said and the read time" {
+    run "$STATS" "$FIX/paced.txt"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"paced (motion paced: lines): 1"$'\n'"  motion steps by  16.667 ms a frame (60.0 Hz), from the 60 Hz default"$'\n'"  LG refresh rate  SDL_webOSGetRefreshRate answered 120 Hz"$'\n'"  display mode     answered 0 Hz"$'\n'"  read in          10.2 ms"$'\n'* ]]
+
+    log="$BATS_TEST_TMPDIR/paced-forms.log"
+    echo '[1792636000.000] motion paced: 4.167 ms a frame, from the display mode; SDL_webOSGetRefreshRate 120 Hz, display mode 240 Hz; read in 0.4 ms' > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"  motion steps by  4.167 ms a frame (240.0 Hz), from the display mode"$'\n'"  LG refresh rate  SDL_webOSGetRefreshRate answered 120 Hz"$'\n'"  display mode     answered 240 Hz"$'\n'"  read in          0.4 ms"$'\n'* ]]
+
+    echo '[1792636000.000] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate absent, display mode failed; read in 0.1 ms' > "$log"
+    run "$STATS" "$log"
+    [[ "$output" == *"  LG refresh rate  SDL_webOSGetRefreshRate absent"$'\n'"  display mode     failed"$'\n'* ]]
+
+    echo '[1792636000.000] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate failed, display mode absent; read in 0.1 ms' > "$log"
+    run "$STATS" "$log"
+    [[ "$output" == *"  LG refresh rate  SDL_webOSGetRefreshRate failed"$'\n'"  display mode     absent"$'\n'* ]]
+
+    # Whatever SDL said is printed as it said it; no period, no rate for it.
+    echo '[1792636000.000] motion paced: 0.000 ms a frame, from the display mode; SDL_webOSGetRefreshRate -1 Hz, display mode 0 Hz; read in 0.0 ms' > "$log"
+    run "$STATS" "$log"
+    [[ "$output" == *"  motion steps by  0.000 ms a frame, from the display mode"$'\n'"  LG refresh rate  SDL_webOSGetRefreshRate answered -1 Hz"$'\n'* ]]
+}
+
+@test "a log of several runs shows the first motion paced line, with the count" {
+    log="$BATS_TEST_TMPDIR/runs.log"
+    {
+        echo '[1792636000.000] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms'
+        echo '[1792636100.000] motion paced: 4.167 ms a frame, from the display mode; SDL_webOSGetRefreshRate 120 Hz, display mode 240 Hz; read in 0.4 ms'
+        echo '[1792636200.000] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate absent, display mode failed; read in 0.1 ms'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"paced (motion paced: lines): 3, the first shown"$'\n'"  motion steps by  16.667 ms a frame (60.0 Hz), from the 60 Hz default"$'\n'"  LG refresh rate  SDL_webOSGetRefreshRate answered 120 Hz"$'\n'"  display mode     answered 0 Hz"$'\n'"  read in          10.2 ms"$'\n'* ]]
+    [[ "$output" != *"240"* ]]
+}
+
+@test "motion paced lines that do not read right are skipped" {
+    log="$BATS_TEST_TMPDIR/bad-paced.log"
+    {
+        echo '[1792636000.000] motion paced: 16.667 ms a frame, from the display; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms'
+        echo '[1792636000.100] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz display mode 0 Hz; read in 10.2 ms'
+        echo '[1792636000.200] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate soon, display mode 0 Hz; read in 10.2 ms'
+        echo '[1792636000.300] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode soon; read in 10.2 ms'
+        echo '[1792636000.400] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in soon ms'
+        echo '[1792636000.500] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms late'
+        echo '[1792636000.600] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz'
+        echo '[1792636000.700] motion paced: soon ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms'
+        echo '[1792636000.800] motion paced: 16.667 ms a frame; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms'
+        echo '[1792636000.900] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120, display mode 0 Hz; read in 10.2 ms'
+        echo '[1792636001.000] motion paced 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms'
+        echo '[1792636001.100] motion paced:'
+        echo 'motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" != *"paced ("* ]]
+    [[ "$output" != *"motion steps by"* ]]
+    # Alone they are no sign of stage 3, so they cause no statement either.
+    [[ "$output" != *"no warm line"* ]]
+    [ "$output" = "frame-stats.sh: no frame statistics in the log for that period" ]
+}
+
+@test "the warm section gives the glyphs, uploads, KB and time, or says there was no warm line" {
+    run "$STATS" "$FIX/paced.txt"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"warm (warm: lines): 1"$'\n'"  made ahead       137 glyphs, 134 uploads, 769 KB"$'\n'"  took             156.5 ms"$'\n'* ]]
+
+    # The stage 3 run after its warm line: the bursts carry the skip count, so it is stage 3's.
+    run "$STATS" --since 1792723995 "$FIX/paced.txt"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"warm (warm: lines): no warm line in this period"$'\n'* ]]
+    [[ "$output" != *"made ahead"* ]]
+}
+
+@test "a log of several runs shows the first warm line, with the count" {
+    log="$BATS_TEST_TMPDIR/warms.log"
+    {
+        echo '[1792636000.000] warm: 137 glyphs, 134 uploads, 769 KB in 156.5 ms'
+        echo '[1792636100.000] warm: 12 glyphs, 3 uploads, 40 KB in 0.7 ms'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"warm (warm: lines): 2, the first shown"$'\n'"  made ahead       137 glyphs, 134 uploads, 769 KB"$'\n'"  took             156.5 ms"$'\n'* ]]
+    [[ "$output" != *"0.7"* ]]
+    # With a warm line, the missing pacer line is said.
+    [[ "$output" == *"paced (motion paced: lines): no motion paced line in this period"$'\n'* ]]
+}
+
+@test "warm lines that do not read right are skipped" {
+    log="$BATS_TEST_TMPDIR/bad-warm.log"
+    {
+        echo '[1792636000.000] warm: 137 glyphs, 134 uploads, 769 KB in soon ms'
+        echo '[1792636000.100] warm: soon glyphs, 134 uploads, 769 KB in 156.5 ms'
+        echo '[1792636000.200] warm: 137 glyphs, soon uploads, 769 KB in 156.5 ms'
+        echo '[1792636000.300] warm: 137 glyphs, 134 uploads, soon KB in 156.5 ms'
+        echo '[1792636000.400] warm: 137 glyphs, 134 uploads, 769 KB in 156.5 ms late'
+        echo '[1792636000.500] warm: 137 glyphs, 134 uploads, 769 KB'
+        echo '[1792636000.600] warm: 137 glyph, 134 uploads, 769 KB in 156.5 ms'
+        echo '[1792636000.700] warm: -1 glyphs, 134 uploads, 769 KB in 156.5 ms'
+        echo '[1792636000.800] warm 137 glyphs, 134 uploads, 769 KB in 156.5 ms'
+        echo '[1792636000.900] warm:'
+        echo 'warm: 137 glyphs, 134 uploads, 769 KB in 156.5 ms'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" != *"warm ("* ]]
+    [ "$output" = "frame-stats.sh: no frame statistics in the log for that period" ]
+}
+
+@test "dropped launches are listed beside the others and counted by reason" {
+    run "$STATS" "$FIX/launch.txt"
+    # No frame statistics in launch.txt; the launches are printed first.
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"launches (launch <id>: lines): 5, 0 failed, 3 dropped"$'\n'"  com.webos.app.hdmi1: answered in 17 ms"$'\n'"  com.webos.app.hdmi1: dropped: the window was hidden"$'\n'"  com.webos.app.hdmi1: answered in 16 ms"$'\n'"  org.webosbrew.hbchannel: dropped: the shell is leaving"$'\n'"  com.webos.app.hdmi1: dropped: the window was hidden"$'\n'* ]]
+    # Target 6 is over the launches that were called: a dropped one has no answer.
+    [[ "$output" == *"  target 6         2 of 2 within 100 ms (a dropped launch was never called)"$'\n'* ]]
+    [[ "$output" == *"  dropped          1 the shell is leaving"$'\n'"  dropped          2 the window was hidden"$'\n'* ]]
+
+    # With a failed launch among them, which still counts against target 6.
+    {
+        cat "$FIX/launch.txt"
+        echo '[1792655800.000] launch com.example.missing: failed after 12 ms: Permission denied'
+    } > "$BATS_TEST_TMPDIR/launch-failed.log"
+    run "$STATS" "$BATS_TEST_TMPDIR/launch-failed.log"
+    [[ "$output" == *"launches (launch <id>: lines): 6, 1 failed, 3 dropped"$'\n'* ]]
+    [[ "$output" == *"  com.example.missing: failed after 12 ms: Permission denied"$'\n'* ]]
+    [[ "$output" == *"  target 6         2 of 3 within 100 ms (a dropped launch was never called)"$'\n'* ]]
+}
+
+@test "launches with none dropped print as they did, with no dropped part" {
+    run "$STATS" "$FIX/timing.txt"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"launches (launch <id>: lines): 4, 1 failed"$'\n'* ]]
+    [[ "$output" == *"  target 6         2 of 4 within 100 ms"$'\n'* ]]
+    [[ "$output" != *"dropped"* ]]
+    [[ "$output" != *"never called"* ]]
+}
+
+@test "a dropped launch alone has no target 6, and no reason is said so" {
+    log="$BATS_TEST_TMPDIR/dropped-alone.log"
+    echo '[1792636000.000] launch a.b: dropped:' > "$log"
+    echo '[1792636000.100] launch c.d: dropped: nothing to draw' >> "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"launches (launch <id>: lines): 2, 0 failed, 2 dropped"$'\n'"  a.b: dropped: no reason given"$'\n'"  c.d: dropped: nothing to draw"$'\n'"  dropped          1 no reason given"$'\n'"  dropped          1 nothing to draw"$'\n'* ]]
+    [[ "$output" != *"target 6"* ]]
+}
+
+@test "dropped lines that do not read right are skipped" {
+    log="$BATS_TEST_TMPDIR/bad-dropped.log"
+    {
+        echo '[1792636000.000] launch a.b: dropped'
+        echo '[1792636000.100] launch a.b dropped: the window was hidden'
+        echo '[1792636000.200] launch: dropped: the window was hidden'
+        echo '[1792636000.300] launched a.b: dropped: the window was hidden'
+        echo '[1792636000.400] key 79: dropped: nothing to draw'
+        echo 'launch a.b: dropped: the window was hidden'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [ "$output" = "frame-stats.sh: no frame statistics in the log for that period" ]
+}
+
+@test "--since and --until apply to the stage 3 lines like the others" {
+    # Up to the first burst: the motion paced and warm lines, and one burst of 28
+    # frames with 2 skipped in 482 ms (20 in 0.482 s is 41.49 in 10 s).
+    run "$STATS" --until 1792723995.5 "$FIX/paced.txt"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"  skip count       1 of 1 bursts carry it"$'\n'* ]]
+    [[ "$output" == *"  vsyncs skipped   2 in all, in 1 of 1 bursts"$'\n'* ]]
+    [[ "$output" == *"  per 10 s         41.49 over 0.5 s of motion"$'\n'* ]]
+    [[ "$output" == *"paced (motion paced: lines): 1"$'\n'* ]]
+    [[ "$output" == *"warm (warm: lines): 1"$'\n'* ]]
+
+    # After the launch: the start-up's motion paced line is cut, as the start line is.
+    run "$STATS" --since 1792723994 "$FIX/paced.txt"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"  skip count       5 of 5 bursts carry it"$'\n'* ]]
+    [[ "$output" == *"paced (motion paced: lines): no motion paced line in this period"$'\n'* ]]
+    [[ "$output" == *"warm (warm: lines): 1"$'\n'* ]]
+    [[ "$output" != *"start-ups"* ]]
+
+    # Before the first burst: no frame statistics, but the paced section is printed.
+    run "$STATS" --until 1792723993.9 "$FIX/paced.txt"
+    [ "$status" -eq 1 ]
+    [[ "$output" == "paced (motion paced: lines): 1"*"warm (warm: lines): no warm line in this period"*"no frame statistics in the log for that period" ]]
+
+    # The launches of launch.txt up to its first dropped one.
+    run "$STATS" --until 1792655600 "$FIX/launch.txt"
+    [[ "$output" == *"launches (launch <id>: lines): 2, 0 failed, 1 dropped"$'\n'* ]]
+    [[ "$output" == *"  target 6         1 of 1 within 100 ms (a dropped launch was never called)"$'\n'* ]]
+    run "$STATS" --since 1792655700 "$FIX/launch.txt"
+    [[ "$output" == *"launches (launch <id>: lines): 2, 0 failed, 2 dropped"$'\n'* ]]
+    [[ "$output" != *"target 6"* ]]
+}
+
+@test "the stage 3 sections come after the first frames and before the timing sections" {
+    log="$BATS_TEST_TMPDIR/order3.log"
+    {
+        cat "$FIX/paced.txt" "$FIX/launch.txt"
+        echo '[1792723999.100] window focus lost: no key yet, 3 other events since'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 0 ]
+    order=$(printf '%s\n' "$output" |
+        grep -o -E '^(windows|bursts|note:|slow frames|first frames|paced|warm|key presses|start-ups|launches|focus losses)' |
+        tr '\n' ',')
+    [ "$order" = "bursts,note:,slow frames,first frames,paced,warm,key presses,start-ups,launches,focus losses," ]
+}
+
+@test "stage 3 lines without frame statistics are printed, and the status is still 1" {
+    log="$BATS_TEST_TMPDIR/only3.log"
+    echo '[1792636000.000] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms' > "$log"
+    echo '[1792636000.100] warm: 12 glyphs, 3 uploads, 40 KB in 0.7 ms' >> "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == "paced (motion paced: lines): 1"*"warm (warm: lines): 1"*"no frame statistics in the log for that period" ]]
+    [[ "$output" != *"skip count"* ]]
+}
+
+@test "carriage returns and percent signs on stage 3 lines do not matter" {
+    log="$BATS_TEST_TMPDIR/crlf-stage3.log"
+    printf '[1792636000.000] motion paced: 16.667 ms a frame, from the 60 Hz default; SDL_webOSGetRefreshRate 120 Hz, display mode 0 Hz; read in 10.2 ms\r\n' > "$log"
+    printf '[1792636000.100] warm: 137 glyphs, 134 uploads, 769 KB in 156.5 ms\r\n' >> "$log"
+    printf '[1792636000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 33.45 ms, 52 quads); first 8.79, 33.45, 16.67 ms; 2 vsyncs skipped; idle\r\n' >> "$log"
+    printf '[1792636000.300] launch a.b: dropped: the window was hidden\r\n' >> "$log"
+    printf '[1792636000.400] launch c.d: dropped: 100%% %%s odd\r\n' >> "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"  read in          10.2 ms"$'\n'* ]]
+    [[ "$output" == *"  took             156.5 ms"$'\n'* ]]
+    [[ "$output" == *"  vsyncs skipped   2 in all, in 1 of 1 bursts"$'\n'* ]]
+    [[ "$output" == *"  a.b: dropped: the window was hidden"$'\n'* ]]
+    [[ "$output" == *"  c.d: dropped: 100% %s odd"$'\n'* ]]
+    [[ "$output" == *"  dropped          1 100% %s odd"$'\n'* ]]
+    [[ "$output" != *$'\r'* ]]
+}

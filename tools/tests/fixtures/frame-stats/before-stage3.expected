@@ -1,0 +1,24 @@
+bursts (drew ... idle): 2, 318 frames, 5.3 s
+  average frame    16.84 ms (59.4 fps)
+  worst frame      33.55 ms
+  burst worst      p50 33.04  p95 33.55  p99 33.55 ms
+  burst average    p50 16.83  p95 16.90  p99 16.90 ms
+  missed vsync     2 of 2 bursts had a frame over 25 ms
+  quads            51 to 53
+note: the log keeps one average and one worst frame per window or burst, so percentiles are over those, not over single frames
+slow frames (slow frame lines): 2, 0 more not logged
+  which frame      frame 2: 0, frame 3: 2, frame 4: 0, later: 0
+  loop             p50 0.04  max 0.04 ms
+  batch            p50 0.28  max 0.34 ms
+  upload           p50 0.00  max 0.00 ms
+  submit           p50 28.51  max 32.36 ms
+  swap             p50 0.30  max 0.43 ms
+  uploads          0 of 2 had uploads, 0 KB in all
+  glyphs           0 of 2 rasterised glyphs, 0 in all
+  page faults      0 minor, 0 major; 0 of 2 counted had a major fault
+first frames: in 2 bursts with first times, frame 2 over 25 ms in 0, frame 3 in 2, frame 4 in 0
+key presses (key ...: lines): 2 shown, 0 not shown, 0 more not timed
+  shown after      p50 1  p95 2  max 2 ms
+  target 2         2 of 2 within 33 ms
+start-ups (start: lines): 1
+  sdl 181 ms, gl 150 ms, renderer 52 ms, assets 932 ms, apps 61 ms, first frame 46 ms (1422 ms in all)
