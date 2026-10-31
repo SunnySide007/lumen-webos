@@ -128,7 +128,8 @@ EOF
     done
     # tools/tv.sh: logs each call to its own file; runs the scripts
     # tools/takeover.sh generates here, after FAKE_TAMPER (a sed script) has
-    # had its way with them, and answers status.sh with the sums asked for.
+    # had its way with them, piped to sh -s the way tools/tv.sh script sends
+    # them, and answers status.sh with the sums asked for.
     cat >"$T/tv.sh" <<'EOF'
 #!/bin/sh
 printf '%s|%s|%s\n' "$1" "$2" "${3:-}" >>"$T/tvcalls"
@@ -141,7 +142,7 @@ case $1 in
                 cp "$2" "$T/sent-raw.sh"
                 sed -f "$T/remap.sed" "$2" >"$T/sent.sh"
                 [ -z "${FAKE_TAMPER:-}" ] || sed -i "$FAKE_TAMPER" "$T/sent.sh"
-                exec sh "$T/sent.sh" ;;
+                { echo '{'; cat "$T/sent.sh"; printf '\n} </dev/null\n'; } | sh -s ;;
             *) echo "ran $2" ;;
         esac ;;
 esac
