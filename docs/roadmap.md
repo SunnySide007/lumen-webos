@@ -39,6 +39,12 @@ Off the TV (Stage A):
 - [x] `tools/store-safe-check.sh`, `tools/uninstall-all.sh`,
   `tools/glasshouse-custom.sh`, `tools/tv.sh push` and `tunnel`
 
+Proposed on 2026-10-27, awaiting the owner: [specs/privacy.md](specs/privacy.md)
+replaces the 24 h capture with a lookup log that restarts at boot (Lumen
+Guard), and adds layers below the hosts file. Its read-only survey,
+`tools/recon.sh --privacy`, ran on 2026-10-28: the B9 has an IPv4 firewall
+in its kernel, and none for IPv6.
+
 On the TV ([runbook](runbooks/phase1-tv.md)):
 
 - [x] plx-native 0.8.0 installed from the verified IPK; signed in, plays from Plex
