@@ -14,6 +14,10 @@ from what it measured.
 | **5. Release** | CI-built IPKs, docs, screenshots, Homebrew Channel submission; upstream pull requests (B9 profile and HDR saver to Glasshouse, deep links to plx-native) | A clean install on a freshly reset set, following only the docs |
 | **P. Play** (parallel, proposed) | RetroArch measured on the B9, one controller working, a Games row, OLED care, the phone path ([spec](specs/play.md), decision 7) | A pad plays a game started from the shell at full speed on the B9; every step reverts |
 
+Status on 2026-10-30, how deep the B9 lets Lumen reach, the upstream prior
+art and the next steps with hand-off lanes: [specs/depth.md](specs/depth.md)
+(proposed).
+
 ## Phase 0 checklist
 
 - [x] Repository, license, contribution and safety docs
