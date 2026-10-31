@@ -7,6 +7,18 @@ so nothing is built twice, and what to build next, in which order and by
 whom. Nothing here has run on the TV; every TV step waits for the owner
 ([safety.md](../safety.md)).
 
+## Hand-off of 2026-10-31
+
+Since 2026-10-31 every session on the project, the project manager and each
+lane, is a Claude Opus 5.5 session at extra-high effort: the owner's choice,
+quality first and as low in the B9's stack as it allows. The Codex and Gemini
+lanes of the first set are gone; A, B, C and D ran as Claude sessions and are
+merged. The briefs for what comes next (lanes F to K, below) and the project
+manager's opening prompt are in
+[tools/out/handoff-20261031/](../../tools/out/handoff-20261031/README.md)
+(git-ignored). In flight at the hand-off: lane A's second round, the Guard
+boot hook rebuilt around a `resolv.conf` bind mount (item 6).
+
 ## Where it stands
 
 | Where | What | State |
@@ -107,28 +119,31 @@ layer costs:
 ## What to build next
 
 Ordered by what unblocks what. Each item names who runs it: **TV** means the
-owner at the set with this session, **lane** means a hand-off to Codex or
-Gemini ([tools/out/handoff-20261030/](../../tools/out/handoff-20261030/README.md),
-git-ignored), **here** means this session off the TV.
+owner at the set with the project manager's session, **lane** means a Claude
+Opus 5.5 session started from it with a brief
+([tools/out/handoff-20261031/](../../tools/out/handoff-20261031/README.md),
+git-ignored), **here** means the project manager off the TV.
 
 | # | Item | Who | Needs | Done when |
 |---|---|---|---|---|
 | 1 | Commit the privacy work on `main` (Gate 2) after the owner's Netflix and casting check | TV, then here | The owner's word | `make check` green; one commit series on `main` |
 | 2 | **Lumen Guard G1**: the Rust forwarder, log only, with its hook and tooling, off the TV | lane A (done 2026-10-31, merged) | 1 | Built and merged: unit, integration, bats and Python tests, make check green. Next: the by-hand run on the TV (`tools/guard.sh push`, `guard-apply.sh`), G1 |
-| 3 | `tools/frame-stats.sh` summarises the stage 3 lines (`vsyncs skipped`, `motion paced`, `warm`, `dropped`) | lane B (Codex, GPT-6.1 Sol) | Nothing | bats cases on real fixtures from `tools/out/archive/tv-check-20261023T024724Z` |
+| 3 | `tools/frame-stats.sh` summarises the stage 3 lines (`vsyncs skipped`, `motion paced`, `warm`, `dropped`) | lane B (done 2026-10-31, merged 208ce07) | Nothing | Done: bats cases on real fixtures from `tools/out/archive/tv-check-20261023T024724Z` |
 | 4 | **Remote R0** as a read-only survey script, like `--privacy` | lane C (done 2026-10-31, merged ff81bfe) | Nothing | Done: `tools/recon.sh --remote` ran on the B9 on 2026-10-31; answers in b9.md, "Remote" |
 | 5 | The Home look (done 2026-10-31: route D), route D proven by hand, YouTube AdFree, the owed post-boot check, the loop-pass TV check | TV | The owner | b9.md "Home" section; the route chosen; YouTube plays without ads or the IPK is removed; decision 8 accepted or not |
 | 6 | Guard G1 on the TV by hand, then as a hook; a week of log | TV | 2, 5 | privacy.md G1's "done when". First by-hand run 2026-10-31: the redirect design failed open as built (connman's sockets are bound to wlan0; b9.md, "Resolver"); a resolv.conf bind mount was proven by hand the same day and lane A is rebuilding the hook around it |
-| 7 | `--no-ff` merge of `claude/shell-timing` (and `refactor/loop-pass` once checked) into `main`; the pull requests; the push | here | 5, the owner's call | CI green; `v0.3.0` waits for the takeover |
-| 8 | **`takeover/`** on route D: a long Home press that opens LG's Home (or Lumen's own recents), the setting applied by `tools/takeover.sh` with its undo, `uninstall-all.sh` restoring `defaultApps.home`, LG Home closed after boot as LG's own script does | lane (Codex, Astra) after 5, then TV | 5, 7 | Home opens Lumen in under 150 ms on the B9; every escape hatch works; a reboot without the hook restores LG |
+| 7 | `--no-ff` merge of `claude/shell-timing` (and `refactor/loop-pass` once checked) and `claude/studio-9e791a` into `main`; the pull requests; the push | here | 5, the owner's call | CI green; `v0.3.0` waits for the takeover. A trial merge of `claude/shell-timing` on 2026-10-31 conflicts only in `Makefile`, `THIRD-PARTY.md`, `shell/Cargo.toml` and `shell/Cargo.lock` |
+| 8 | **`takeover/`** on route D: `tools/takeover.sh` with its undo, the boot hook that closes LG Home after boot as LG's own script does, `uninstall-all.sh` restoring `defaultApps.home` before it removes the app, an LG Home tile, and the long-Home key filter designed and fake-tested but delivered inert | lane F, then TV | 5 (done); 7 for the tile only | Home opens Lumen in under 150 ms on the B9; every escape hatch works; `undo` restores LG |
 | 9 | **Lumen Remote front-end** against a mock `lumen-ctl` (R3's web UI, the shared front-end) | lane D (done 2026-10-31, merged) | Nothing: remote.md approved 2026-10-31 | Built and merged: `remote/ui` and `remote/mock-ctl`, 73 KB gzipped, tests green in the lane; not in make check yet (D9) |
-| 10 | **Original Top Shelf and tile art** for Lumen's own tiles and the inputs | lane E (Gemini, image generation) | Nothing | PNGs that fit the look-and-feel tokens, CC BY-SA 4.0, no brand marks |
-| 11 | Phase 4 on the merged shell: focus light and tilt, the Top Shelf hero with 10's art, frosted glass B, the Control Center (with OpenHome's key map as a reference), editing; the dither | here and lanes, after 7 | 7, 10 | look-and-feel.md's three checks |
-| 12 | Guard G2 and G3, senders G4, the Privacy panel G5 | here, TV | 6 | privacy.md |
+| 10 | **Original Top Shelf and tile art** for Lumen's own tiles and the inputs, made by code from the studio's scenes and the tile palette; no image model | lane E | 7 (the studio merge) | PNGs that fit the look-and-feel tokens and pass their own luminance and banding tests, CC BY-SA 4.0, no brand marks |
+| 11 | Phase 4 on the merged shell: the Control Center over `settingsservice` with the Privacy panel (lane I); focus light and tilt, the Top Shelf hero with 10's art, frosted glass B, the dither (lane J); editing | lanes I and J, one at a time on the shell | 7, 10 | look-and-feel.md's three checks |
+| 12 | Guard G2 with the address rules (lane H, after a week of G1's log), Guard G3 (lane K, after P4), senders G4 (TV, one job per check) | lanes H and K, TV | 6 | privacy.md |
+| 13 | **`lumen-ctl`** (Remote R2): the root control binary behind an SSH forced command, two bus implementations behind one trait, `tools/remote.sh`, a PC driver | lane G, then TV | 4 (done) | remote.md R2's "done when" on the B9 |
 
-Lanes A, B, C and D can start now (1 is done and remote.md is approved); E
-waits for D8. Three Codex lanes and one Gemini lane at a time is the
-owner's limit, and the README says how each comes back.
+Lanes F (parts 1, 2 and 4) and G can start now; E after the studio merge;
+F's tile, I and J after the shell merge; H after a week of Guard's log; K
+after P4. Two or three lanes at a time, never two on the shell's files at
+once; the README says how each comes back.
 
 ### What this changes in the roadmap
 
@@ -145,9 +160,9 @@ owner's limit, and the README says how each comes back.
 | D1 | Commit the privacy work on `main` now (your post-boot check first, or trust the 2026-10-28 log and check later) | Done 2026-10-30: commits 354d989 to 655518b, pushed |
 | D2 | Home: route D proven on 2026-10-31. Keep the setting on, or set LG's Home back until Lumen handles a long Home press | Kept on, the owner's choice the same day: Lumen is the B9's Home. Undo: one setSystemSettings back to com.webos.app.home |
 | D3 | YouTube AdFree through Homebrew Channel | Yes, after the look says which copy SAM picks; one IPK, reversible |
-| D4 | Lanes: A Guard (Astra high), B frame-stats (Sol high), C remote survey (Sol high), D remote front-end (Argon high, after remote.md), E art (Gemini image generation) | Start A, B and C after D1; E any time; D when remote.md is approved |
+| D4 | Lanes: A Guard (Astra high), B frame-stats (Sol high), C remote survey (Sol high), D remote front-end (Argon high, after remote.md), E art (Gemini image generation) | Superseded 2026-10-31: A to D ran as Claude sessions and are merged; from now on every lane is a Claude Opus 5.5 session at extra-high effort (the owner's choice), and E is remade without an image model |
 | D5 | remote.md: approve as drafted on 2026-10-28, with your D1 to D13 answers | Approved 2026-10-31, merged into `main` |
 | D6 | plx-native: pin a 0.10.0 nightly for a look at the HDR and remote changes, or stay on 0.8.0 | Stay until a tagged 0.9 or 0.10; nightlies change daily |
 | D7 | Glasshouse: still install at all | Decide after G1's week, as P2 says; if yes, for OLED care and remote keys only |
-| D8 | Art: the generated images' rights follow the tool's terms; Lumen ships them CC BY-SA 4.0 | Confirm you accept that before lane E runs |
+| D8 | Art: the generated images' rights follow the tool's terms; Lumen ships them CC BY-SA 4.0 | Falls away 2026-10-31: lane E makes the art by code from Lumen's own scenes, original work with no third party's terms |
 | D9 | `make check` for `remote/`: add `npm ci`, lint, tests and the build to the container's check (Node 22 is already in the image), which fetches from the npm registry at check time and adds about a minute | Yes, with a cached npm volume in `tools/dev.sh`; Playwright stays out of it |

@@ -17,7 +17,7 @@ from what it measured.
 
 Status on 2026-10-30, how deep the B9 lets Lumen reach, the upstream prior
 art and the next steps with hand-off lanes: [specs/depth.md](specs/depth.md)
-(proposed).
+(proposed; the lanes were handed to Opus 5.5 sessions on 2026-10-31).
 
 ## Phase 0 checklist
 
