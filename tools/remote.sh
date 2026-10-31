@@ -64,6 +64,47 @@ stamp() {
     date -u +%Y%m%d-%H%M%S
 }
 
+# The TV's side of put(), single-quoted since it runs there: the file comes on
+# stdin into /var/lib/lumen/stage/ (root's alone; never /tmp, which every
+# app's jail shares), is checked against the SHA-256 the PC sent in this
+# command, and only then goes into place. A mismatch deletes it and changes
+# nothing. Prints the SHA-256 of the file in place.
+# shellcheck disable=SC2016
+PUT='set -e
+name=$1 want=$2 dest=$3 mode=$4 s=/var/lib/lumen/stage
+if [ ! -d "${dest%/*}" ]; then echo "no ${dest%/*}: tools/remote.sh install first" >&2; exit 1; fi
+mkdir -p /var/lib/lumen
+umask 077
+mkdir -p $s
+if [ -L $s ] || [ ! -d $s ]; then echo "$s is not a plain folder; nothing changed" >&2; exit 1; fi
+set -- $(ls -ldn $s)
+if [ "$3" != 0 ]; then echo "$s is not root'"'"'s; nothing changed" >&2; exit 1; fi
+chmod 700 $s
+rm -f "$s/$name"
+cat >"$s/$name"
+got=$(sha256sum <"$s/$name" | cut -d" " -f1)
+if [ "$got" != "$want" ]; then
+    rm -f "$s/$name"
+    echo "the staged copy is $got, not $want; deleted, nothing changed" >&2
+    exit 1
+fi
+chmod "$mode" "$s/$name"
+cp -p "$s/$name" "$dest.new"
+rm -f "$s/$name"
+mv "$dest.new" "$dest"
+sha256sum <"$dest" | cut -d" " -f1'
+
+# put FILE DEST MODE: FILE here to DEST on the TV through the stage, checked.
+# DEST's folder must exist; DEST and MODE are this script's own.
+put() {
+    want=$(sha "$1")
+    got=$("$TV" run "set -- ${2##*/} $want $2 $3; $PUT" <"$1") || return 1
+    [ "$got" = "$want" ] || {
+        echo "remote.sh: $2 on the TV is $got, not $want" >&2
+        return 1
+    }
+}
+
 # The public key's base64, checked: it goes into a file on the TV.
 pub_key() {
     [ -f "$KEY.pub" ] || die "no key at $KEY.pub: tools/remote.sh keygen makes one"
@@ -102,21 +143,16 @@ cmd_install() {
     "$DEV" make ctl
     [ -f "$BIN" ] || die "no $BIN after tools/dev.sh make ctl"
     want=$(sha "$BIN")
-    # Straight into a folder only root can open, since /tmp is shared with
-    # the apps' jails; checked before it is moved over the old one.
-    got=$("$TV" run "set -e; mkdir -p /var/lib/lumen; umask 077; mkdir -p $DIR; chmod 700 $DIR
-        rm -f $DIR/lumen-ctl.new; cat >$DIR/lumen-ctl.new
-        got=\$(sha256sum <$DIR/lumen-ctl.new | cut -d' ' -f1)
-        if [ \"\$got\" != $want ]; then rm -f $DIR/lumen-ctl.new; echo \"\$got\"; exit 1; fi
-        chmod 700 $DIR/lumen-ctl.new; mv $DIR/lumen-ctl.new $DIR/lumen-ctl
-        sha256sum <$DIR/lumen-ctl | cut -d' ' -f1" <"$BIN") ||
-        die "copying lumen-ctl failed (${got:-no SHA-256 back}; this build is $want); authorized_keys was not touched"
-    [ "$got" = "$want" ] || die "lumen-ctl on the TV ($got) is not this build ($want)"
+    "$TV" run "mkdir -p /var/lib/lumen && (umask 077 && mkdir -p $DIR) && chmod 700 $DIR" </dev/null
+    put "$BIN" "$DIR/lumen-ctl" 700 ||
+        die "copying lumen-ctl failed (this build is $want); authorized_keys was not touched"
     echo "copied lumen-ctl to $DIR/lumen-ctl; SHA-256 checked ($want)"
 
+    # authorize.sh checks lumen-ctl against this build again before it
+    # touches authorized_keys.
     script=$(mktemp)
     trap 'rm -f "$script"' EXIT
-    sed "s|@KEY@|$b64|" "$PROFILE/authorize.sh" >"$script"
+    sed -e "s|@KEY@|$b64|" -e "s|@SHA@|$want|" "$PROFILE/authorize.sh" >"$script"
     "$TV" script "$script"
 
     # A copy here, beside any earlier one that differs.
@@ -191,9 +227,11 @@ cmd_config() {
     [ -n "$keys" ] || keys=$(conf_value "$current" keys)
     case $bus in library | command) ;; *) bus='command' ;; esac
     case $keys in none | keymanager) ;; *) keys=none ;; esac
-    printf '# Written by tools/remote.sh config.\nbus %s\nkeys %s\n' "$bus" "$keys" |
-        "$TV" run "set -e; [ -d $DIR ] || { echo 'no $DIR: tools/remote.sh install first' >&2; exit 1; }
-            umask 077; cat >$DIR/ctl.conf.new; mv $DIR/ctl.conf.new $DIR/ctl.conf; cat $DIR/ctl.conf"
+    conf=$(mktemp)
+    trap 'rm -f "$conf"' EXIT
+    printf '# Written by tools/remote.sh config.\nbus %s\nkeys %s\n' "$bus" "$keys" >"$conf"
+    put "$conf" "$DIR/ctl.conf" 600 || die "ctl.conf was not changed"
+    grep -v '^#' "$conf"
     echo "the next session reads it; one that is open keeps what it started with"
 }
 
@@ -205,12 +243,8 @@ cmd_keys() {
     fi
     [ -f "$1" ] || die "no such file: $1"
     [ "$(wc -c <"$1" | tr -d ' ')" -le 16384 ] || die "$1 is over 16 KiB, which lumen-ctl refuses"
-    want=$(sha "$1")
-    got=$("$TV" run "set -e; [ -d $DIR ] || { echo 'no $DIR: tools/remote.sh install first' >&2; exit 1; }
-        umask 077; cat >$DIR/keys.json.new; mv $DIR/keys.json.new $DIR/keys.json
-        sha256sum <$DIR/keys.json | cut -d' ' -f1" <"$1")
-    [ "$got" = "$want" ] || die "keys.json on the TV ($got) is not $1 ($want)"
-    echo "copied $1 to $DIR/keys.json ($want)"
+    put "$1" "$DIR/keys.json" 600 || die "keys.json was not changed"
+    echo "copied $1 to $DIR/keys.json ($(sha "$1"))"
     echo "lumen-ctl reads it with keys=keymanager (tools/remote.sh config keys=keymanager), and logs why if it can't"
 }
 

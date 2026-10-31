@@ -1,8 +1,10 @@
 #!/bin/sh
 # Adds Lumen Remote's key to root's authorized_keys with lumen-ctl as its
 # forced command (docs/specs/remote.md, R2). tools/remote.sh install puts the
-# PC's public key in place of the placeholder below and runs this with
-# tools/tv.sh script, once lumen-ctl is in /var/lib/lumen/remote/.
+# PC's public key and its build's SHA-256 in place of the placeholders below
+# and runs this with tools/tv.sh script, once lumen-ctl is in
+# /var/lib/lumen/remote/. Nothing is touched unless lumen-ctl there is that
+# build.
 #
 # The line, last in the file:
 #
@@ -16,6 +18,7 @@
 set -eu
 
 KEY='@KEY@'
+SHA='@SHA@'
 AK=/home/root/.ssh/authorized_keys
 DIR=/var/lib/lumen/remote
 LINE="restrict,command=\"/var/lib/lumen/remote/lumen-ctl serve\" ssh-ed25519 $KEY lumen-remote"
@@ -35,7 +38,15 @@ case $KEY in
 esac
 [ ${#KEY} -eq 68 ] || fail "the key is not 68 characters long"
 
-[ -x $DIR/lumen-ctl ] || fail "no $DIR/lumen-ctl for the line to run"
+case $SHA in
+    *[!0-9a-f]*) fail "the SHA-256 is not hex: was the placeholder filled in?" ;;
+esac
+[ ${#SHA} -eq 64 ] || fail "the SHA-256 is not 64 characters long"
+if [ ! -f $DIR/lumen-ctl ] || [ -L $DIR/lumen-ctl ] || [ ! -x $DIR/lumen-ctl ]; then
+    fail "no $DIR/lumen-ctl for the line to run"
+fi
+got=$(sha256sum <$DIR/lumen-ctl | cut -d' ' -f1)
+[ "$got" = "$SHA" ] || fail "$DIR/lumen-ctl is $got, not the PC's build $SHA"
 if [ ! -f $AK ] || [ -L $AK ]; then
     fail "$AK is not a plain file"
 fi

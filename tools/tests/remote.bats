@@ -20,18 +20,28 @@ setup() {
     printf '%s\n' "$OWNER" >"$R/home/root/.ssh/authorized_keys"
     chmod 600 "$R/home/root/.ssh/authorized_keys"
 
-    # run and script run here, with /var/lib/ and /home/root/ moved under $R;
-    # a path just after a double quote is the forced command's, and stays.
+    # run and script run here, with /var/lib/ and /home/root/ moved under $R
+    # and root's uid, 0, as this test's; a path just after a double quote is
+    # the forced command's, and stays.
+    # FAKE_TAMPER plays an app that rewrites a staged file between the push
+    # and the check.
     cat >"$T/tv.sh" <<'EOF'
 #!/bin/sh
 printf '%s|%s\n' "$1" "$2" >>"$CALLS"
 on_tv() {
     sed -e "s|\([^\"]\)/var/lib/|\1$R/var/lib/|g" -e "s|^/var/lib/|$R/var/lib/|" \
-        -e "s|/home/root/|$R/home/root/|g"
+        -e "s|/home/root/|$R/home/root/|g" -e 's/"\$3" != 0/"$3" != '"$(id -u)"'/'
+}
+tamper() {
+    if [ -n "${FAKE_TAMPER:-}" ]; then
+        sed 's|^cat >"\$s/\$name"$|&\nprintf tampered >>"$s/$name"|'
+    else
+        cat
+    fi
 }
 export ON_TV=1
 case $1 in
-    run) sh -c "$(printf '%s\n' "$2" | on_tv)" ;;
+    run) sh -c "$(printf '%s\n' "$2" | on_tv | tamper)" ;;
     script) on_tv <"$2" >"$T/script.sh" && sh "$T/script.sh" </dev/null ;;
     *) exit 3 ;;
 esac
@@ -60,7 +70,7 @@ EOF
     cat >"$T/dev.sh" <<'EOF'
 #!/bin/sh
 echo "dev|$*" >>"$CALLS"
-printf '#!/bin/sh\necho "lumen-ctl $*"\n' >"$LUMEN_CTL_BIN"
+printf '#!/bin/sh\necho "lumen-ctl $*"\n# build %s\n' "${FAKE_BUILD:-1}" >"$LUMEN_CTL_BIN"
 EOF
     chmod +x "$T/tv.sh" "$T/dev.sh" "$T/bin/sha256sum" "$T/bin/ssh-keygen"
     export T R CALLS REAL_SHA256SUM FAKE_KEY="$KEY"
@@ -210,6 +220,74 @@ $OURS" ]
     [ -z "$(grep '^script|' "$CALLS")" ]
 }
 
+@test "install stages in /var/lib/lumen/stage with the PC's SHA-256, and leaves no copy" {
+    pc_key
+    remote install
+    [ "$status" -eq 0 ]
+    want=$("$REAL_SHA256SUM" <"$LUMEN_CTL_BIN" | cut -d' ' -f1)
+    grep -q "^run|set -- lumen-ctl $want /var/lib/lumen/remote/lumen-ctl 700; set -e\$" "$CALLS"
+    s="$R/var/lib/lumen/stage"
+    [ -d "$s" ] && [ ! -L "$s" ]
+    [ "$(stat -c %a "$s")" = 700 ]
+    [ -z "$(ls -A "$s")" ]
+    # authorize.sh, the last script, checks lumen-ctl against this build.
+    grep -qx "SHA='$want'" "$T/script.sh"
+}
+
+@test "a staged binary changed before its check never goes in place, nor its line" {
+    pc_key
+    FAKE_TAMPER=1 remote install
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"the staged copy is "*", not "*"; deleted, nothing changed"* ]]
+    [[ "$output" == *"authorized_keys was not touched"* ]]
+    [ ! -e "$D/lumen-ctl" ] && [ ! -e "$D/lumen-ctl.new" ]
+    [ -z "$(ls -A "$R/var/lib/lumen/stage")" ]
+    [ "$(cat "$AK")" = "$OWNER" ]
+    [ -z "$(grep '^script|' "$CALLS")" ]
+}
+
+@test "a tampered update leaves the installed binary and authorized_keys as they were" {
+    installed
+    before=$(tv_files)
+    FAKE_BUILD=2 FAKE_TAMPER=1 remote install
+    [ "$status" -eq 1 ]
+    [ "$(tv_files)" = "$before" ]
+    [ -z "$(grep '^script|' "$CALLS")" ]
+}
+
+@test "a tampered keys.json or ctl.conf is not put in place" {
+    installed
+    echo '{"service":"keymanager","press":[{"code":"$code"}],"codes":{"up":38}}' >"$T/keys.json"
+    before=$(tv_files)
+    FAKE_TAMPER=1 remote keys "$T/keys.json"
+    [ "$status" -eq 1 ]
+    FAKE_TAMPER=1 remote config bus=library
+    [ "$status" -eq 1 ]
+    [ "$(tv_files)" = "$before" ]
+}
+
+@test "a stage that is a link, or not root's, is refused and nothing changes" {
+    pc_key
+    mkdir -p "$T/elsewhere"
+    ln -s "$T/elsewhere" "$R/var/lib/lumen/stage"
+    remote install
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"stage is not a plain folder; nothing changed"* ]]
+    [ -z "$(ls -A "$T/elsewhere")" ]
+    [ ! -e "$D/lumen-ctl" ]
+    [ "$(cat "$AK")" = "$OWNER" ]
+    rm "$R/var/lib/lumen/stage"
+    [ "$(id -u)" = 0 ] || skip "giving the stage to another user needs root"
+    mkdir "$R/var/lib/lumen/stage"
+    chown 65534 "$R/var/lib/lumen/stage"
+    remote install
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"stage is not root's; nothing changed"* ]]
+    [ -z "$(ls -A "$R/var/lib/lumen/stage")" ]
+    [ ! -e "$D/lumen-ctl" ]
+    [ "$(cat "$AK")" = "$OWNER" ]
+}
+
 @test "install refuses a key that is missing, not ed25519 or not plain base64" {
     remote install
     [ "$status" -eq 1 ]
@@ -229,12 +307,29 @@ ssh-ed25519 $KEY lumen-remote"; do
     [ "$(cat "$AK")" = "$OWNER" ]
 }
 
-@test "authorize.sh refuses to run with its placeholder unfilled" {
+@test "authorize.sh refuses to run with its placeholders unfilled" {
     mkdir -p "$D" && printf '#!/bin/sh\n' >"$D/lumen-ctl" && chmod 700 "$D/lumen-ctl"
-    run "$T/tv.sh" script "$BATS_TEST_DIRNAME/../../profiles/remote/authorize.sh"
+    AUTHORIZE="$BATS_TEST_DIRNAME/../../profiles/remote/authorize.sh"
+    run "$T/tv.sh" script "$AUTHORIZE"
     [ "$status" -eq 1 ]
-    [[ "$output" == *"placeholder"* ]]
+    [[ "$output" == *"the key is not base64: was the placeholder filled in?"* ]]
+    sed "s|@KEY@|$KEY|" "$AUTHORIZE" >"$T/authorize.sh"
+    run "$T/tv.sh" script "$T/authorize.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"the SHA-256 is not hex: was the placeholder filled in?"* ]]
     [ "$(cat "$AK")" = "$OWNER" ]
+}
+
+@test "authorize.sh touches nothing unless lumen-ctl is the PC's build" {
+    mkdir -p "$D" && printf '#!/bin/sh\n# not this build\n' >"$D/lumen-ctl" && chmod 700 "$D/lumen-ctl"
+    want=$(printf 'the PC build\n' | "$REAL_SHA256SUM" | cut -d' ' -f1)
+    sed -e "s|@KEY@|$KEY|" -e "s|@SHA@|$want|" \
+        "$BATS_TEST_DIRNAME/../../profiles/remote/authorize.sh" >"$T/authorize.sh"
+    run "$T/tv.sh" script "$T/authorize.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"not the PC's build $want; authorized_keys was not changed"* ]]
+    [ "$(cat "$AK")" = "$OWNER" ]
+    [ ! -e "$D/authorized_keys.before" ]
 }
 
 @test "remove takes out only Lumen Remote's line, and every other stays as it was" {
