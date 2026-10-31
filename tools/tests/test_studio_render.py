@@ -49,6 +49,22 @@ class SceneTest(unittest.TestCase):
                 self.assertGreater(step, 0.0, 'the scene should move')
                 self.assertLess(seam, 2.0 * step)
 
+    def test_layers_make_the_frame(self):
+        # Stills for the Top Shelf move a scene's layers apart; put back
+        # together, they must be the frame the loop shows.
+        for name, make in self.SCENES:
+            with self.subTest(scene=name):
+                scene = make(320, 180, frames=48, fps=24)
+                for theta in (0.0, 1.7):
+                    parts = scene.layers_at(theta)
+                    cover = parts['cover'][:, :, None]
+                    joined = (parts['back'] + parts['light']) * (1.0 - cover) + parts['front']
+                    expected = scene.frame_at(theta)
+                    self.assertEqual(parts['back'].shape, expected.shape)
+                    self.assertTrue(np.allclose(scenekit.soft_clip(joined, 600.0, scenekit.PEAK_NITS), expected,
+                                                rtol=1e-5, atol=1e-4))
+                    self.assertGreater(parts['light'].max(), 1.0, 'the middle layer carries the light')
+
     def test_made_for_oled(self):
         for name, make in self.SCENES:
             with self.subTest(scene=name):

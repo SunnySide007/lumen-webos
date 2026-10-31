@@ -97,10 +97,8 @@ class Fireflies:
         """Frame `index` (taken modulo the loop) as (H, W, 3) float32 cd/m²."""
         return self.frame_at(TAU * (index % self.frames) / self.frames)
 
-    def frame_at(self, theta):
-        """The picture at loop phase theta: 0 and 2π are the same moment."""
-        frame = self.sky[:, None, :] * (1.0 - self.trees)[:, :, None]
-
+    def _fireflies(self, frame, theta):
+        """Adds the fireflies at loop phase theta to frame."""
         def wander(parts):
             return sum(a * np.sin(n * theta + p) for a, n, p in parts)
 
@@ -113,5 +111,25 @@ class Fireflies:
             sigma = size * self.height * self.near
             splat(frame, x, y, resolved_peak(share * light, sigma), self.colour, sigma)
 
+    def frame_at(self, theta):
+        """The picture at loop phase theta: 0 and 2π are the same moment."""
+        frame = self.sky[:, None, :] * (1.0 - self.trees)[:, :, None]
+        self._fireflies(frame, theta)
         frame *= (1.0 - self.grass)[:, :, None]
         return soft_clip(frame, 600.0, PEAK_NITS).astype(np.float32)
+
+    def layers_at(self, theta):
+        """The picture at theta in depth layers, for stills whose layers move
+        apart (parallax in the Top Shelf; tools/art/heroes.py).
+
+        Returns (H, W) or (H, W, 3) float32 arrays in cd/m², before the
+        highlights' roll-off: `back`, the sky with the black treeline;
+        `light`, the fireflies; `cover`, how much the foreground grass hides;
+        and `front`, the grass's own light (none). soft_clip((back + light)
+        * (1 - cover) + front) is frame_at(theta), up to float rounding.
+        """
+        back = (self.sky[:, None, :] * (1.0 - self.trees)[:, :, None]).astype(np.float32)
+        light = np.zeros_like(back)
+        self._fireflies(light, theta)
+        return {'back': back, 'light': light, 'cover': self.grass.astype(np.float32),
+                'front': np.zeros_like(back)}

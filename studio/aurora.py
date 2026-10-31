@@ -185,22 +185,57 @@ class Aurora:
         """Frame `index` (taken modulo the loop) as (H, W, 3) float32 cd/m²."""
         return self.frame_at(TAU * (index % self.frames) / self.frames)
 
-    def frame_at(self, theta):
-        """The picture at loop phase theta: 0 and 2π are the same moment."""
-        sky = np.zeros((self.water_row, self.width, 3), dtype=np.float32)
+    def _airglow(self, sky):
+        """Adds the airglow, a faint green light low over the mountains."""
         y = self.y[:self.water_row]
-
         glow = 2.0 * np.exp(-(WATERLINE - y) / 0.10)
         for c in range(3):
             sky[:, :, c] += (AIRGLOW[c] * glow)[:, None]
-        for curtain in self.curtains:
-            curtain.draw(sky, self.x, y, theta, self.height)
-        self._draw_stars(sky, theta)
 
-        # The mountains are black; their outline is antialiased.
+    def _covered(self):
+        """How much of each sky pixel the mountains cover, 0 to 1; their
+        outline is antialiased."""
         ridge_rows = self.ridge * self.height
-        covered = np.clip(np.arange(self.water_row)[:, None] + 1.0 - ridge_rows[None, :], 0.0, 1.0)
-        sky *= (1.0 - covered).astype(np.float32)[:, :, None]
+        return np.clip(np.arange(self.water_row)[:, None] + 1.0 - ridge_rows[None, :], 0.0, 1.0)
 
+    def frame_at(self, theta):
+        """The picture at loop phase theta: 0 and 2π are the same moment."""
+        sky = np.zeros((self.water_row, self.width, 3), dtype=np.float32)
+        self._airglow(sky)
+        for curtain in self.curtains:
+            curtain.draw(sky, self.x, self.y[:self.water_row], theta, self.height)
+        self._draw_stars(sky, theta)
+        # The mountains are black.
+        sky *= (1.0 - self._covered()).astype(np.float32)[:, :, None]
         frame = np.concatenate([sky, self._reflect(sky, theta)], axis=0)
         return soft_clip(frame, 600.0, PEAK_NITS).astype(np.float32)
+
+    def layers_at(self, theta):
+        """The picture at theta in depth layers, for stills whose layers move
+        apart (parallax in the Top Shelf; tools/art/heroes.py).
+
+        Returns (H, W) or (H, W, 3) float32 arrays in cd/m², before the
+        highlights' roll-off: `back`, the airglow and stars; `light`, the
+        curtains; `cover`, how much the mountains and the lake hide of
+        what is behind them; and `front`, the light of the mountains (none)
+        and the lake, already multiplied by `cover`. Below the waterline
+        the lake hides everything, and `back` carries on the horizon's
+        airglow. soft_clip((back + light) * (1 - cover) + front) is
+        frame_at(theta), up to float rounding.
+        """
+        rows = self.height - self.water_row
+        back = np.zeros((self.water_row, self.width, 3), dtype=np.float32)
+        self._airglow(back)
+        horizon = np.repeat(back[-1:], rows, axis=0)
+        self._draw_stars(back, theta)
+        light = np.zeros_like(back)
+        for curtain in self.curtains:
+            curtain.draw(light, self.x, self.y[:self.water_row], theta, self.height)
+        covered = self._covered().astype(np.float32)
+        sky = (back + light) * (1.0 - covered)[:, :, None]
+        return {
+            'back': np.concatenate([back, horizon]),
+            'light': np.concatenate([light, np.zeros((rows, self.width, 3), dtype=np.float32)]),
+            'cover': np.concatenate([covered, np.ones((rows, self.width), dtype=np.float32)]),
+            'front': np.concatenate([np.zeros_like(sky), self._reflect(sky, theta)]),
+        }

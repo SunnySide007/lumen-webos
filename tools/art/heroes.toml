@@ -1,0 +1,117 @@
+# The Top Shelf heroes: the scene that draws each file and its seed.
+# tools/art/heroes.py reads this table; shell/assets/art/CREDITS.md lists it.
+# A hero's name is its file name without .png. grain is film grain (the
+# share of light it moves), peak the brightest light before the roll-off.
+
+# Ambient (the screensaver): a still of the studio's aurora loop, as the 30 s
+# loop at 24 fps has it at `frame`, with the scene's own seed, toned as the
+# studio's previews are (peak_nits maps to white: the 1080p loop's MaxCLL).
+
+[hero-ambient]
+scene = "ambient"
+source = "aurora"
+seed = 2026
+seconds = 30
+fps = 24
+frame = 0
+peak_nits = 725.0
+
+# Palette: one per colour of style.rs's TILE_PALETTE, by index.
+
+[hero-palette-0]
+scene = "palette"
+colour = 0
+shape = "ember"
+seed = 4101
+
+[hero-palette-1]
+scene = "palette"
+colour = 1
+shape = "dunes"
+seed = 4102
+
+[hero-palette-2]
+scene = "palette"
+colour = 2
+shape = "rings"
+seed = 4103
+
+[hero-palette-3]
+scene = "palette"
+colour = 3
+shape = "canopy"
+seed = 4104
+
+[hero-palette-4]
+scene = "palette"
+colour = 4
+shape = "caustic"
+seed = 4105
+
+[hero-palette-5]
+scene = "palette"
+colour = 5
+shape = "horizon"
+stars = 160
+seed = 4106
+
+[hero-palette-6]
+scene = "palette"
+colour = 6
+shape = "nebula"
+peak = 0.36
+stars = 260
+seed = 4107
+
+[hero-palette-7]
+scene = "palette"
+colour = 7
+shape = "silk"
+seed = 4108
+
+# Inputs: lines of light from the right through dark glass. angle is the
+# lines' slope in degrees (positive: falling to the left), kelvin their colour.
+
+[hero-hdmi1]
+scene = "arrival"
+angle = -9.0
+kelvin = 2400
+seed = 5201
+
+[hero-hdmi2]
+scene = "arrival"
+angle = 5.0
+kelvin = 3600
+seed = 5202
+
+[hero-hdmi3]
+scene = "arrival"
+angle = -2.5
+kelvin = 5600
+seed = 5203
+
+[hero-hdmi4]
+scene = "arrival"
+angle = 12.0
+kelvin = 12000
+seed = 5204
+
+# Live TV, Plex, Homebrew Channel, Settings: a scene each.
+
+[hero-live-tv]
+scene = "towers"
+seed = 6301
+
+[hero-plex]
+scene = "beam"
+seed = 6302
+grain = 0.16
+
+[hero-homebrew]
+scene = "circuits"
+seed = 6303
+
+[hero-settings]
+scene = "panels"
+seed = 6304
+grain = 0.04
