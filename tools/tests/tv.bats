@@ -56,6 +56,7 @@ setup() {
     src="$BATS_TEST_TMPDIR/file"
     echo hi >"$src"
     for bad in /etc/hosts /var/lib/x /media/developer/temp/ /tmp/ tmp/x \
+        /var/lib/lumen/stage/ /var/lib/lumen/stagex /var/lib/lumen/stage/../guard/x \
         /tmp/../etc/passwd /media/developer/temp/a/../../../etc/x \
         '/tmp/a b' '/tmp/$(reboot)' "/tmp/a'b" /tmp//x; do
         TV_HOST=192.0.2.1 TV_KEY="$key" run "$TV" push "$src" "$bad"

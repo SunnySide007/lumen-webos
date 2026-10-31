@@ -14,7 +14,8 @@
 #                                   (lumen-shell.log, and the .fallback.log if any)
 #   tools/tv.sh push <local> <remote>
 #                                   upload a file; <remote> must be under
-#                                   /media/developer/temp/ or /tmp/
+#                                   /media/developer/temp/, /tmp/ or, for files
+#                                   root will run, /var/lib/lumen/stage/
 #   tools/tv.sh tunnel [port]       forward 127.0.0.1:<port> (default 8080) here
 #                                   to the TV's Glasshouse dashboard; Ctrl-C ends it
 set -eu
@@ -164,8 +165,8 @@ check_push_args() {
     case $2 in
         *[!A-Za-z0-9._/-]*) die "remote path has unsupported characters: $2" ;;
         */../* | */.. | */./* | */. | *//*) die "remote path must be plain: $2" ;;
-        /media/developer/temp/?* | /tmp/?*) ;;
-        *) die "remote path must be under /media/developer/temp/ or /tmp/: $2" ;;
+        /media/developer/temp/?* | /tmp/?* | /var/lib/lumen/stage/?*) ;;
+        *) die "remote path must be under /media/developer/temp/, /tmp/ or /var/lib/lumen/stage/: $2" ;;
     esac
     case $2 in */) die "remote path must name a file: $2" ;; esac
 }
