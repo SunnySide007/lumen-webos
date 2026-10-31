@@ -1,0 +1,146 @@
+#!/bin/sh
+# Lumen Guard, stage G1 (docs/specs/privacy.md, "Lumen Guard"), as a Homebrew
+# Channel boot hook: /var/lib/webosbrew/init.d/lumen-guard (run-parts allows no
+# dot in the name). At each boot it starts lumen-guard, a DNS forwarder that
+# logs every lookup to /var/lib/lumen/guard/lookups.log, and once Guard
+# answers, sends the TV's lookups through it with two nat rules (udp, tcp).
+# When Guard exits, for any reason, the rules go and lookups go straight to the
+# router again: it fails open. Nothing it does outlasts the next boot.
+#
+# docs/safety.md: it does nothing while the kill switch exists and returns at
+# once. Its start-up is over within about five minutes, with the rules in
+# place or with Guard stopped and no rules; after that only this shell is left,
+# asleep until Guard exits, to remove the rules.
+# Log: /tmp/lumen-guard.log. tools/guard.sh installs, checks and removes it;
+# profiles/privacy/guard-apply.sh runs it by hand from the copy tools/guard.sh
+# push leaves in /var/lib/lumen/guard; guard-undo.sh stops Guard now.
+
+KILL=/var/luna/preferences/lumen_disable
+LOG=/tmp/lumen-guard.log
+PIDFILE=/tmp/lumen-guard.pid
+DIR=/var/lib/lumen/guard
+BIN=$DIR/lumen-guard
+LISTEN=127.0.0.2:53
+# Guard marks the packets it sends upstream with this DSCP value, and the
+# rules leave those alone, so Guard's own lookups are not sent back to it.
+DSCP=7
+
+[ -e "$KILL" ] && exit 0
+
+# The resolver connman forwards to: the newest Nameservers= line among its
+# saved services, else the address the owner wrote to $DIR/upstream.
+upstream() {
+    best=
+    for f in /var/lib/connman/*/settings; do
+        grep -q '^Nameservers=[0-9]' "$f" 2>/dev/null || continue
+        # shellcheck disable=SC3013 # busybox's test has -nt
+        if [ -z "$best" ] || [ "$f" -nt "$best" ]; then
+            best=$f
+        fi
+    done
+    if [ -n "$best" ]; then
+        sed -n 's/^Nameservers=\([0-9.]*\).*/\1/p' "$best" | head -n 1
+    elif [ -f "$DIR/upstream" ]; then
+        sed -n '1s/^[[:space:]]*\([0-9.]*\).*/\1/p' "$DIR/upstream"
+    fi
+}
+
+# rule -A|-D udp|tcp
+rule() {
+    iptables -t nat "$1" OUTPUT -p "$2" --dport 53 ! -d 127.0.0.0/8 \
+        -m dscp ! --dscp "$DSCP" -j DNAT --to-destination "$LISTEN"
+}
+
+# Every copy, so none is left over from an earlier run.
+remove_rules() {
+    for proto in udp tcp; do
+        n=0
+        while [ "$n" -lt 10 ] && rule -D "$proto" 2>/dev/null; do
+            n=$((n + 1))
+        done
+    done
+}
+
+# Guard's pid, if the pid file names a running lumen-guard.
+running() {
+    p=$(cat "$PIDFILE" 2>/dev/null) || return 1
+    case $p in '' | *[!0-9]*) return 1 ;; esac
+    grep -q lumen-guard "/proc/$p/cmdline" 2>/dev/null || return 1
+    echo "$p"
+}
+
+(
+    # No hangup when the SSH session that ran guard-apply.sh closes.
+    trap '' HUP
+    say() {
+        echo "$(date -u) lumen-guard: $*"
+    }
+    say "start"
+    if p=$(running); then
+        say "Guard already runs (pid $p); nothing done"
+        exit 0
+    fi
+    if [ ! -x "$BIN" ]; then
+        say "no $BIN; nothing done"
+        exit 0
+    fi
+    up=$(upstream)
+    case $up in
+        '' | *[!0-9.]* | 127.* | 0.*)
+            say "no upstream resolver ('$up'); Guard not started, no rules (fail open)"
+            exit 0
+            ;;
+    esac
+
+    "$BIN" --listen "$LISTEN" --upstream "$up:53" --rules "$DIR/rules" \
+        --log "$DIR" --status "$DIR/status" --dscp "$DSCP" &
+    pid=$!
+    echo "$pid" >"$PIDFILE"
+    say "Guard started (pid $pid), upstream $up:53"
+
+    give_up() {
+        say "$1; Guard stopped, no rules (fail open)"
+        remove_rules
+        kill "$pid" 2>/dev/null
+        wait "$pid"
+        rm -f "$PIDFILE"
+        exit 0
+    }
+
+    # The network comes up during the boot: about five minutes for Guard,
+    # and the router behind it, to answer.
+    tries=0
+    until "$BIN" --probe "$LISTEN" 2>/dev/null; do
+        tries=$((tries + 1))
+        kill -0 "$pid" 2>/dev/null || give_up "Guard exited"
+        [ "$tries" -lt 40 ] || give_up "Guard did not answer"
+        [ ! -e "$KILL" ] || give_up "the kill switch appeared"
+        sleep 5
+    done
+
+    remove_rules
+    if ! { rule -A udp && rule -A tcp; }; then
+        give_up "FAILED to add the nat rules"
+    fi
+    # The rules must bring connman's own lookups to Guard too, which a probe
+    # to Guard can't show (connman binds its sockets to the network
+    # interface): a new name asked through connman must turn up in Guard's log.
+    name=lumen-check-$pid-$(date +%s).invalid
+    "$BIN" --probe 127.0.0.1:53 --name "$name" 2>/dev/null
+    seen=0
+    for _ in 1 2 3 4 5; do
+        if grep -qF " $name " "$DIR/lookups.log" 2>/dev/null; then
+            seen=1
+            break
+        fi
+        sleep 1
+    done
+    [ "$seen" = 1 ] || give_up "a lookup through connman did not reach Guard"
+    say "Guard answers and connman's lookups reach it: the TV's DNS goes through Guard"
+
+    wait "$pid"
+    code=$?
+    remove_rules
+    rm -f "$PIDFILE"
+    say "Guard exited ($code); nat rules removed, lookups go to the router again"
+) </dev/null >>"$LOG" 2>&1 &
