@@ -114,14 +114,14 @@ git-ignored), **here** means this session off the TV.
 | # | Item | Who | Needs | Done when |
 |---|---|---|---|---|
 | 1 | Commit the privacy work on `main` (Gate 2) after the owner's Netflix and casting check | TV, then here | The owner's word | `make check` green; one commit series on `main` |
-| 2 | **Lumen Guard G1**: the Rust forwarder, log only, with its hook and tooling, off the TV | lane A (Codex, GPT-6 Astra) | 1 | Unit and bats tests; a PC run forwards and logs real lookups; `tools/dev.sh make check` green |
+| 2 | **Lumen Guard G1**: the Rust forwarder, log only, with its hook and tooling, off the TV | lane A (done 2026-10-31, merged) | 1 | Built and merged: unit, integration, bats and Python tests, make check green. Next: the by-hand run on the TV (`tools/guard.sh push`, `guard-apply.sh`), G1 |
 | 3 | `tools/frame-stats.sh` summarises the stage 3 lines (`vsyncs skipped`, `motion paced`, `warm`, `dropped`) | lane B (Codex, GPT-6.1 Sol) | Nothing | bats cases on real fixtures from `tools/out/archive/tv-check-20261023T024724Z` |
 | 4 | **Remote R0** as a read-only survey script, like `--privacy` | lane C (done 2026-10-31, merged ff81bfe) | Nothing | Done: `tools/recon.sh --remote` ran on the B9 on 2026-10-31; answers in b9.md, "Remote" |
 | 5 | The Home look (done 2026-10-31: route D), route D proven by hand, YouTube AdFree, the owed post-boot check, the loop-pass TV check | TV | The owner | b9.md "Home" section; the route chosen; YouTube plays without ads or the IPK is removed; decision 8 accepted or not |
 | 6 | Guard G1 on the TV by hand, then as a hook; a week of log | TV | 2, 5 | privacy.md G1's "done when" |
 | 7 | `--no-ff` merge of `claude/shell-timing` (and `refactor/loop-pass` once checked) into `main`; the pull requests; the push | here | 5, the owner's call | CI green; `v0.3.0` waits for the takeover |
 | 8 | **`takeover/`** on route D: a long Home press that opens LG's Home (or Lumen's own recents), the setting applied by `tools/takeover.sh` with its undo, `uninstall-all.sh` restoring `defaultApps.home`, LG Home closed after boot as LG's own script does | lane (Codex, Astra) after 5, then TV | 5, 7 | Home opens Lumen in under 150 ms on the B9; every escape hatch works; a reboot without the hook restores LG |
-| 9 | **Lumen Remote front-end** against a mock `lumen-ctl` (R3's web UI, the shared front-end) | lane D (Gemini 4 Argon) | Nothing: remote.md approved 2026-10-31 | A bundled TypeScript UI with the verbs of remote.md, no CDN, a demo recording |
+| 9 | **Lumen Remote front-end** against a mock `lumen-ctl` (R3's web UI, the shared front-end) | lane D (done 2026-10-31, merged) | Nothing: remote.md approved 2026-10-31 | Built and merged: `remote/ui` and `remote/mock-ctl`, 73 KB gzipped, tests green in the lane; not in make check yet (D9) |
 | 10 | **Original Top Shelf and tile art** for Lumen's own tiles and the inputs | lane E (Gemini, image generation) | Nothing | PNGs that fit the look-and-feel tokens, CC BY-SA 4.0, no brand marks |
 | 11 | Phase 4 on the merged shell: focus light and tilt, the Top Shelf hero with 10's art, frosted glass B, the Control Center (with OpenHome's key map as a reference), editing; the dither | here and lanes, after 7 | 7, 10 | look-and-feel.md's three checks |
 | 12 | Guard G2 and G3, senders G4, the Privacy panel G5 | here, TV | 6 | privacy.md |
@@ -150,3 +150,4 @@ owner's limit, and the README says how each comes back.
 | D6 | plx-native: pin a 0.10.0 nightly for a look at the HDR and remote changes, or stay on 0.8.0 | Stay until a tagged 0.9 or 0.10; nightlies change daily |
 | D7 | Glasshouse: still install at all | Decide after G1's week, as P2 says; if yes, for OLED care and remote keys only |
 | D8 | Art: the generated images' rights follow the tool's terms; Lumen ships them CC BY-SA 4.0 | Confirm you accept that before lane E runs |
+| D9 | `make check` for `remote/`: add `npm ci`, lint, tests and the build to the container's check (Node 22 is already in the image), which fetches from the npm registry at check time and adds about a minute | Yes, with a cached npm volume in `tools/dev.sh`; Playwright stays out of it |
