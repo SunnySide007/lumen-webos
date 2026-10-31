@@ -1,7 +1,7 @@
 #!/bin/sh
 # Surveys the TV, read-only, and saves a redacted report.
 #
-#   tools/recon.sh              the device survey (tools/recon/remote.sh)
+#   tools/recon.sh              the device survey (tools/recon/device.sh)
 #   tools/recon.sh --privacy    the privacy and exposure survey (tools/recon/privacy.sh)
 #
 # Both scripts that run on the TV only read; review them before the first run.
@@ -12,7 +12,7 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 case "${1:-}" in
-    '') survey=remote; name=recon ;;
+    '') survey=device; name=recon ;;
     --privacy) survey=privacy; name=privacy ;;
     *) echo "usage: tools/recon.sh [--privacy]" >&2; exit 2 ;;
 esac

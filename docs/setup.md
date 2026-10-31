@@ -45,7 +45,7 @@ Channel installed and SSH enabled in its settings:
 tools/recon.sh
 ```
 
-This runs [tools/recon/remote.sh](../tools/recon/remote.sh) on the TV, which
+This runs [tools/recon/device.sh](../tools/recon/device.sh) on the TV, which
 only reads: firmware, hardware, graphics libraries, system apps, settings,
 mounts, boot hooks, and input, Bluetooth, USB, network and audio devices. The
 raw output stays in `tools/out/` (git ignores it); a redacted copy, with serial
