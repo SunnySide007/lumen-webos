@@ -20,6 +20,7 @@
 
 use std::ffi::c_void;
 
+use lumen_core::layout::Rect;
 use lumen_core::style::{self, Color};
 
 use crate::atlas::{ATLAS_H, ATLAS_W, Upload, Uv};
@@ -30,8 +31,9 @@ use crate::gl::{self, Gl};
 pub use lumen_core::layout::{SCREEN_H, SCREEN_W};
 
 /// x, y; u, v; r, g, b, a; the pixel's offset from the shape's centre; the
-/// shape's half width, half height, corner radius and edge softness; kind.
-const FLOATS_PER_VERTEX: usize = 15;
+/// shape's half width, half height, corner radius and edge softness; kind;
+/// w, the perspective divide, 1 unless the quad leans (`Tilt`).
+const FLOATS_PER_VERTEX: usize = 16;
 const VERTICES_PER_QUAD: usize = 6;
 
 const FLAT: f32 = 0.0;
@@ -108,6 +110,47 @@ pub enum Texture {
     Own(u32),
 }
 
+/// A lean in perspective, which `Batch::set_tilt` projects the quads pushed
+/// after it by: their plane turns about its upright axis through (cx, cy) by
+/// `angles[0]` radians (positive sends its right side back) and about its
+/// level one by `angles[1]` (positive sends its lower side back), seen from
+/// `distance` px in front of the screen. Each vertex is drawn where it
+/// projects, with the w that has the GPU interpolate its texture place and
+/// shape offset in perspective, so a leaning tile's corners, icon and
+/// letter stay true; two triangles of one flat quad agree exactly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tilt {
+    cx: f32,
+    cy: f32,
+    sin: [f32; 2],
+    cos: [f32; 2],
+    distance: f32,
+}
+
+impl Tilt {
+    pub fn new(cx: f32, cy: f32, angles: [f32; 2], distance: f32) -> Self {
+        Self {
+            cx,
+            cy,
+            sin: angles.map(f32::sin),
+            cos: angles.map(f32::cos),
+            distance,
+        }
+    }
+
+    /// Where (x, y) on the leaning plane shows on the screen, and its w.
+    fn project(&self, x: f32, y: f32) -> (f32, f32, f32) {
+        let (dx, dy) = (x - self.cx, y - self.cy);
+        let z = dx * self.sin[0] + dy * self.sin[1];
+        let w = (self.distance + z) / self.distance;
+        (
+            self.cx + dx * self.cos[0] / w,
+            self.cy + dy * self.cos[1] / w,
+            w,
+        )
+    }
+}
+
 /// Vertices drawn with one texture bound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Run {
@@ -126,8 +169,8 @@ struct Quad {
     w: f32,
     h: f32,
     uv: Uv,
-    top: Rgba,
-    bottom: Rgba,
+    /// Top left, top right, bottom left, bottom right.
+    colors: [Rgba; 4],
     shape: Shape,
     kind: f32,
     /// What an image quad samples; `None` for flat and shape quads.
@@ -138,12 +181,20 @@ struct Quad {
 pub struct Batch {
     verts: Vec<f32>,
     runs: Vec<Run>,
+    /// The lean the quads pushed now take, if any.
+    tilt: Option<Tilt>,
 }
 
 impl Batch {
     pub fn clear(&mut self) {
         self.verts.clear();
         self.runs.clear();
+        self.tilt = None;
+    }
+
+    /// Leans the quads pushed from now on, until set to `None`.
+    pub fn set_tilt(&mut self, tilt: Option<Tilt>) {
+        self.tilt = tilt;
     }
 
     /// The runs to draw, in order: each a texture and the vertices drawn
@@ -194,6 +245,15 @@ impl Batch {
         )
     }
 
+    /// How many quads lean: their w is not 1.
+    #[cfg(test)]
+    pub fn leaning_quads(&self) -> usize {
+        self.verts
+            .chunks(FLOATS_PER_VERTEX * VERTICES_PER_QUAD)
+            .filter(|quad| quad.chunks(FLOATS_PER_VERTEX).any(|v| v[15] != 1.0))
+            .count()
+    }
+
     /// Quad `n`'s box: left, top, right, bottom.
     #[cfg(test)]
     pub fn quad_bounds(&self, n: usize) -> (f32, f32, f32, f32) {
@@ -205,6 +265,7 @@ impl Batch {
                 .expect("quad n")
                 .to_vec(),
             runs: Vec::new(),
+            tilt: None,
         };
         quad.bounds()
     }
@@ -232,16 +293,17 @@ impl Batch {
         let (x1, y1) = (q.x + q.w, q.y + q.h);
         let s = q.shape;
         let corners = [
-            (q.x, q.y, q.uv.u0, q.uv.v0, q.top),
-            (x1, q.y, q.uv.u1, q.uv.v0, q.top),
-            (q.x, y1, q.uv.u0, q.uv.v1, q.bottom),
-            (x1, y1, q.uv.u1, q.uv.v1, q.bottom),
+            (q.x, q.y, q.uv.u0, q.uv.v0, q.colors[0]),
+            (x1, q.y, q.uv.u1, q.uv.v0, q.colors[1]),
+            (q.x, y1, q.uv.u0, q.uv.v1, q.colors[2]),
+            (x1, y1, q.uv.u1, q.uv.v1, q.colors[3]),
         ];
         for i in [0, 1, 2, 1, 3, 2] {
             let (x, y, u, v, c) = corners[i];
+            let (sx, sy, w) = self.tilt.map_or((x, y, 1.0), |t| t.project(x, y));
             self.verts.extend_from_slice(&[
-                x,
-                y,
+                sx,
+                sy,
                 u,
                 v,
                 c.0,
@@ -255,6 +317,7 @@ impl Batch {
                 s.radius,
                 s.soft,
                 q.kind,
+                w,
             ]);
         }
         self.add_to_run(q.texture);
@@ -268,8 +331,7 @@ impl Batch {
             w,
             h,
             uv: NO_UV,
-            top,
-            bottom,
+            colors: [top, top, bottom, bottom],
             shape: NO_SHAPE,
             kind: FLAT,
             texture: None,
@@ -326,14 +388,17 @@ impl Batch {
         (top, bottom): (Rgba, Rgba),
         margin: f32,
     ) {
+        let (top, bottom) = (
+            top.lerp(bottom, -margin / h),
+            top.lerp(bottom, 1.0 + margin / h),
+        );
         self.push(&Quad {
             x: x - margin,
             y: y - margin,
             w: w + 2.0 * margin,
             h: h + 2.0 * margin,
             uv: NO_UV,
-            top: top.lerp(bottom, -margin / h),
-            bottom: top.lerp(bottom, 1.0 + margin / h),
+            colors: [top, top, bottom, bottom],
             shape: Shape {
                 cx: x + w / 2.0,
                 cy: y + h / 2.0,
@@ -341,6 +406,35 @@ impl Batch {
                 half_h: h / 2.0,
                 radius: r,
                 soft,
+            },
+            kind: SHAPE,
+            texture: None,
+        });
+    }
+
+    /// The `part` of the rounded rectangle `rect` (radius `r`) that lies
+    /// inside it, cut by its corners, each corner of the part its own colour:
+    /// top left, top right, bottom left, bottom right. The light crossing a
+    /// tile is two of these.
+    pub fn rounded_part(&mut self, rect: Rect, r: f32, part: Rect, colors: [Rgba; 4]) {
+        if part.w <= 0.0 || part.h <= 0.0 {
+            return;
+        }
+        let r = r.min(rect.w / 2.0).min(rect.h / 2.0).max(0.0);
+        self.push(&Quad {
+            x: part.x,
+            y: part.y,
+            w: part.w,
+            h: part.h,
+            uv: NO_UV,
+            colors,
+            shape: Shape {
+                cx: rect.x + rect.w / 2.0,
+                cy: rect.y + rect.h / 2.0,
+                half_w: rect.w / 2.0,
+                half_h: rect.h / 2.0,
+                radius: r,
+                soft: 0.5,
             },
             kind: SHAPE,
             texture: None,
@@ -375,8 +469,7 @@ impl Batch {
             w,
             h,
             uv,
-            top: tint,
-            bottom: tint,
+            colors: [tint; 4],
             shape: NO_SHAPE,
             kind: IMAGE,
             texture: Some(texture),
@@ -402,16 +495,18 @@ attribute vec4 a_color;
 attribute vec2 a_local;
 attribute vec4 a_shape;
 attribute float a_kind;
+attribute float a_w;
 uniform vec2 u_screen;
-varying vec2 v_pos;
+varying vec3 v_pos;
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec2 v_local;
 varying vec4 v_shape;
 varying float v_kind;
 void main() {
-    gl_Position = vec4(a_pos.x / u_screen.x * 2.0 - 1.0, 1.0 - a_pos.y / u_screen.y * 2.0, 0.0, 1.0);
-    v_pos = a_pos;
+    vec2 ndc = vec2(a_pos.x / u_screen.x * 2.0 - 1.0, 1.0 - a_pos.y / u_screen.y * 2.0);
+    gl_Position = vec4(ndc * a_w, 0.0, a_w);
+    v_pos = vec3(a_pos * a_w, a_w);
     v_uv = a_uv;
     v_color = a_color;
     v_local = a_local;
@@ -431,7 +526,9 @@ void main() {
 //
 // The place is `v_pos`, the design-space position, which on the TV is the
 // framebuffer's pixel: a varying takes the shader's highp, where GLSL ES
-// declares `gl_FragCoord` mediump. In 16-bit floats a position past 1024
+// declares `gl_FragCoord` mediump. It goes as (x w, y w, w) and comes back
+// divided, which undoes the perspective interpolation a leaning quad gets,
+// so the pattern stays on the screen's pixels there too. In 16-bit floats a position past 1024
 // holds only even pixel centres, which would leave 8 levels in x and bias
 // the pattern in y; `tests` work the arithmetic both ways. Mod 4 is
 // p - 4 floor(p / 4), exact for whole numbers either way.
@@ -445,7 +542,7 @@ precision mediump float;
 #endif
 uniform sampler2D u_atlas;
 uniform float u_dither;
-varying vec2 v_pos;
+varying vec3 v_pos;
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec2 v_local;
@@ -468,7 +565,7 @@ void main() {
         gl_FragColor = c;
     }
     if (u_dither > 0.0) {
-        vec2 p = floor(v_pos);
+        vec2 p = floor(v_pos.xy / v_pos.z);
         p -= 4.0 * floor(p * 0.25);
         float t = bayer2(p * 0.5) * 0.25 + bayer2(p);
         gl_FragColor.rgb += (t - 15.0 / 32.0) * u_dither * gl_FragColor.a;
@@ -477,13 +574,14 @@ void main() {
 ";
 
 /// Each attribute: its name and how many floats it takes, in vertex order.
-const ATTRIBUTES: [(&std::ffi::CStr, i32); 6] = [
+const ATTRIBUTES: [(&std::ffi::CStr, i32); 7] = [
     (c"a_pos", 2),
     (c"a_uv", 2),
     (c"a_color", 4),
     (c"a_local", 2),
     (c"a_shape", 4),
     (c"a_kind", 1),
+    (c"a_w", 1),
 ];
 
 pub struct Renderer {
@@ -857,6 +955,43 @@ mod tests {
     }
 
     #[test]
+    fn a_leaning_quad_is_drawn_in_perspective_and_keeps_its_own_place() {
+        let c = Rgba(1.0, 1.0, 1.0, 1.0);
+        let mut batch = Batch::default();
+        // Turned 0.1 rad about the upright axis through its middle, so its
+        // right side goes back.
+        batch.set_tilt(Some(Tilt::new(100.0, 50.0, [0.1, 0.0], 1000.0)));
+        batch.gradient_rect(0.0, 0.0, 200.0, 100.0, c, c);
+        batch.set_tilt(None);
+        batch.gradient_rect(0.0, 0.0, 200.0, 100.0, c, c);
+        let vs = vertices(&batch);
+        // Corners: top left, top right, bottom left, and bottom right fifth.
+        let (tl, tr, bl, br) = (vs[0], vs[1], vs[2], vs[4]);
+        assert!(tr[15] > 1.0 && tl[15] < 1.0, "w: {} {}", tl[15], tr[15]);
+        let (left, right) = (bl[1] - tl[1], br[1] - tr[1]);
+        assert!(
+            right < 100.0 && left > 100.0 && right < left,
+            "{left} {right}"
+        );
+        // Projected about the middle: the centre line stays put.
+        assert!((tl[1] + bl[1] - 100.0).abs() < 1e-3);
+        // The same plane seen from in front: x' = cx + dx cos / w.
+        let w = (1000.0 + 100.0 * 0.1f32.sin()) / 1000.0;
+        assert!((tr[0] - (100.0 + 100.0 * 0.1f32.cos() / w)).abs() < 1e-3);
+        // The shape offset is the quad's own, not the projection's.
+        assert_eq!((tr[8], tr[9]), (200.0, 0.0));
+        // Level again, w is 1 and nothing moves.
+        let level = &vs[6..12];
+        assert!(level.iter().all(|v| v[15] == 1.0));
+        assert_eq!((level[1][0], level[1][1]), (200.0, 0.0));
+        // A cleared batch starts level.
+        batch.set_tilt(Some(Tilt::new(0.0, 0.0, [0.1, 0.1], 1000.0)));
+        batch.clear();
+        batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        assert!(vertices(&batch).iter().all(|v| v[15] == 1.0));
+    }
+
+    #[test]
     fn colour_helpers() {
         let a = Rgba(0.0, 0.2, 1.0, 0.0);
         let b = Rgba(1.0, 0.4, 0.0, 1.0);
@@ -911,7 +1046,7 @@ mod tests {
         // The shader holds the arithmetic these tests work.
         for line in [
             "return fract(dot(a, vec2(0.5, a.y * 0.75)));",
-            "vec2 p = floor(v_pos);",
+            "vec2 p = floor(v_pos.xy / v_pos.z);",
             "p -= 4.0 * floor(p * 0.25);",
             "float t = bayer2(p * 0.5) * 0.25 + bayer2(p);",
             "gl_FragColor.rgb += (t - 15.0 / 32.0) * u_dither * gl_FragColor.a;",

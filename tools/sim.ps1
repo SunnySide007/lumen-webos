@@ -10,6 +10,9 @@
   For automated checks, -Keys plays remote keys (U, D, L, R, OK, BACK),
   -FixedDt makes the clock deterministic, and -ScreenshotWhenSettled saves
   the frame once the keys are done and nothing moves, then quits.
+  -ScreenshotAt moves -Screenshot's frame from 1.5 s to the given time on
+  the loop's clock: the first key goes down at 0.5 s, so with -FixedDt
+  -Screenshot frame.png -ScreenshotAt 0.62 -Keys R catches a tile leaning.
 
   The Top Shelf heroes come from shell/assets/art, the owner's from
   shell/assets/art-owner. For screenshots of a given hero, -First moves the
@@ -26,6 +29,7 @@
 param(
     [double]$ExitAfter = 0,
     [string]$Screenshot = '',
+    [double]$ScreenshotAt = -1,
     [string]$Keys = '',
     [double]$FixedDt = 0,
     [string]$ScreenshotWhenSettled = '',
@@ -75,6 +79,7 @@ $cargoArgs += @('--', '--windowed')
 if ($ScreenshotWhenSettled -and $ExitAfter -le 0) { $ExitAfter = 30 }
 if ($ExitAfter -gt 0) { $cargoArgs += @('--exit-after', "$ExitAfter") }
 if ($Screenshot) { $cargoArgs += @('--screenshot', [System.IO.Path]::GetFullPath($Screenshot)) }
+if ($ScreenshotAt -ge 0) { $cargoArgs += @('--screenshot-at', "$ScreenshotAt") }
 if ($Keys) { $cargoArgs += @('--keys', $Keys) }
 if ($FixedDt -gt 0) { $cargoArgs += @('--fixed-dt', "$FixedDt") }
 if ($ScreenshotWhenSettled) {

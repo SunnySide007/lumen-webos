@@ -56,6 +56,8 @@ fn paint_all(apps: &[App], assets: &mut Assets) {
                     lift: 1.0,
                     focused: true,
                     index,
+                    tilt: [0.0; 2],
+                    sweep: None,
                 }],
                 status: Some(&status),
                 empty: false,

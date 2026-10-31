@@ -174,6 +174,27 @@ pub const HERO_FADE: Tuning = Tuning {
     rest_speed: 0.02,
 };
 
+// Focus light and tilt (docs/specs/look-and-feel.md, "Phase 4 features").
+
+/// How far a newly focused tile leans toward the move, at most, in degrees:
+/// the edge it moved toward goes back, and it springs upright.
+pub const TILT_DEGREES: f32 = 5.0;
+/// The lean's spring, in radians.
+pub const TILT: Tuning = Tuning {
+    omega: 14.0,
+    epsilon: 0.0005,
+    rest_speed: 0.005,
+};
+/// How far the eye is from the screen for the lean's perspective, in px: a
+/// 5 degree lean of the lifted tile makes its far edge about 3% shorter.
+pub const TILT_DISTANCE: f32 = 1200.0;
+/// How long the light takes to sweep once across a newly focused tile.
+pub const SWEEP_TIME: Duration = Duration::from_millis(450);
+/// The light's band, as a fraction of the tile it crosses.
+pub const SWEEP_WIDTH: f32 = 0.45;
+/// The light at its brightest: white at this alpha.
+pub const SWEEP_STRENGTH: f32 = 0.2;
+
 // Dither.
 
 /// The ordered dither on gradients and shapes, peak to peak, as a fraction

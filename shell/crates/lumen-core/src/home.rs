@@ -50,6 +50,29 @@ pub struct TileView<'a> {
     pub focused: bool,
     /// Position in the launcher's list.
     pub index: usize,
+    /// Its lean, in radians: about its upright axis (positive leans its
+    /// right edge back) and its level one (positive leans its lower edge
+    /// back).
+    pub tilt: [f32; 2],
+    /// The light crossing it, if it is.
+    pub sweep: Option<SweepView>,
+}
+
+/// The light crossing a newly focused tile: the middle of its band, as a
+/// fraction of the tile along `dir` (below 0 before it enters, above 1 after
+/// it leaves), and the way it travels, the way focus moved.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SweepView {
+    pub at: f32,
+    pub dir: Dir,
+}
+
+/// A sweep under way: which tile, which way, and when it began.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Sweep {
+    tile: usize,
+    dir: Dir,
+    from: Duration,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +94,9 @@ pub struct Home {
     apps: Vec<App>,
     focus: GridFocus,
     lifts: Vec<Spring>,
+    /// Each tile's lean, as `TileView::tilt`.
+    tilts: Vec<[Spring; 2]>,
+    sweep: Option<Sweep>,
     scroll: Spring,
     bump_x: Spring,
     bump_y: Spring,
@@ -100,8 +126,11 @@ impl Home {
         let lifts = (0..apps.len())
             .map(|i| Spring::new(if i == 0 { 1.0 } else { 0.0 }, LIFT))
             .collect();
+        let upright = Spring::new(0.0, style::TILT);
         Self {
             focus: GridFocus::new(apps.len(), layout::COLUMNS),
+            tilts: vec![[upright; 2]; apps.len()],
+            sweep: None,
             apps,
             lifts,
             scroll: Spring::new(0.0, SCROLL),
@@ -204,19 +233,29 @@ impl Home {
             return;
         };
         match self.focus.move_focus(dir) {
-            Move::Moved => self.focus_changed(from),
+            Move::Moved => self.focus_changed(from, dir),
             // A repeat that reaches an edge stops there; only a fresh press bumps.
             Move::Blocked if !repeat => self.bump(dir),
             Move::Blocked => {}
         }
     }
 
-    fn focus_changed(&mut self, from: usize) {
+    /// Focus went from `from` the way `dir` points: the new tile lifts,
+    /// leans toward the move and the light crosses it.
+    fn focus_changed(&mut self, from: usize, dir: Dir) {
         let Some(to) = self.focus.index() else {
             return;
         };
         self.lifts[from].set_target(0.0);
         self.lifts[to].set_target(1.0);
+        self.lean(to, dir);
+        if self.look.light {
+            self.sweep = Some(Sweep {
+                tile: to,
+                dir,
+                from: self.now,
+            });
+        }
         let row = self.focus.row();
         self.scroll.set_target(layout::scroll_for_row(row));
         if row == 0 && self.shelf_index != to {
@@ -247,7 +286,31 @@ impl Home {
         let already = (spring.value() * sign).max(0.0);
         let room = (1.0 - already / BUMP_PEAK).max(0.0);
         spring.set_velocity(sign * room * kick_for_peak(BUMP_PEAK, BUMP.omega));
+        // A blocked tile leans too, as if it met the edge; focus stays, so
+        // no light crosses it.
+        self.lean(focused, dir);
         self.dirty = true;
+    }
+
+    /// Leans `tile` toward `dir` and lets it spring upright, if the look
+    /// tilts. Like the bump, a lean under way only gets the kick it has room
+    /// for, so a key held or mashed never leans a tile past
+    /// `style::TILT_DEGREES`.
+    fn lean(&mut self, tile: usize, dir: Dir) {
+        if !self.look.tilt {
+            return;
+        }
+        let (axis, sign) = match dir {
+            Dir::Left => (0, -1.0),
+            Dir::Right => (0, 1.0),
+            Dir::Up => (1, -1.0),
+            Dir::Down => (1, 1.0),
+        };
+        let peak = style::TILT_DEGREES.to_radians();
+        let spring = &mut self.tilts[tile][axis];
+        let already = (spring.value() * sign).max(0.0);
+        let room = (1.0 - already / peak).max(0.0);
+        spring.set_velocity(sign * room * kick_for_peak(peak, style::TILT.omega));
     }
 
     fn select(&mut self) -> Option<Effect> {
@@ -262,7 +325,7 @@ impl Home {
             && self.focus.row() > 0
         {
             self.focus.set(self.focus.column());
-            self.focus_changed(from);
+            self.focus_changed(from, Dir::Up);
             return None;
         }
         match self.back_at_top {
@@ -311,19 +374,29 @@ impl Home {
             self.status = None;
             self.dirty = true;
         }
+        if self
+            .sweep
+            .is_some_and(|s| self.now >= s.from + style::SWEEP_TIME)
+        {
+            self.sweep = None;
+            self.dirty = true;
+        }
     }
 
     fn springs_mut(&mut self) -> impl Iterator<Item = &mut Spring> {
         self.lifts
             .iter_mut()
+            .chain(self.tilts.iter_mut().flatten())
             .chain([&mut self.scroll, &mut self.bump_x, &mut self.bump_y])
     }
 
     pub fn is_animating(&self) -> bool {
         self.shelf.is_animating()
+            || self.sweep.is_some()
             || !self
                 .lifts
                 .iter()
+                .chain(self.tilts.iter().flatten())
                 .chain([&self.scroll, &self.bump_x, &self.bump_y])
                 .all(Spring::is_settled)
     }
@@ -356,7 +429,24 @@ impl Home {
         for spring in self.springs_mut() {
             spring.snap();
         }
+        self.sweep = None;
         self.shelf.settle_now();
+    }
+
+    /// Where the light is on `tile`, if it is crossing it: its band's
+    /// middle runs from one band's width before the tile to one after,
+    /// easing in and out.
+    fn sweep_on(&self, tile: usize) -> Option<SweepView> {
+        let sweep = self.sweep.filter(|s| s.tile == tile)?;
+        let t = (self.now.saturating_sub(sweep.from).as_secs_f32()
+            / style::SWEEP_TIME.as_secs_f32())
+        .clamp(0.0, 1.0);
+        let eased = t * t * (3.0 - 2.0 * t);
+        let w = style::SWEEP_WIDTH;
+        Some(SweepView {
+            at: -w / 2.0 + (1.0 + w) * eased,
+            dir: sweep.dir,
+        })
     }
 
     pub fn view(&self) -> View<'_> {
@@ -380,6 +470,8 @@ impl Home {
                 lift,
                 focused: focused == Some(i),
                 index: i,
+                tilt: self.tilts[i].map(|s| s.value()),
+                sweep: self.sweep_on(i),
             };
             if tile.focused {
                 front = Some(tile);
@@ -855,6 +947,146 @@ mod tests {
         assert_eq!(sim.home.view().shelf_art.base, Some(&PLEX));
     }
 
+    const PEAK: f32 = style::TILT_DEGREES * std::f32::consts::PI / 180.0;
+
+    /// Frames until settled, keeping each tile's largest lean either way
+    /// and every light seen.
+    fn watch(sim: &mut Sim) -> (Vec<[f32; 2]>, Vec<(usize, SweepView)>) {
+        let mut most = vec![[0.0f32; 2]; sim.home.apps().len()];
+        let mut sweeps = Vec::new();
+        let mut frames = 0;
+        loop {
+            for tile in sim.home.view().tiles {
+                for (most, tilt) in most[tile.index].iter_mut().zip(tile.tilt) {
+                    if tilt.abs() > most.abs() {
+                        *most = tilt;
+                    }
+                }
+                sweeps.extend(tile.sweep.map(|s| (tile.index, s)));
+            }
+            if !sim.frame() {
+                return (most, sweeps);
+            }
+            frames += 1;
+            assert!(frames < 600, "never settled");
+        }
+    }
+
+    #[test]
+    fn a_newly_focused_tile_leans_toward_the_move_and_the_light_crosses_it() {
+        let mut sim = full(mock_apps());
+        sim.settle();
+        sim.press(RIGHT);
+        let (most, sweeps) = watch(&mut sim);
+        // Prime Video leans its right edge back, up to the peak; nothing else
+        // leans.
+        assert!(
+            most[1][0] > 0.95 * PEAK && most[1][0] <= PEAK,
+            "{:?}",
+            most[1]
+        );
+        assert_eq!(most[1][1], 0.0);
+        assert!(
+            most.iter()
+                .enumerate()
+                .all(|(i, m)| i == 1 || *m == [0.0; 2])
+        );
+        // The light crosses it once, the way focus moved, entering before
+        // its left edge and leaving past its right.
+        assert!(sweeps.iter().all(|&(i, s)| i == 1 && s.dir == Dir::Right));
+        let ats: Vec<f32> = sweeps.iter().map(|(_, s)| s.at).collect();
+        assert!(ats.windows(2).all(|w| w[0] <= w[1]), "{ats:?}");
+        assert!(ats[0] < 0.0 && ats[ats.len() - 1] > 1.0, "{ats:?}");
+        // Then everything is upright and dark again, and the screen settles.
+        let tile = sim.focused_view();
+        assert_eq!((tile.tilt, tile.sweep), ([0.0; 2], None));
+        assert!(sim.home.is_settled());
+        // Down leans the lower edge back.
+        sim.press(DOWN);
+        let (most, _) = watch(&mut sim);
+        assert!(
+            most[6][1] > 0.95 * PEAK && most[6][0] == 0.0,
+            "{:?}",
+            most[6]
+        );
+    }
+
+    #[test]
+    fn a_held_key_never_leans_a_tile_past_the_peak() {
+        // Right repeats every 120 ms along row 0, then Left and Right back
+        // and forth over two tiles faster than they settle.
+        let mut sim = full(mock_apps());
+        sim.settle();
+        let mut most = vec![0.0f32; sim.home.apps().len()];
+        let keep = |sim: &Sim, most: &mut Vec<f32>| {
+            for tile in sim.home.view().tiles {
+                most[tile.index] = most[tile.index].max(tile.tilt[0].abs());
+            }
+        };
+        let presses = [RIGHT; 4].into_iter().chain([LEFT, RIGHT].repeat(6));
+        for (n, action) in presses.enumerate() {
+            let _ = sim.home.handle(
+                Press {
+                    action,
+                    repeat: n > 0 && n < 4,
+                },
+                sim.now,
+            );
+            for _ in 0..7 {
+                sim.frame();
+                keep(&sim, &mut most);
+            }
+        }
+        assert!(most.iter().all(|&m| m <= PEAK * 1.0001), "{most:?}");
+        assert!(most[1..5].iter().all(|&m| m > 0.5 * PEAK), "{most:?}");
+        sim.settle();
+        assert!(sim.home.view().tiles.iter().all(|t| t.tilt == [0.0; 2]));
+    }
+
+    #[test]
+    fn a_blocked_move_leans_the_tile_with_no_light() {
+        let mut sim = full(mock_apps());
+        sim.settle();
+        sim.press(LEFT);
+        let (most, sweeps) = watch(&mut sim);
+        assert!(most[0][0] < -0.95 * PEAK, "{:?}", most[0]);
+        assert!(sweeps.is_empty());
+    }
+
+    #[test]
+    fn the_light_alone_or_neither_as_the_look_says() {
+        let light_only = Look {
+            tilt: false,
+            ..Look::FULL
+        };
+        let mut sim = full(mock_apps());
+        sim.home = Home::new(mock_apps(), BackAtTop::Exit).with_look(light_only);
+        sim.settle();
+        sim.press(RIGHT);
+        let (most, sweeps) = watch(&mut sim);
+        assert!(most.iter().all(|m| *m == [0.0; 2]));
+        assert!(!sweeps.is_empty());
+        // As main drew: no lean and no light.
+        let mut sim = Sim::mock();
+        sim.settle();
+        sim.press(RIGHT);
+        sim.press(LEFT);
+        let (most, sweeps) = watch(&mut sim);
+        assert!(most.iter().all(|m| *m == [0.0; 2]) && sweeps.is_empty());
+    }
+
+    #[test]
+    fn settle_now_stands_tiles_upright_and_ends_the_light() {
+        let mut sim = full(mock_apps());
+        sim.press(RIGHT);
+        sim.frame();
+        assert!(sim.focused_view().sweep.is_some());
+        sim.home.settle_now();
+        let tile = sim.focused_view();
+        assert_eq!((tile.tilt, tile.sweep), ([0.0; 2], None));
+        assert!(!sim.home.is_animating());
+    }
+
     /// A fixed-seed random walk over keys, repeat flags, frame lengths and
     /// app counts: nothing panics, every rect stays finite, and every screen
     /// settles once the keys stop.
@@ -879,6 +1111,9 @@ mod tests {
             let count = next(14) as usize;
             let apps = mock_apps().into_iter().cycle().take(count).collect();
             let mut sim = Sim::new(apps, BackAtTop::Stay);
+            if next(2) == 0 {
+                sim.home.look = Look::FULL;
+            }
             for _ in 0..30 {
                 let press = Press {
                     action: actions[next(6) as usize],
@@ -892,10 +1127,11 @@ mod tests {
                 for tile in sim.home.view().tiles {
                     let r = tile.rect;
                     assert!(
-                        [r.x, r.y, r.w, r.h, tile.lift]
+                        [r.x, r.y, r.w, r.h, tile.lift, tile.tilt[0], tile.tilt[1]]
                             .iter()
                             .all(|v| v.is_finite())
                     );
+                    assert!(tile.tilt.iter().all(|t| t.abs() <= PEAK * 1.0001));
                 }
                 sim.draw_if_needed();
             }

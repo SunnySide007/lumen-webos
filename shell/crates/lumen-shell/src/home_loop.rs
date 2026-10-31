@@ -39,7 +39,7 @@ use clock::Clock;
 use hero::HeroPlan;
 use shell::Shell;
 
-/// When `--screenshot` takes its frame.
+/// When `--screenshot` takes its frame, unless `--screenshot-at` says.
 const SCREENSHOT_AFTER: Duration = Duration::from_millis(1500);
 /// How often a settled screen looks for icons while the loader has some.
 const ICON_POLL: Duration = Duration::from_millis(16);
@@ -190,6 +190,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
     let mut stats = FrameStats::new();
     let mut clock = Clock::new(wall, start.zero, opts.fixed_dt, None);
     let mut screenshot = opts.screenshot.clone();
+    let shot_at = opts.screenshot_at.unwrap_or(SCREENSHOT_AFTER);
     let mut settled_shot = opts.screenshot_when_settled.clone();
     let mut script = opts.keys.clone();
     // Every title's glyphs are made once (`warm`), while visible, when the
@@ -272,7 +273,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
                 screenshot
                     .as_ref()
                     .filter(|_| shell.visible)
-                    .map(|_| SCREENSHOT_AFTER),
+                    .map(|_| shot_at),
                 // The same for icons; showing the shell again wakes the loop.
                 (shell.visible && screen.icons_loading()).then(|| clock.now() + ICON_POLL),
                 // The idle heartbeat. Not under a fixed clock, which would
@@ -363,7 +364,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
                 info!("{line}");
             }
         }
-        if screenshot.is_some() && now >= SCREENSHOT_AFTER {
+        if screenshot.is_some() && now >= shot_at {
             shell.home.mark_dirty();
         }
         if icons_arrived(screen, waited) {
@@ -389,7 +390,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         }
 
         screen.paint(&shell.home);
-        if now >= SCREENSHOT_AFTER
+        if now >= shot_at
             && let Some(path) = screenshot.take()
         {
             screen.screenshot(&path);

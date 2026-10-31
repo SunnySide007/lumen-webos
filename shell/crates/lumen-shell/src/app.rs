@@ -32,6 +32,9 @@ pub struct Options {
     pub windowed: bool,
     /// Save one frame as a PNG here, 1.5 s after the start.
     pub screenshot: Option<PathBuf>,
+    /// When, on the loop's clock, `screenshot` takes its frame instead: with
+    /// `--fixed-dt` and `--keys`, a frame mid-motion.
+    pub screenshot_at: Option<Duration>,
     /// On a PC, use a GLES2 context instead of desktop GL (always on the TV).
     pub gles: bool,
     /// Keys to play, through the same path as the remote's.
@@ -46,10 +49,11 @@ pub struct Options {
 
 impl Options {
     /// Reads `--exit-after <seconds>`, `--windowed`, `--gles`,
-    /// `--screenshot <path>`, `--keys <list>`, `--fixed-dt <seconds>` and
-    /// `--screenshot-when-settled <path>`. Anything else is ignored: webOS
-    /// passes the app's launch parameters as a JSON argument. A bad `--keys`
-    /// or `--fixed-dt` is an error, since only automation uses them.
+    /// `--screenshot <path>`, `--screenshot-at <seconds>`, `--keys <list>`,
+    /// `--fixed-dt <seconds>` and `--screenshot-when-settled <path>`. Anything
+    /// else is ignored: webOS passes the app's launch parameters as a JSON
+    /// argument. A bad `--keys`, `--fixed-dt` or `--screenshot-at` is an
+    /// error, since only automation uses them.
     pub fn from_args(args: &[String]) -> Result<Self, String> {
         let mut opts = Self {
             windowed: !on_tv(),
@@ -68,6 +72,14 @@ impl Options {
                         .and_then(|s| Duration::try_from_secs_f64(s).ok());
                 }
                 "--screenshot" => opts.screenshot = it.next().map(PathBuf::from),
+                "--screenshot-at" => {
+                    let at = it
+                        .next()
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .filter(|s| s.is_finite() && *s >= 0.0 && *s <= 600.0)
+                        .ok_or("--screenshot-at needs seconds on the loop's clock, such as 0.62")?;
+                    opts.screenshot_at = Some(Duration::from_secs_f64(at));
+                }
                 "--keys" => {
                     let list = it.next().ok_or("--keys needs a list, such as R,R,D,OK")?;
                     opts.keys = Some(Script::parse(list)?);
@@ -343,7 +355,10 @@ mod tests {
             "0.02",
             "--screenshot-when-settled",
             "/tmp/settled.png",
+            "--screenshot-at",
+            "0.62",
         ]);
+        assert_eq!(opts.screenshot_at, Some(Duration::from_millis(620)));
         assert_eq!(opts.keys, Some(Script::parse("R,R,D,OK").unwrap()));
         assert_eq!(opts.fixed_dt, Some(Duration::from_millis(20)));
         assert_eq!(
@@ -380,6 +395,8 @@ mod tests {
             &["--fixed-dt", "fast"],
             &["--fixed-dt", "5"],
             &["--screenshot-when-settled"],
+            &["--screenshot-at", "-1"],
+            &["--screenshot-at"],
         ] {
             assert!(Options::from_args(&args(bad)).is_err(), "{bad:?}");
         }

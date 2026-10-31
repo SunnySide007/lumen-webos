@@ -7,13 +7,14 @@ use std::collections::HashMap;
 
 use lumen_core::apps::App;
 use lumen_core::art::Hero;
-use lumen_core::home::{TileView, View};
+use lumen_core::focus::Dir;
+use lumen_core::home::{SweepView, TileView, View};
 use lumen_core::layout::{self, Rect, SAFE, SCREEN_H, SCREEN_W};
 use lumen_core::style::{self, Color};
 
 use crate::atlas::{Atlas, Uv};
 use crate::icons::Icons;
-use crate::render::{Batch, Rgba, Texture};
+use crate::render::{Batch, Rgba, Texture, Tilt};
 use crate::text::Text;
 
 pub mod warm;
@@ -132,8 +133,19 @@ fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     for tile in &view.tiles {
         shadow(batch, tile);
     }
+    // A tile leans as one piece, its icon or letter and its light with it;
+    // its shadow and title stay level.
     for tile in &view.tiles {
+        if tile.tilt != [0.0; 2] {
+            let r = tile.rect;
+            let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+            batch.set_tilt(Some(Tilt::new(cx, cy, tile.tilt, style::TILT_DISTANCE)));
+        }
         draw_tile(batch, tile, assets);
+        if let Some(sweep) = tile.sweep {
+            light(batch, tile, sweep);
+        }
+        batch.set_tilt(None);
     }
     for tile in &view.tiles {
         title(batch, tile, assets);
@@ -283,6 +295,52 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
     );
 }
 
+/// The light crossing a newly focused tile: a soft band of white, brightest
+/// in its middle, that travels the way focus moved, cut by the tile's
+/// corners. Two quads, one each side of the band's middle, each clipped to
+/// the tile.
+fn light(batch: &mut Batch, tile: &TileView<'_>, sweep: SweepView) {
+    let r = tile.rect;
+    let radius = layout::TILE_RADIUS * r.w / layout::TILE_W;
+    let half = style::SWEEP_WIDTH / 2.0;
+    // Along the tile the way the band travels: 0 where it enters, 1 where
+    // it leaves.
+    let forward = matches!(sweep.dir, Dir::Right | Dir::Down);
+    let across = matches!(sweep.dir, Dir::Left | Dir::Right);
+    let glow = |at: f32| {
+        let a = style::SWEEP_STRENGTH * (1.0 - (at - sweep.at).abs() / half).max(0.0);
+        WHITE.alpha(a)
+    };
+    for (from, to) in [(sweep.at - half, sweep.at), (sweep.at, sweep.at + half)] {
+        let (from, to) = (from.clamp(0.0, 1.0), to.clamp(0.0, 1.0));
+        if to <= from {
+            continue;
+        }
+        // In the tile's own terms, left to right or top to bottom.
+        let (lo, hi, c_lo, c_hi) = if forward {
+            (from, to, glow(from), glow(to))
+        } else {
+            (1.0 - to, 1.0 - from, glow(to), glow(from))
+        };
+        let (part, colors) = if across {
+            let part = Rect {
+                x: r.x + lo * r.w,
+                w: (hi - lo) * r.w,
+                ..r
+            };
+            (part, [c_lo, c_hi, c_lo, c_hi])
+        } else {
+            let part = Rect {
+                y: r.y + lo * r.h,
+                h: (hi - lo) * r.h,
+                ..r
+            };
+            (part, [c_lo, c_lo, c_hi, c_hi])
+        };
+        batch.rounded_part(r, radius, part, colors);
+    }
+}
+
 /// The focused app's name below its tile, fading in as the tile lifts.
 fn title(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
     let lift = tile.lift.min(1.0);
@@ -404,6 +462,38 @@ mod tests {
             let n = quads(&home, &mut assets);
             assert!(n <= QUAD_BUDGET, "row {row}: {n} quads");
         }
+    }
+
+    #[test]
+    fn a_newly_focused_tile_leans_whole_with_its_light_and_fits_the_budget() {
+        let right = Press {
+            action: Action::Move(Dir::Right),
+            repeat: false,
+        };
+        let mut assets = assets();
+        let mut home = mock_home().with_look(Look::FULL);
+        assert_eq!(home.handle(right, Duration::ZERO), None);
+        // Halfway through the light, the lean on its way back.
+        home.advance_to(style::SWEEP_TIME / 2);
+        let tile = *home.view().tiles.last().unwrap();
+        assert!(tile.tilt[0] > 0.0 && tile.sweep.is_some());
+        let mut batch = Batch::default();
+        super::home(&mut batch, &home.view(), &mut assets);
+        // Prime Video's tile, its letter and the light's two quads lean;
+        // its shadow, title and every other tile stay level.
+        assert_eq!(batch.leaning_quads(), 4);
+        let mut plain = mock_home();
+        assert_eq!(plain.handle(right, Duration::ZERO), None);
+        plain.advance_to(style::SWEEP_TIME / 2);
+        let n = batch.quad_count();
+        assert_eq!(n, quads(&plain, &mut assets) + 2);
+        assert!(n <= QUAD_BUDGET, "{n} quads");
+        // Settled, it is the plain frame again.
+        home.settle_now();
+        plain.settle_now();
+        super::home(&mut batch, &home.view(), &mut assets);
+        assert_eq!(batch.leaning_quads(), 0);
+        assert_eq!(batch.quad_count(), quads(&plain, &mut assets));
     }
 
     #[test]
