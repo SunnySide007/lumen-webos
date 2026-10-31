@@ -8,6 +8,10 @@
 //! * `listApps` gives each app's folder, which its icon must stay inside.
 //! * `getAllInputStatus` gives the inputs, with the names the owner gave them.
 //!
+//! LG's Home is not a launch point (its appinfo says `visible: false`), so the
+//! shell adds it as "LG Home", last among the apps: with Lumen as the TV's
+//! Home, it is the way back to LG's (takeover/README.md).
+//!
 //! IDs, titles, icon paths and colours come from other apps' appinfo, so they
 //! are checked, cleaned and confined here before the shell sees them.
 //!
@@ -25,7 +29,9 @@ use std::thread::{JoinHandle, ScopedJoinHandle};
 use std::time::{Duration, Instant};
 
 use libloading::Library;
-use lumen_core::apps::{App, AppId, AppKind, LaunchError, Launcher, clean_title};
+use lumen_core::apps::{
+    App, AppId, AppKind, LG_HOME, LG_HOME_TITLE, LaunchError, Launcher, clean_title,
+};
 use serde_json::{Value, json};
 
 use crate::info;
@@ -541,9 +547,48 @@ struct Skipped {
     inputs: usize,
 }
 
+/// The icon an app's entry names, confined to `folder`: the 130 px one, which
+/// a tile draws at up to 138 px, else the 80.
+fn icon_of(
+    entry: &Value,
+    folder: &Path,
+    confine: &dyn Fn(&Path, &Path) -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    ["largeIcon", "icon"]
+        .iter()
+        .filter_map(|key| str_field(entry, key))
+        .find_map(|path| confine(Path::new(path), folder))
+}
+
+/// LG's Home as a tile. It is there whatever `listApps` said: it is the way
+/// back to LG's Home, and LG's system image always has it. Its icon and
+/// colour come from its `listApps` entry, if there is one; the jail cannot
+/// read its folder, so the icon comes from the icon copy, which
+/// `lumen-icons.sh` gives it.
+fn lg_home(apps: &Value, confine: &dyn Fn(&Path, &Path) -> Option<PathBuf>) -> Entry {
+    let entry = list(apps, "apps").find(|app| str_field(app, "id") == Some(LG_HOME));
+    let icon = entry.and_then(|entry| {
+        let folder = str_field(entry, "folderPath").filter(|p| p.starts_with('/'))?;
+        icon_of(entry, Path::new(folder), confine)
+    });
+    Entry {
+        app: App {
+            id: AppId::new(LG_HOME),
+            title: LG_HOME_TITLE.to_owned(),
+            kind: AppKind::App,
+            icon,
+            color: entry
+                .and_then(|entry| str_field(entry, "iconColor"))
+                .and_then(parse_color),
+        },
+        params: json!({}),
+    }
+}
+
 /// Turns the three replies into tiles: the pinned apps, then the rest of
-/// LG's launch points in its order, then the connected inputs. `confine`
-/// returns an icon's path only if it stays inside the given folder.
+/// LG's launch points in its order, then LG's Home unless a launch point is
+/// it, then the connected inputs. `confine` returns an icon's path only if it
+/// stays inside the given folder.
 fn entries(
     points: &Value,
     apps: &Value,
@@ -569,13 +614,7 @@ fn entries(
         }
         let info = infos.get(id);
         let folder = info.and_then(|i| i.folder.as_deref());
-        // The 130 px icon, which a tile draws at up to 138 px, else the 80.
-        let icon = folder.and_then(|folder| {
-            ["largeIcon", "icon"]
-                .iter()
-                .filter_map(|key| str_field(point, key))
-                .find_map(|path| confine(Path::new(path), folder))
-        });
+        let icon = folder.and_then(|folder| icon_of(point, folder, confine));
         let color = str_field(point, "iconColor")
             .and_then(parse_color)
             .or_else(|| info.and_then(|i| i.color));
@@ -602,6 +641,9 @@ fn entries(
             .position(|&p| p == e.app.id.as_str())
             .unwrap_or(PINNED.len())
     });
+    if seen.insert(LG_HOME.to_owned()) {
+        out.push(lg_home(apps, confine));
+    }
 
     for device in list(inputs, "devices") {
         let Some(id) = str_field(device, "appId").filter(|id| plausible_id(id)) else {
@@ -866,7 +908,7 @@ mod tests {
     }
 
     #[test]
-    fn plx_native_first_then_lgs_order_then_connected_inputs() {
+    fn plx_native_first_then_lgs_order_then_lg_home_then_connected_inputs() {
         let entries = b9_entries();
         assert_eq!(
             ids(&entries),
@@ -877,6 +919,7 @@ mod tests {
                 "cdp-30",
                 "com.webos.app.discovery",
                 "com.open.hidden.menu",
+                LG_HOME,
                 "com.webos.app.hdmi1",
                 "com.webos.app.hdmi2",
                 "com.webos.app.hdmi3",
@@ -922,6 +965,10 @@ mod tests {
         assert_eq!(get("com.webos.app.hdmi3").title, "Streamer");
         assert_eq!(get("com.webos.app.hdmi3").kind, AppKind::Input);
         assert_eq!(get("com.webos.app.hdmi3").color, Some([0x4b, 0x4b, 0x4b]));
+        // LG's Home, named so beside Lumen's, with its colour from listApps.
+        assert_eq!(get(LG_HOME).title, "LG Home");
+        assert_eq!(get(LG_HOME).kind, AppKind::App);
+        assert_eq!(get(LG_HOME).color, Some([0x1e, 0xc1, 0x5f]));
     }
 
     #[test]
@@ -952,6 +999,59 @@ mod tests {
                 "/usr/palm/plugins/inputapps/assets/small/hometheater.png"
             ))
         );
+        // No launch point names it: listApps' path, relative to its folder.
+        assert_eq!(
+            icon(LG_HOME),
+            Some(PathBuf::from(
+                "/usr/palm/applications/com.webos.app.home/assets/icon.png"
+            ))
+        );
+    }
+
+    #[test]
+    fn lg_homes_icon_stays_in_its_folder_and_its_tile_needs_no_list() {
+        let listed = |entry: Value| json!({ "returnValue": true, "apps": [entry] });
+        for entry in [
+            json!({ "id": LG_HOME, "folderPath": "/usr/palm/applications/com.webos.app.home",
+                    "largeIcon": "/etc/shadow", "icon": "/var/x.png", "iconColor": "#1ec15f" }),
+            json!({ "id": LG_HOME, "folderPath": "relative/path", "icon": "assets/icon.png",
+                    "iconColor": "#1ec15f" }),
+        ] {
+            let home = lg_home(&listed(entry), &lexical);
+            assert_eq!(home.app.icon, None, "{home:?}");
+            assert_eq!(home.app.color, Some([0x1e, 0xc1, 0x5f]));
+        }
+        // Without listApps, or without its entry in it, the tile is still
+        // there: the way back to LG's Home must not hang on that list.
+        for apps in [
+            json!({}),
+            listed(json!({ "id": "netflix", "folderPath": "/x" })),
+        ] {
+            let home = lg_home(&apps, &lexical);
+            assert_eq!(home.app, App::new(LG_HOME, LG_HOME_TITLE, AppKind::App));
+            assert_eq!(home.params, json!({}));
+        }
+    }
+
+    #[test]
+    fn a_launch_point_that_is_lg_home_keeps_its_place() {
+        let points = json!({ "returnValue": true, "launchPoints": [
+            { "id": LG_HOME, "title": "Home" },
+            { "id": "netflix", "title": "Netflix" },
+        ]});
+        let (listed, _) = entries(&points, &parse(APPS), &json!({}), &lexical);
+        assert_eq!(ids(&listed), [LG_HOME, "netflix"]);
+        assert_eq!(
+            listed[0].app.title, "Home",
+            "LG's own entry, as it lists it"
+        );
+        // A bookmark with its ID is no tile of it, so the tile is added.
+        let points = json!({ "returnValue": true, "launchPoints": [
+            { "id": LG_HOME, "title": "A bookmark", "lptype": "bookmark" },
+        ]});
+        let (added, _) = entries(&points, &json!({}), &json!({}), &lexical);
+        assert_eq!(ids(&added), [LG_HOME]);
+        assert_eq!(added[0].app.title, LG_HOME_TITLE);
     }
 
     #[test]
@@ -969,7 +1069,10 @@ mod tests {
               "iconPrefix": "/usr/palm/plugins/inputapps/assets/", "icon": "/etc/passwd" },
         ]});
         let (entries, _) = entries(&points, &apps, &inputs, &lexical);
-        assert_eq!(ids(&entries), ["evil", "nofolder", "com.webos.app.hdmi1"]);
+        assert_eq!(
+            ids(&entries),
+            ["evil", "nofolder", LG_HOME, "com.webos.app.hdmi1"]
+        );
         assert!(entries.iter().all(|e| e.app.icon.is_none()), "{entries:?}");
     }
 
@@ -990,7 +1093,7 @@ mod tests {
             { "appId": "hdmi\u{1b}[2J", "connected": true, "label": "X" },
         ]});
         let (entries, skipped) = entries(&points, &json!({}), &inputs, &lexical);
-        assert_eq!(ids(&entries), ["netflix"]);
+        assert_eq!(ids(&entries), ["netflix", LG_HOME]);
         assert_eq!(skipped.launch_points, 6);
         assert!(plausible_id(&"x".repeat(MAX_ID_BYTES)));
     }
@@ -1038,8 +1141,10 @@ mod tests {
         let mut launcher = LunaLauncher::new(bus);
         let apps = launcher.list().unwrap();
         assert_eq!(apps[0].id.as_str(), "netflix");
+        assert_eq!(apps[1].id.as_str(), LG_HOME, "last among the apps");
         launcher.launch(&AppId::new("netflix")).unwrap();
         launcher.launch(&AppId::new("com.webos.app.hdmi2")).unwrap();
+        launcher.launch(&AppId::new(LG_HOME)).unwrap();
         let sent = launcher.bus.sent.lock().unwrap();
         let launches: Vec<&Value> = sent
             .iter()
@@ -1051,6 +1156,7 @@ mod tests {
             [
                 &json!({ "id": "netflix", "params": { "contentTarget": "x" } }),
                 &json!({ "id": "com.webos.app.hdmi2", "params": {} }),
+                &json!({ "id": LG_HOME, "params": {} }),
             ]
         );
     }
@@ -1079,7 +1185,11 @@ mod tests {
             .answering(LIST_APPS, Err("denied".to_owned()))
             .answering(LIST_INPUTS, Ok(json!({ "returnValue": false })));
         let apps = LunaLauncher::new(bus).list().unwrap();
-        assert_eq!(apps.len(), 6, "the launch points, without inputs");
+        assert_eq!(
+            apps.len(),
+            7,
+            "the launch points and LG Home, without inputs"
+        );
         assert!(apps.iter().all(|a| a.icon.is_none()));
     }
 
@@ -1165,6 +1275,11 @@ mod tests {
             &copy,
             "/usr/palm/plugins/inputapps/assets/small/hometheater.png",
         );
+        // Where lumen-icons.sh puts LG Home's icon, which no launch point names.
+        let lg_home = touch(
+            &copy,
+            "/usr/palm/applications/com.webos.app.home/assets/icon.png",
+        );
         let (entries, _) = entries_with(&confine_or_copied(Some(&copy)));
         let icon = |id: &str| {
             entries
@@ -1175,6 +1290,7 @@ mod tests {
         assert_eq!(icon("netflix"), Some(netflix));
         assert_eq!(icon("com.webos.app.photovideo"), Some(photos));
         assert_eq!(icon("com.webos.app.hdmi2"), Some(hdmi2));
+        assert_eq!(icon(LG_HOME), Some(lg_home));
         assert_eq!(icon("cdp-30"), None, "not copied");
         // Without the copy, none of them: the build container has none of
         // the TV's folders.
@@ -1346,7 +1462,7 @@ mod tests {
                 ..LunaLauncher::new(FakeBus::b9().answering(EXEC, reply))
             };
             let apps = launcher.list().unwrap();
-            assert_eq!(apps.len(), 10);
+            assert_eq!(apps.len(), 11);
             wait_for_refresh(&launcher);
             assert_eq!(execs(&launcher).len(), 1);
         }

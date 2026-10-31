@@ -96,6 +96,18 @@
       "removable": false
     },
     {
+      "id": "com.webos.app.home",
+      "title": "Home",
+      "type": "native",
+      "visible": false,
+      "systemApp": true,
+      "folderPath": "/usr/palm/applications/com.webos.app.home",
+      "icon": "assets/icon.png",
+      "largeIcon": "assets/icon.png",
+      "iconColor": "#1ec15f",
+      "removable": false
+    },
+    {
       "id": "com.webos.app.photovideo",
       "title": "Photo & Video",
       "type": "web",
