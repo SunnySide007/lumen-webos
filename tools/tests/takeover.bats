@@ -3,35 +3,45 @@
 # against a fake luna-send that keeps the TV's state in this test's folder
 # (the default home, SAM's running list, the app in front, configd's key-filter
 # list), a fake sleep that moves a fake /proc/uptime on, and the real node for
-# the scripts' JSON; and tools/takeover.sh against a fake tools/tv.sh. The
-# key-filter list is the B9's as configd answered it on 2026-10-31
-# (fixtures/takeover/keyfilters-b9.json). Nothing reaches a TV.
+# the scripts' JSON; and tools/takeover.sh against a fake tools/tv.sh that
+# runs the scripts it generates (hook-install.sh, filter-apply.sh, each with
+# its file and the PC's SHA-256) the same way, and can tamper with them on
+# the way. The key-filter list is the B9's as configd answered it on
+# 2026-10-31 (fixtures/takeover/keyfilters-b9.json). Nothing reaches a TV.
 
 TAKEOVER="$BATS_TEST_DIRNAME/../../takeover"
+CTL="$BATS_TEST_DIRNAME/../takeover.sh"
 FIXTURE="$BATS_TEST_DIRNAME/fixtures/takeover/keyfilters-b9.json"
 LUMEN=io.github.sunnyside007.lumen.shell
 LG=com.webos.app.home
-SCRIPTS="apply.sh undo.sh status.sh home-apply.sh filter-check.sh filter-apply.sh filter-undo.sh lumen-home"
+SCRIPTS="apply.sh undo.sh status.sh home-apply.sh hook-install.sh filter-check.sh filter-apply.sh filter-undo.sh lumen-home"
 
 setup() {
     T="$BATS_TEST_TMPDIR"
     CALLS="$T/calls"
     REAL_SLEEP=$(command -v sleep)
     REAL_NODE=$(command -v node)
-    export T CALLS REAL_SLEEP REAL_NODE
+    REAL_TIMEOUT=$(command -v timeout)
+    export T CALLS REAL_SLEEP REAL_NODE REAL_TIMEOUT
     : >"$CALLS"
     mkdir -p "$T/bin" "$T/tmp" "$T/apps/$LUMEN" "$T/initd"
 
-    # The scripts with every TV path moved into this test's folder.
+    # Every TV path moved into this test's folder, and root's uid to ours.
+    # The file a generated script carries is left as the PC sent it.
+    cat >"$T/remap.sed" <<EOF
+/^staged_copy() {\$/,/^LUMEN_STAGED_FILE_END\$/b
+s|/var/luna/preferences/lumen_disable|$T/lumen_disable|g
+s|/var/lib/lumen/takeover|$T/takeover|g
+s|/var/lib/lumen/stage|$T/lumen/stage|g
+s|/tmp/lumen-home|$T/tmp/lumen-home|g
+s|/media/developer/apps/usr/palm/applications|$T/apps|g
+s|/var/lib/webosbrew/init.d|$T/initd|g
+s|/proc/uptime|$T/uptime|g
+s|/usr/lib/qt5/qml/YSM|$T/ysm|g
+s|^ROOT_UID=0\$|ROOT_UID=$(id -u)|
+EOF
     for f in $SCRIPTS; do
-        sed -e "s|/var/luna/preferences/lumen_disable|$T/lumen_disable|g" \
-            -e "s|/var/lib/lumen/takeover|$T/takeover|g" \
-            -e "s|/tmp/lumen-home|$T/tmp/lumen-home|g" \
-            -e "s|/media/developer/apps/usr/palm/applications|$T/apps|g" \
-            -e "s|/var/lib/webosbrew/init.d|$T/initd|g" \
-            -e "s|/proc/uptime|$T/uptime|g" \
-            -e "s|/usr/lib/qt5/qml/YSM|$T/ysm|g" \
-            "$TAKEOVER/$f" >"$T/$f"
+        sed -f "$T/remap.sed" "$TAKEOVER/$f" >"$T/$f"
     done
     FILTER="$T/takeover/lumen-home.js"
     echo "$LG" >"$T/home"
@@ -96,16 +106,48 @@ fi
 [ -z "${FAKE_LG_HOME_AT:-}" ] || [ "$up" -lt "$FAKE_LG_HOME_AT" ] || echo com.webos.app.home >"$T/home"
 exec "$REAL_SLEEP" 0.01
 EOF
-    # node, unless a test takes it away.
+    # node, unless a test takes it away, from everyone or from the TV's
+    # scripts only (they run it with -e; the PC runs node --check).
     cat >"$T/bin/node" <<'EOF'
 #!/bin/sh
 [ -z "${FAKE_NO_NODE:-}" ] || exit 127
+if [ "$1" = -e ]; then
+    [ -z "${FAKE_TV_NO_NODE:-}" ] || exit 127
+    case $2 in *"new Function"*) [ -z "${FAKE_TV_COMPILE_FAILS:-}" ] || exit 1 ;; esac
+fi
 exec "$REAL_NODE" "$@"
+EOF
+    # timeout, unless a test takes it away: then neither form works.
+    cat >"$T/bin/timeout" <<'EOF'
+#!/bin/sh
+[ -z "${FAKE_NO_TIMEOUT:-}" ] || exit 125
+exec "$REAL_TIMEOUT" "$@"
 EOF
     for tool in mount umount initctl reboot; do
         printf '#!/bin/sh\necho "%s $*" >>"$CALLS"\n' "$tool" >"$T/bin/$tool"
     done
-    chmod +x "$T/bin/"*
+    # tools/tv.sh: logs each call to its own file; runs the scripts
+    # tools/takeover.sh generates here, after FAKE_TAMPER (a sed script) has
+    # had its way with them, and answers status.sh with the sums asked for.
+    cat >"$T/tv.sh" <<'EOF'
+#!/bin/sh
+printf '%s|%s|%s\n' "$1" "$2" "${3:-}" >>"$T/tvcalls"
+case $1 in
+    script)
+        case $2 in
+            */status.sh)
+                printf 'default home: Lumen\nhook in init.d: %s\nfilter file: %s\n' "${FAKE_TV_HOOK:-none}" "${FAKE_TV_FILTER:-none}" ;;
+            */hook-install.sh | */filter-apply.sh)
+                cp "$2" "$T/sent-raw.sh"
+                sed -f "$T/remap.sed" "$2" >"$T/sent.sh"
+                [ -z "${FAKE_TAMPER:-}" ] || sed -i "$FAKE_TAMPER" "$T/sent.sh"
+                exec sh "$T/sent.sh" ;;
+            *) echo "ran $2" ;;
+        esac ;;
+esac
+EOF
+    chmod +x "$T/bin/"* "$T/tv.sh"
+    export LUMEN_TV_SH="$T/tv.sh"
     PATH="$T/bin:$PATH"
 }
 
@@ -151,10 +193,15 @@ handlers() {
     node -e 'console.log(JSON.parse(require("fs").readFileSync(0, "utf8")).map((e) => e.handler).join(" "))' <"$T/chain"
 }
 
-# The filter as tools/takeover.sh pushes it.
-stage_filter() {
-    cp "$TAKEOVER/filters/lumen-home.js" "$T/tmp/lumen-home-filter.js"
-    sha256sum <"$T/tmp/lumen-home-filter.js" | cut -d' ' -f1 >"$T/tmp/lumen-home-filter.js.sha256"
+# The filter or its no-op build put on the fake TV through tools/takeover.sh.
+filter_apply() {
+    run "$CTL" filter apply "$@"
+}
+
+# Nothing is left in the stage, and the stage is root's alone.
+stage_clean() {
+    [ -z "$(ls -A "$T/lumen/stage")" ]
+    [ "$(stat -c %a "$T/lumen/stage")" = 700 ]
 }
 
 # Code without comments or the words of messages, for the read-only checks.
@@ -408,86 +455,160 @@ commands() {
     [ ! -s "$CALLS" ]
 }
 
-# --- the key filter
+@test "without a working timeout command the hook does nothing and says so" {
+    run_tv apply.sh
+    : >"$CALLS"
+    FAKE_NO_TIMEOUT=1 run_hook
+    wait_done
+    log=$(cat "$T/tmp/lumen-home.log")
+    [[ "$log" == *"no timeout command; nothing done"* ]]
+    not grep -q '^luna' "$CALLS"
+    grep -q "$LG" "$T/running"
+}
+
+# --- the key filter, put on the fake TV through tools/takeover.sh
 
 @test "filter apply puts Lumen's entry just before handleSystemKeys, and saves the list without it" {
-    stage_filter
-    run_tv filter-apply.sh
+    filter_apply
     [ "$status" -eq 0 ]
     [ "$(handlers)" = "handleScreenSaver handleAccessibility handleAvReset handleLowSpeedDataBroadcast lumenHomeKeys handleSystemKeys handleHotkeys handleCPHotkeys handleFactoryKeys handleTvhotkeyAppLaunch handleLocalKeys handleMagicNumber" ]
     grep -qF "{\"file\":\"$FILTER\",\"handler\":\"lumenHomeKeys\"}" "$T/chain"
     [ "$(cat "$T/takeover/keyFilters.before")" = "$(canon <"$FIXTURE")" ]
     cmp "$FILTER" "$TAKEOVER/filters/lumen-home.js"
-    [ ! -e "$T/tmp/lumen-home-filter.js" ]
+    [ "$(stat -c %a "$FILTER")" = 644 ]
+    stage_clean
     [[ "$output" == *"5. lumenHomeKeys in $FILTER   (Lumen)"* ]]
     [[ "$output" == *"Nothing was"* ]]
     not grep -qE '^(initctl|reboot)' "$CALLS"
+    # Only the script went to the TV: no push, nothing through /tmp.
+    [ "$(wc -l <"$T/tvcalls")" -eq 1 ]
+    [[ "$(cat "$T/tvcalls")" == "script|"*"/filter-apply.sh|" ]]
+    [ -z "$(ls -A "$T/tmp")" ]
 }
 
-@test "filter apply refuses a copy whose SHA-256 differs, a file that doesn't compile, and the kill switch" {
-    stage_filter
-    echo 0000 >"$T/tmp/lumen-home-filter.js.sha256"
+@test "the script sent carries the PC's SHA-256 and the file itself" {
+    filter_apply
+    [ "$(sed -n 1p "$T/sent-raw.sh")" = "WANT=$(sha256sum <"$TAKEOVER/filters/lumen-home.js" | cut -d' ' -f1)" ]
+    sed -n "/^    cat <<'LUMEN_STAGED_FILE_END'\$/,/^LUMEN_STAGED_FILE_END\$/p" "$T/sent-raw.sh" |
+        sed '1d;$d' >"$T/carried.js"
+    cmp "$T/carried.js" "$TAKEOVER/filters/lumen-home.js"
+    # The file comes before the template, and nothing else carries it.
+    [ "$(grep -c '^staged_copy() {$' "$T/sent-raw.sh")" -eq 1 ]
+}
+
+@test "a staged filter that differs from the PC's is removed and changes nothing" {
+    FAKE_TAMPER='s/^var lumenHomeFired = false;$/var lumenHomeFired = 0;/' filter_apply
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"the staged filter is not the one the PC checked; nothing changed"* ]]
+    stage_clean
+    [ ! -e "$FILTER" ]
+    [ ! -e "$T/takeover/keyFilters.before" ]
+    not grep -q setConfigs "$CALLS"
+    cmp "$T/chain" "$FIXTURE"
+}
+
+@test "a SHA-256 changed on the way is refused just the same" {
+    FAKE_TAMPER='1s/^WANT=.*/WANT=0000000000000000000000000000000000000000000000000000000000000000/' filter_apply
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"not the one the PC checked"* ]]
+    stage_clean
+    [ ! -e "$FILTER" ]
+}
+
+@test "filter apply refuses a stage a jail could reach: a link, a folder others may write, another owner" {
+    mkdir -p "$T/lumen" "$T/elsewhere"
+    ln -s "$T/elsewhere" "$T/lumen/stage"
+    filter_apply
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$T/lumen/stage is not a real folder"* ]]
+    [ -z "$(ls -A "$T/elsewhere")" ]
+    rm "$T/lumen/stage"
+    mkdir "$T/lumen/stage"
+    chmod 777 "$T/lumen/stage"
+    filter_apply
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"is writable by others"* ]]
+    [ -z "$(ls -A "$T/lumen/stage")" ]
+    chmod 700 "$T/lumen/stage"
+    FAKE_TAMPER='s/^ROOT_UID=.*/ROOT_UID=99999/' filter_apply
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"not root"* ]]
+    # The folder above the stage counts too.
+    rm -rf "$T/lumen"
+    mkdir -p "$T/real"
+    ln -s "$T/real" "$T/lumen"
+    filter_apply
+    [ "$status" -eq 1 ]
+    [ -z "$(ls -A "$T/real")" ]
+    [ ! -e "$FILTER" ]
+    not grep -q setConfigs "$CALLS"
+}
+
+@test "filter-apply.sh run by itself, without the PC's SHA-256 and file, refuses" {
     run_tv filter-apply.sh
     [ "$status" -eq 1 ]
-    [[ "$output" == *"is not the file the PC checked"* ]]
-    printf 'function lumenHomeKeys(key, pressed, autoRepeat) {\n  return (;\n}\n' >"$T/tmp/lumen-home-filter.js"
-    sha256sum <"$T/tmp/lumen-home-filter.js" | cut -d' ' -f1 >"$T/tmp/lumen-home-filter.js.sha256"
-    run_tv filter-apply.sh
+    [[ "$output" == *"no SHA-256 from the PC: run tools/takeover.sh filter apply"* ]]
+    printf 'WANT=%064d\n' 0 | cat - "$T/filter-apply.sh" >"$T/no-file.sh"
+    run sh "$T/no-file.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"no file from the PC"* ]]
+    [ ! -e "$T/lumen/stage" ] || stage_clean
+    not grep -q luna "$CALLS"
+}
+
+@test "filter apply refuses a file the TV's node won't compile, no node on the TV, and the kill switch" {
+    FAKE_TV_COMPILE_FAILS=1 filter_apply
     [ "$status" -eq 1 ]
     [[ "$output" == *"does not compile on the TV's node"* ]]
-    stage_filter
-    touch "$T/lumen_disable"
-    run_tv filter-apply.sh
+    stage_clean
+    FAKE_TV_NO_NODE=1 filter_apply
     [ "$status" -eq 1 ]
+    stage_clean
+    touch "$T/lumen_disable"
+    filter_apply
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"lumen_disable exists; nothing changed"* ]]
     not grep -q setConfigs "$CALLS"
     [ ! -e "$FILTER" ]
     [ ! -e "$T/takeover/keyFilters.before" ]
     cmp "$T/chain" "$FIXTURE"
 }
 
-@test "filter apply refuses without node, without the push, or with no handleSystemKeys in the list" {
-    run_tv filter-apply.sh
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"run tools/takeover.sh filter apply"* ]]
-    stage_filter
-    FAKE_NO_NODE=1 run_tv filter-apply.sh
-    [ "$status" -eq 1 ]
+@test "filter apply refuses a list with no handleSystemKeys entry" {
     sed 's/handleSystemKeys/handleOtherKeys/' "$FIXTURE" >"$T/chain"
-    run_tv filter-apply.sh
+    filter_apply
     [ "$status" -eq 1 ]
     [[ "$output" == *"no handleSystemKeys entry"* ]]
     not grep -q setConfigs "$CALLS"
     [ ! -e "$FILTER" ]
+    stage_clean
 }
 
 @test "filter apply again changes only the file, and says a reboot loads it" {
-    stage_filter
-    run_tv filter-apply.sh
+    filter_apply
     : >"$CALLS"
-    sed 's/^var lumenHomeActs = true;$/var lumenHomeActs = false;/' "$TAKEOVER/filters/lumen-home.js" >"$T/tmp/lumen-home-filter.js"
-    sha256sum <"$T/tmp/lumen-home-filter.js" | cut -d' ' -f1 >"$T/tmp/lumen-home-filter.js.sha256"
     before=$(cat "$T/chain")
-    run_tv filter-apply.sh
+    filter_apply --noop
     [ "$status" -eq 0 ]
     [[ "$output" == *"already in place"* ]]
     [[ "$output" == *"reboot"* ]]
     grep -qx 'var lumenHomeActs = false;' "$FILTER"
     [ "$(cat "$T/chain")" = "$before" ]
     not grep -q setConfigs "$CALLS"
+    stage_clean
 }
 
 @test "filter apply whose list reads back otherwise writes the old list back and removes the file" {
-    stage_filter
-    FAKE_CONFIG_IGNORED=1 run_tv filter-apply.sh
+    FAKE_CONFIG_IGNORED=1 filter_apply
     [ "$status" -eq 1 ]
     [[ "$output" == *"writing the old one back"* ]]
     [ "$(grep -c setConfigs "$CALLS")" -eq 2 ]
     [ ! -e "$FILTER" ]
+    stage_clean
 }
 
 @test "filter undo takes Lumen's entry out, says the list is the saved one, and removes its files" {
-    stage_filter
-    run_tv filter-apply.sh
+    filter_apply
     run_tv filter-undo.sh
     [ "$status" -eq 0 ]
     [ "$(cat "$T/chain")" = "$(canon <"$FIXTURE")" ]
@@ -497,8 +618,7 @@ commands() {
 }
 
 @test "filter undo keeps what changed in the list since apply" {
-    stage_filter
-    run_tv filter-apply.sh
+    filter_apply
     # Another filter put first after Lumen's apply, as Glasshouse puts its own.
     sed 's|^\[|[{"file":"/var/lib/tvweb/remotekeys-filter.js","handler":"remoteKeys"},|' "$T/chain" >"$T/chain.new"
     mv "$T/chain.new" "$T/chain"
@@ -509,8 +629,7 @@ commands() {
 }
 
 @test "filter undo without node writes the saved list back" {
-    stage_filter
-    run_tv filter-apply.sh
+    filter_apply
     FAKE_NO_NODE=1 run_tv filter-undo.sh
     [ "$status" -eq 0 ]
     [[ "$output" == *"writing the saved list back"* ]]
@@ -519,8 +638,7 @@ commands() {
 }
 
 @test "filter undo keeps its files while the entry stays, and tidies up when it is gone" {
-    stage_filter
-    run_tv filter-apply.sh
+    filter_apply
     FAKE_CONFIG_IGNORED=1 run_tv filter-undo.sh
     [ "$status" -eq 1 ]
     [[ "$output" == *"still in the list; its files are kept"* ]]
@@ -536,8 +654,7 @@ commands() {
 }
 
 @test "filter check numbers the list, finds Lumen's entry, and writes nothing" {
-    stage_filter
-    run_tv filter-apply.sh
+    filter_apply
     : >"$CALLS"
     run_tv filter-check.sh
     [ "$status" -eq 0 ]
@@ -546,6 +663,78 @@ commands() {
     [[ "$output" == *"Lumen's entry: in the chain"* ]]
     [[ "$output" == *"(no $T/ysm/StarfishKeyFilter.qml)"* ]]
     not grep -qE '/set[A-Z]|/close' "$CALLS"
+}
+
+# --- the hook put on the fake TV through tools/takeover.sh
+
+@test "hook push stages the hook in root's stage, checks it, and puts only the by-hand copy in place" {
+    run "$CTL" hook push
+    [ "$status" -eq 0 ]
+    cmp "$T/takeover/boot-hook" "$TAKEOVER/lumen-home"
+    [ "$(stat -c %a "$T/takeover/boot-hook")" = 644 ]
+    [ ! -e "$T/initd/lumen-home" ]
+    stage_clean
+    [[ "$output" == *"boot-hook: $(sha256sum <"$TAKEOVER/lumen-home" | cut -d' ' -f1)"* ]]
+    [[ "$output" == *"tools/tv.sh script takeover/home-apply.sh runs it by hand"* ]]
+    [ "$(wc -l <"$T/tvcalls")" -eq 1 ]
+    [[ "$(cat "$T/tvcalls")" == "script|"*"/hook-install.sh|" ]]
+    [ -z "$(ls -A "$T/tmp")" ]
+}
+
+@test "hook install puts the hook into init.d as well, whole and executable, and doesn't run it" {
+    run "$CTL" hook install
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"installed /var/lib/webosbrew/init.d/lumen-home"* ]]
+    cmp "$T/initd/lumen-home" "$TAKEOVER/lumen-home"
+    [ "$(stat -c %a "$T/initd/lumen-home")" = 755 ]
+    cmp "$T/takeover/boot-hook" "$TAKEOVER/lumen-home"
+    [ -z "$(ls "$T/initd" | grep -v '^lumen-home$')" ]
+    stage_clean
+    not grep -q '^luna' "$CALLS"
+    [ ! -e "$T/tmp/lumen-home.log" ]
+}
+
+@test "a staged hook that differs from the PC's installs nothing anywhere" {
+    FAKE_TAMPER='s/^DEADLINE=260$/DEADLINE=99999/' run "$CTL" hook install
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"the staged hook is not the one the PC sent; nothing changed"* ]]
+    [ ! -e "$T/initd/lumen-home" ]
+    [ ! -e "$T/takeover/boot-hook" ]
+    stage_clean
+    # An installed hook stays as it was.
+    run "$CTL" hook install
+    FAKE_TAMPER='s/^DEADLINE=260$/DEADLINE=99999/' run "$CTL" hook install
+    [ "$status" -eq 1 ]
+    cmp "$T/initd/lumen-home" "$TAKEOVER/lumen-home"
+    cmp "$T/takeover/boot-hook" "$TAKEOVER/lumen-home"
+}
+
+@test "hook install refuses a stage a jail could reach, and a hook that doesn't parse" {
+    mkdir -p "$T/lumen" "$T/elsewhere"
+    ln -s "$T/elsewhere" "$T/lumen/stage"
+    run "$CTL" hook install
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"is not a real folder"* ]]
+    [ -z "$(ls -A "$T/elsewhere")" ]
+    [ ! -e "$T/initd/lumen-home" ]
+    rm "$T/lumen/stage"
+    root="$T/root"
+    mkdir -p "$root/tools" "$root/takeover"
+    cp "$CTL" "$root/tools/"
+    cp "$TAKEOVER/hook-install.sh" "$root/takeover/"
+    printf 'if then\n' >"$root/takeover/lumen-home"
+    run "$root/tools/takeover.sh" hook install
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"the hook does not parse"* ]]
+    [ ! -e "$T/initd/lumen-home" ]
+    stage_clean
+}
+
+@test "hook-install.sh run by itself refuses" {
+    run_tv hook-install.sh
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"no SHA-256 from the PC: run tools/takeover.sh hook push"* ]]
+    [ ! -e "$T/takeover/boot-hook" ]
 }
 
 # --- what every script may touch
@@ -568,19 +757,22 @@ commands() {
     done
 }
 
-@test "nothing in takeover/ writes outside /var/lib/lumen/takeover and /tmp" {
+@test "nothing in takeover/ writes outside /var/lib/lumen and /tmp, but the hook into init.d" {
     for f in $SCRIPTS; do
         code=$(commands "$TAKEOVER/$f")
-        # Each path variable is under one of the two.
+        # Each path variable is under /var/lib/lumen's takeover or stage
+        # folder, or /tmp; hook-install.sh alone names init.d's hook.
         while IFS='=' read -r name value; do
-            case $value in
-                /var/lib/lumen/takeover | '$DIR/'* | /tmp/lumen-home*) ;;
+            case $f:$name=$value in
+                *=/var/lib/lumen/takeover | *='$DIR/'* | *=/tmp/lumen-home*) ;;
+                *:STAGE=/var/lib/lumen/stage | *:STAGED='$STAGE/'*) ;;
+                hook-install.sh:HOOK_DEST=/var/lib/webosbrew/init.d/lumen-home) ;;
                 *) echo "$f: $name=$value"; return 1 ;;
             esac
-        done < <(grep -E '^(DIR|BEFORE|FILTER|STAGED|SAVED|LOG)=' "$TAKEOVER/$f")
+        done < <(grep -E '^(DIR|BEFORE|FILTER|STAGE|STAGED|SAVED|LOG|HOOK_DEST)=' "$TAKEOVER/$f")
         run grep -Eo '>>?[[:space:]]*[^[:space:]&;)|]+' <<<"$code"
         for target in "${lines[@]}"; do
-            [[ "$target" =~ ^\>\>?[[:space:]]*(/dev/null|\"\$LOG\"|\"\$BEFORE.tmp\"|\"\$DIR/keyFilters.before.tmp\")$ ]] || {
+            [[ "$target" =~ ^\>\>?[[:space:]]*(/dev/null|\"\$LOG\"|\"\$BEFORE.tmp\"|\"\$DIR/keyFilters.before.tmp\"|\"\$STAGED\")$ ]] || {
                 echo "$f writes to $target"
                 return 1
             }
@@ -589,8 +781,11 @@ commands() {
         run grep -Eo '\b(rm|mv|cp|touch|mkdir|rmdir|ln|chmod|tee|dd|truncate)\b[^;|&]*' <<<"$code"
         for cmd in "${lines[@]}"; do
             for word in ${cmd#* }; do
+                word=${word%\'}
+                word=${word%)}
                 case $word in
-                    -f | -p | 2\>/dev/null | '"$DIR"' | '"$DIR/'* | '"$BEFORE'* | '"$FILTER'* | '"$STAGED'* | '"$SAVED"') ;;
+                    -f | -p | 644 | 755 | EXIT | 2\>/dev/null | '"$DIR"' | '"$DIR/'* | '"$BEFORE'* | '"$FILTER'* | '"$STAGED'* | '"$STAGE"' | '"${STAGE%/*}"' | '"$SAVED"') ;;
+                    '"$HOOK_DEST'*) [ "$f" = hook-install.sh ] || { echo "$f: $cmd"; return 1; } ;;
                     *) echo "$f: $cmd"; return 1 ;;
                 esac
             done
@@ -598,8 +793,8 @@ commands() {
     done
 }
 
-@test "the scripts share their luna, setting and list helpers word for word" {
-    for fn in call apps_of home_of chain sha; do
+@test "the scripts share their luna, setting, list, sum and stage helpers word for word" {
+    for fn in call apps_of home_of chain sha stage_ok; do
         first=
         for f in $SCRIPTS; do
             body=$(sed -n "/^$fn() {/,/^}/p" "$TAKEOVER/$f")
@@ -615,131 +810,74 @@ commands() {
         done
         [ -n "$first" ]
     done
-    # Three copies of the list helper: check, apply and undo.
+    # Three copies of the list helper: check, apply and undo; two of the stage's.
     [ "$(grep -l '^chain() {' "$TAKEOVER"/*.sh | wc -l)" -eq 3 ]
+    [ "$(grep -l '^stage_ok() {' "$TAKEOVER"/*.sh | wc -l)" -eq 2 ]
+    # Nothing in takeover/ stages in /tmp.
+    not grep -n 'lumen-home-filter\|lumen-home\.new\|\.sha256' "$TAKEOVER"/*.sh "$TAKEOVER/lumen-home" "$BATS_TEST_DIRNAME/../takeover.sh"
 }
 
-# --- tools/takeover.sh, against a fake tools/tv.sh
-
-ctl_setup() {
-    CTL="$BATS_TEST_DIRNAME/../takeover.sh"
-    cat >"$T/tv.sh" <<'EOF'
-#!/bin/sh
-printf '%s|%s|%s\n' "$1" "$2" "${3:-}" >>"$CALLS"
-case $1 in
-    push) cp "$2" "$T/pushed$(echo "$3" | tr / _)" ;;
-    run)
-        case $2 in
-            *'sha256sum <'*'| cut'*)
-                if [ -n "${FAKE_BAD_SHA:-}" ]; then echo 0000
-                else sha256sum <"$T/pushed_tmp_lumen-home.new" | cut -d' ' -f1; fi ;;
-        esac ;;
-    script)
-        case $2 in
-            */status.sh) printf 'default home: Lumen\nhook in init.d: %s\nfilter file: %s\n' "${FAKE_TV_HOOK:-none}" "${FAKE_TV_FILTER:-none}" ;;
-            *) echo "ran $2" ;;
-        esac ;;
-esac
-EOF
-    chmod +x "$T/tv.sh"
-    export LUMEN_TV_SH="$T/tv.sh"
-}
+# --- tools/takeover.sh's own commands, against the fake tools/tv.sh
 
 @test "takeover.sh: an unknown command fails with usage and runs nothing" {
-    ctl_setup
     for args in frobnicate "hook" "hook frob" "filter" "filter apply --yes"; do
         # shellcheck disable=SC2086
         run "$CTL" $args
         [ "$status" -eq 2 ]
         [[ "$output" == *"tools/takeover.sh filter apply [--noop]"* ]]
     done
-    [ ! -s "$CALLS" ]
+    [ ! -e "$T/tvcalls" ]
 }
 
 @test "takeover.sh apply reminds of the backup, then runs takeover/apply.sh; undo runs undo.sh" {
-    ctl_setup
     run "$CTL" apply
     [ "$status" -eq 0 ]
     [[ "${lines[0]}" == "tools/backup.sh comes first"* ]]
     run "$CTL" undo
-    run cat "$CALLS"
+    run cat "$T/tvcalls"
     [[ "${lines[0]}" == "script|"*"/takeover/apply.sh|" ]]
     [[ "${lines[1]}" == "script|"*"/takeover/undo.sh|" ]]
     [ "${#lines[@]}" -eq 2 ]
 }
 
-@test "takeover.sh hook push checks the copy and moves it whole into /var/lib/lumen/takeover" {
-    ctl_setup
-    run "$CTL" hook push
-    [ "$status" -eq 0 ]
-    run cat "$CALLS"
-    [[ "${lines[0]}" == "push|"*"/takeover/lumen-home|/tmp/lumen-home.new" ]]
-    [[ "${lines[1]}" == "run|set -e; sh -n /tmp/lumen-home.new;"*"mv /var/lib/lumen/takeover/boot-hook.tmp /var/lib/lumen/takeover/boot-hook"* ]]
-    [ "${#lines[@]}" -eq 2 ]
-    FAKE_BAD_SHA=1 run "$CTL" hook push
-    [ "$status" -eq 1 ]
-    [[ "$output" == *"is not this checkout's"* ]]
-}
-
-@test "takeover.sh hook install pushes, installs the hook whole into init.d, and doesn't run it" {
-    ctl_setup
-    run "$CTL" hook install
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"installed /var/lib/webosbrew/init.d/lumen-home"* ]]
-    run cat "$CALLS"
-    [ "${#lines[@]}" -eq 4 ]
-    [[ "${lines[3]}" == "run|sh -n /tmp/lumen-home.new && cp "*"&& mv /var/lib/webosbrew/init.d/lumen-home.tmp /var/lib/webosbrew/init.d/lumen-home"* ]]
-    not grep -qx 'run|/var/lib/webosbrew/init.d/lumen-home|' "$CALLS"
-    : >"$CALLS"
-    FAKE_BAD_SHA=1 run "$CTL" hook install
-    [ "$status" -eq 1 ]
-    [ "$(wc -l <"$CALLS")" -eq 2 ]
-}
-
 @test "takeover.sh hook remove deletes only the hook" {
-    ctl_setup
     run "$CTL" hook remove
     [ "$status" -eq 0 ]
-    [ "$(cat "$CALLS")" = "run|rm -f /var/lib/webosbrew/init.d/lumen-home && echo 'removed /var/lib/webosbrew/init.d/lumen-home'|" ]
+    [ "$(cat "$T/tvcalls")" = "run|rm -f /var/lib/webosbrew/init.d/lumen-home && echo 'removed /var/lib/webosbrew/init.d/lumen-home'|" ]
 }
 
-@test "takeover.sh filter apply pushes the checked file and its SHA-256, then runs filter-apply.sh" {
-    ctl_setup
-    run "$CTL" filter apply
-    [ "$status" -eq 0 ]
-    cmp "$T/pushed_tmp_lumen-home-filter.js" "$TAKEOVER/filters/lumen-home.js"
-    [ "$(cat "$T/pushed_tmp_lumen-home-filter.js.sha256")" = "$(sha256sum <"$TAKEOVER/filters/lumen-home.js" | cut -d' ' -f1)" ]
-    run cat "$CALLS"
-    [[ "${lines[2]}" == "script|"*"/takeover/filter-apply.sh|" ]]
-    [ "${#lines[@]}" -eq 3 ]
-}
-
-@test "takeover.sh filter apply --noop pushes the build that differs in its one switch" {
-    ctl_setup
-    run "$CTL" filter apply --noop
+@test "takeover.sh filter apply --noop sends the build that differs in its one switch" {
+    filter_apply --noop
     [ "$status" -eq 0 ]
     [[ "$output" == *"acts on nothing"* ]]
-    run diff "$TAKEOVER/filters/lumen-home.js" "$T/pushed_tmp_lumen-home-filter.js"
+    run diff "$TAKEOVER/filters/lumen-home.js" "$FILTER"
     [ "$status" -eq 1 ]
     [ "$(printf '%s\n' "$output" | grep -c '^[<>]')" -eq 2 ]
     [[ "$output" == *"> var lumenHomeActs = false;"* ]]
-    [ "$(cat "$T/pushed_tmp_lumen-home-filter.js.sha256")" = "$(sha256sum <"$T/pushed_tmp_lumen-home-filter.js" | cut -d' ' -f1)" ]
+    [ "$(sed -n 1p "$T/sent-raw.sh")" = "WANT=$(sha256sum <"$FILTER" | cut -d' ' -f1)" ]
 }
 
-@test "takeover.sh filter apply refuses a filter with syntax newer than ES5 and pushes nothing" {
-    ctl_setup
+@test "takeover.sh refuses a filter newer than ES5, or a file it can't carry whole, and sends nothing" {
     root="$T/root"
     mkdir -p "$root/tools" "$root/takeover/filters"
     cp "$CTL" "$root/tools/"
+    cp "$TAKEOVER/filter-apply.sh" "$TAKEOVER/hook-install.sh" "$root/takeover/"
     sed 's/^var lumenHomeFired = false;$/let lumenHomeFired = false;/' "$TAKEOVER/filters/lumen-home.js" >"$root/takeover/filters/lumen-home.js"
     run "$root/tools/takeover.sh" filter apply
     [ "$status" -eq 1 ]
     [[ "$output" == *"newer than ES5"* ]]
-    [ ! -s "$CALLS" ]
+    { cat "$TAKEOVER/filters/lumen-home.js"; echo LUMEN_STAGED_FILE_END; } >"$root/takeover/filters/lumen-home.js"
+    run "$root/tools/takeover.sh" filter apply
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"holds the line LUMEN_STAGED_FILE_END"* ]]
+    printf '#!/bin/sh\ntrue' >"$root/takeover/lumen-home"
+    run "$root/tools/takeover.sh" hook push
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not end in a newline"* ]]
+    [ ! -e "$T/tvcalls" ]
 }
 
 @test "takeover.sh status names which hook and which filter build the TV has" {
-    ctl_setup
     hook=$(sha256sum <"$TAKEOVER/lumen-home" | cut -d' ' -f1)
     noop=$(sed 's/^var lumenHomeActs = true;$/var lumenHomeActs = false;/' "$TAKEOVER/filters/lumen-home.js" | sha256sum | cut -d' ' -f1)
     FAKE_TV_HOOK=$hook FAKE_TV_FILTER=$noop run "$CTL" status
