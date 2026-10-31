@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# tools/uninstall-all.sh against a fake tools/tv.sh that only logs its calls.
-# Nothing reaches a TV.
+# tools/uninstall-all.sh against a fake tools/tv.sh and a fake
+# tools/remote.sh that only log their calls. Nothing reaches a TV.
 
 setup() {
     UNINSTALL="$BATS_TEST_DIRNAME/../uninstall-all.sh"
@@ -13,8 +13,13 @@ case "$1 $2" in "remove ${FAKE_FAIL_REMOVE:-none}") exit 1 ;; esac
 case "$1 $2" in "run "*"${FAKE_FAIL_RUN:-no such step}"*) exit 1 ;; esac
 exit 0
 EOF
-    chmod +x "$BATS_TEST_TMPDIR/tv.sh"
-    export CALLS LUMEN_TV_SH="$BATS_TEST_TMPDIR/tv.sh"
+    cat >"$BATS_TEST_TMPDIR/remote.sh" <<'EOF'
+#!/bin/sh
+printf 'remote|%s\n' "$*" >>"$CALLS"
+[ -z "${FAKE_FAIL_REMOTE:-}" ]
+EOF
+    chmod +x "$BATS_TEST_TMPDIR/tv.sh" "$BATS_TEST_TMPDIR/remote.sh"
+    export CALLS LUMEN_TV_SH="$BATS_TEST_TMPDIR/tv.sh" LUMEN_REMOTE_SH="$BATS_TEST_TMPDIR/remote.sh"
 }
 
 @test "the default is a dry run that runs nothing" {
@@ -25,6 +30,7 @@ EOF
     [[ "$output" == *"rm -rf /var/lib/lumen"* ]]
     [[ "$output" == *"rm -f /var/lib/webosbrew/init.d/lumen-*"* ]]
     [[ "$output" == *"tools/tv.sh script profiles/privacy/guard-undo.sh"* ]]
+    [[ "$output" == *"  tools/remote.sh remove"* ]]
     [[ "$output" == *"lumen-capture"* ]]
     [[ "$output" == *"Glasshouse is kept"* ]]
     [[ "$output" != *"tvwebctl"* ]]
@@ -59,7 +65,8 @@ EOF
     grep -qx 'remove|io.github.sunnyside007.lumen.shell' "$CALLS"
     grep -qx 'run|rm -rf /var/lib/lumen' "$CALLS"
     grep -qx 'remove|com.beb.plxnative' "$CALLS"
-    [ "$(wc -l <"$CALLS")" -eq 8 ]
+    grep -qx 'remote|remove' "$CALLS"
+    [ "$(wc -l <"$CALLS")" -eq 9 ]
     [[ "$output" == *"Cold boot"* ]]
 }
 
@@ -74,6 +81,27 @@ EOF
     [ "$guard" -lt "$files" ]
     # The script is this checkout's, and exists.
     [ -f "$(sed -n 's/^script|//p' "$CALLS")" ]
+}
+
+@test "Lumen Remote's line goes through remote.sh remove, before /var/lib/lumen" {
+    run "$UNINSTALL" --yes
+    [ "$status" -eq 0 ]
+    guard=$(grep -nx 'script|.*/profiles/privacy/guard-undo.sh' "$CALLS" | cut -d: -f1)
+    remote=$(grep -nxF 'remote|remove' "$CALLS" | cut -d: -f1)
+    files=$(grep -nx 'run|rm -rf /var/lib/lumen' "$CALLS" | cut -d: -f1)
+    [ -n "$guard" ] && [ -n "$remote" ] && [ -n "$files" ]
+    [ "$guard" -lt "$remote" ]
+    [ "$remote" -lt "$files" ]
+    # Only through remote.sh: tools/tv.sh has no such command.
+    [ "$(grep -c '|remove$' "$CALLS")" -eq 1 ]
+}
+
+@test "a failed remote.sh remove does not stop the rest, and fails the run" {
+    FAKE_FAIL_REMOTE=1 run "$UNINSTALL" --yes
+    [ "$status" -eq 1 ]
+    grep -qx 'run|rm -rf /var/lib/lumen' "$CALLS"
+    grep -qxF 'run|rm -f /tmp/lumen-*' "$CALLS"
+    [[ "$output" == *"1 step(s) failed"* ]]
 }
 
 @test "a script step that names Homebrew Channel's settings stops everything" {

@@ -9,12 +9,13 @@
 #
 # Lumen's parts: the shell app, Lumen's boot hooks
 # (/var/lib/webosbrew/init.d/lumen-*), Lumen Guard's resolv.conf mount, nat
-# rules and process (profiles/privacy/guard-undo.sh), /var/lib/lumen, its kill
+# rules and process (profiles/privacy/guard-undo.sh), Lumen Remote's line in
+# root's authorized_keys (tools/remote.sh remove), /var/lib/lumen, its kill
 # switch, the capture directory and its files in /tmp. --glasshouse runs
 # Glasshouse's documented undo (tvwebctl restores, stop, its files and boot
 # hooks), then removes its app.
 #
-# It never touches Homebrew Channel, root, the SSH key or
+# It never touches Homebrew Channel, root, the owner's SSH key or
 # /var/luna/preferences/webosbrew_*. Every step runs even if an earlier one
 # fails; the exit status says whether all of them succeeded. Cold boot the TV
 # afterwards (unplug it) so no bind mount is left.
@@ -22,6 +23,7 @@ set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TV_SH=${LUMEN_TV_SH:-$ROOT/tools/tv.sh}
+REMOTE_SH=${LUMEN_REMOTE_SH:-$ROOT/tools/remote.sh}
 
 LUMEN_APP=io.github.sunnyside007.lumen.shell
 GLASSHOUSE_APP=io.github.rorygallagher2024.lg-webos-dashboard
@@ -56,7 +58,8 @@ trap 'echo "interrupted; later steps not run" >&2; exit 130' INT
 trap 'exit 143' TERM
 
 # step KIND ROLE ARG: KIND is `remove` (an app id), `run` (a command on the
-# TV) or `script` (a file here, run on the TV). ROLE `restore` marks
+# TV), `script` (a file here, run on the TV) or `remote` (tools/remote.sh
+# with ARG as its command). ROLE `restore` marks
 # Glasshouse's undo; `purge` steps delete its files and run only if every
 # restore succeeded, so a failed one can be retried.
 step() {
@@ -67,6 +70,8 @@ step remove - "$LUMEN_APP"
 step run - "rm -f $INITD/lumen-*"
 # Guard's mount and rules first, then Guard, while its files are still there.
 step script - "$ROOT/profiles/privacy/guard-undo.sh"
+# Lumen Remote's key line, while lumen-ctl is still there for it to name.
+step remote - remove
 step run - "rm -rf /var/lib/lumen"
 step run - "rm -f /var/luna/preferences/lumen_disable"
 step run - "if [ -f /media/developer/temp/lumen-capture/lumen-capture.sh ]; then sh /media/developer/temp/lumen-capture/lumen-capture.sh clean; else rm -rf /media/developer/temp/lumen-capture; fi"
@@ -90,7 +95,10 @@ tab=$(printf '\t')
 
 # The last line of defence for rule 2's exceptions: nothing above, nor any
 # script it runs, may name Homebrew Channel, its settings, root's SSH keys or
-# the whole init.d.
+# the whole init.d. The one exception is the `remote` step: tools/remote.sh
+# remove (profiles/remote/remove.sh) edits authorized_keys to take out
+# Lumen Remote's own line, keeps every other, and refuses if no key would be
+# left; tools/tests/remote.bats checks that.
 if {
     cat "$steps"
     while IFS=$tab read -r kind _ arg; do
@@ -108,6 +116,8 @@ if [ $yes -eq 0 ]; then
             echo "  tools/tv.sh remove $arg$note"
         elif [ "$kind" = script ]; then
             echo "  tools/tv.sh script ${arg#"$ROOT"/}$note"
+        elif [ "$kind" = remote ]; then
+            echo "  tools/remote.sh $arg$note"
         else
             echo "  tools/tv.sh run '$arg'$note"
         fi
@@ -125,7 +135,12 @@ while IFS=$tab read -r kind role arg; do
         continue
     fi
     echo "> $kind $arg"
-    if ! "$TV_SH" "$kind" "$arg" </dev/null; then
+    if [ "$kind" = remote ]; then
+        set -- "$REMOTE_SH" "$arg"
+    else
+        set -- "$TV_SH" "$kind" "$arg"
+    fi
+    if ! "$@" </dev/null; then
         echo "  (failed; going on)"
         failed=$((failed + 1))
         [ "$role" = restore ] && restore_failed=1
