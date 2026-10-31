@@ -15,7 +15,8 @@
 # Guard's resolv.conf mount, nat rules and process
 # (profiles/privacy/guard-undo.sh), Lumen Remote's line in root's
 # authorized_keys (tools/remote.sh remove), the capture (stopped first),
-# /var/lib/lumen, its kill switch, and what earlier versions left in /tmp and
+# /var/lib/lumen, the HDR check's /var/lib/lumen-hdr, its kill switch, and
+# what earlier versions left in /tmp and
 # /media/developer/temp/lumen-capture. --glasshouse runs
 # Glasshouse's documented undo (tvwebctl restores, stop, its files and boot
 # hooks), then removes its app.
@@ -87,6 +88,9 @@ step remote - remove
 # versions used, in apps' reach, only deleted: root runs nothing from it.
 step run - "if [ -f /var/lib/lumen/capture/lumen-capture.sh ]; then sh /var/lib/lumen/capture/lumen-capture.sh clean; fi; rm -rf /media/developer/temp/lumen-capture"
 step run - "rm -rf /var/lib/lumen"
+# The copy the studio's HDR check plays (studio/tv/hdr-check.sh), if a run
+# was not cleaned up.
+step run - "rm -rf /var/lib/lumen-hdr"
 step run - "rm -f /var/luna/preferences/lumen_disable"
 step run - "rm -f /tmp/lumen-*"
 

@@ -5,9 +5,13 @@ own video player, `com.webos.app.photovideo` (the webOS 3–5 player, present
 on the B9), and read the picture settings while it plays.
 
 Everything is temporary, as [docs/safety.md](../../docs/safety.md) asks: the
-loop goes to `/tmp` on the TV, which is RAM, and the only thing started is
-LG's player. No setting is changed. Run the commands from the repository root
-in Git Bash, with `.env` set up ([docs/setup.md](../../docs/setup.md)).
+loop goes to root's stage on the TV (`/var/lib/lumen/stage/hdr`), the script
+copies it to `/var/lib/lumen-hdr` for the player, the last step removes both,
+and the only thing started is LG's player. No setting is changed. Root
+writes nothing into `/tmp`, which every app's jail shares
+([CONTRIBUTING.md](../../CONTRIBUTING.md)). Run the commands from the
+repository root in Git Bash, with `.env` set up
+([docs/setup.md](../../docs/setup.md)).
 
 ## 1. Copy a loop to the TV
 
@@ -17,10 +21,12 @@ calmer `aurora-2160p-60s.mp4` and the second scene, `fireflies-2160p.mp4`,
 go the same way: copy each in turn as `loop.mp4`.
 
 ```sh
-tools/tv.sh push dist/studio/aurora-2160p.mp4 /tmp/lumen-hdr/loop.mp4
+tools/tv.sh push dist/studio/aurora-2160p.mp4 /var/lib/lumen/stage/hdr/loop.mp4
 ```
 
-`push` makes the folder and checks that the size on the TV matches.
+`push` checks that the stage is root's alone, makes the folder and checks
+that the size on the TV matches. `/var` had about 270 MB free on the B9 on
+2026-10-31, and a loop takes twice its size there until the clean-up.
 
 ## 2. Play it and read the dynamic range
 
@@ -28,7 +34,9 @@ tools/tv.sh push dist/studio/aurora-2160p.mp4 /tmp/lumen-hdr/loop.mp4
 tools/tv.sh script studio/tv/hdr-check.sh
 ```
 
-It closes the player if it is open, prints the picture settings'
+It copies the loop to `/var/lib/lumen-hdr` (a folder anyone may read and
+only root may write, since LG's player may not run as root), closes the
+player if it is open, prints the picture settings'
 `pictureMode` and `dynamicRange`, starts the player, and polls for up to 30 s
 until the dynamic range leaves `sdr`. The last line is the verdict:
 
@@ -61,20 +69,19 @@ While it plays, look at the TV:
 
 ```sh
 tools/tv.sh close com.webos.app.photovideo
-tools/tv.sh run 'rm -rf /tmp/lumen-hdr'
+tools/tv.sh run 'rm -rf /var/lib/lumen/stage/hdr /var/lib/lumen-hdr'
 ```
+
+Both folders are on `/var`, which a reboot keeps, so run this whatever the
+result.
 
 ## If it does not work
 
-* **The player will not open the file.** Try a folder on the apps
-  partition (1.8 GB free) instead of `/tmp`. It is not a system partition,
-  but it is persistent, so run the last line whatever the result:
-
-  ```sh
-  tools/tv.sh push dist/studio/aurora-2160p.mp4 /media/developer/temp/lumen-hdr/loop.mp4
-  tools/tv.sh run 'LUMEN_HDR_DIR=/media/developer/temp/lumen-hdr sh -s' < studio/tv/hdr-check.sh
-  tools/tv.sh run 'rm -rf /media/developer/temp/lumen-hdr'
-  ```
+* **The player will not open the file.** The 2026-10-20 run played from
+  `/tmp`; this is the first from `/var/lib/lumen-hdr`. Keep the player's
+  answer and `tools/tv.sh run 'ls -ldn /var/lib/lumen-hdr /var/lib/lumen-hdr/*'`,
+  clean up, and try the USB stick (the last item) to tell the file from the
+  path.
 
 * **It plays, but stays SDR.** Try the Matroska version: it carries the same
   stream, and some players read HDR metadata from the container. Encode it
@@ -84,8 +91,8 @@ tools/tv.sh run 'rm -rf /tmp/lumen-hdr'
 
   ```sh
   tools/studio.sh python3 studio/encode.py dist/studio/aurora-2160p --out dist/studio/aurora-2160p.mkv
-  tools/tv.sh run 'rm -f /tmp/lumen-hdr/loop.mp4'
-  tools/tv.sh push dist/studio/aurora-2160p.mkv /tmp/lumen-hdr/loop.mkv
+  tools/tv.sh run 'rm -f /var/lib/lumen/stage/hdr/loop.mp4'
+  tools/tv.sh push dist/studio/aurora-2160p.mkv /var/lib/lumen/stage/hdr/loop.mkv
   tools/tv.sh script studio/tv/hdr-check.sh
   ```
 

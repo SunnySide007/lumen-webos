@@ -4,11 +4,13 @@
 #
 #   tools/tv.sh script studio/tv/hdr-check.sh
 #
-# after `tools/tv.sh push <loop> /tmp/lumen-hdr/loop.mp4` (or loop.mkv); the
-# steps are in studio/tv/README.md. It changes no setting: it closes and starts the
-# player (com.webos.app.photovideo, the webOS 3-5 player) and reads the
-# picture settings, whose "dimension" says which dynamic range the panel is
-# in. /tmp is RAM, so a reboot leaves nothing behind. POSIX sh for busybox.
+# after `tools/tv.sh push <loop> /var/lib/lumen/stage/hdr/loop.mp4` (or
+# loop.mkv); the steps are in studio/tv/README.md. It changes no setting: it
+# copies the loop out of root's stage into /var/lib/lumen-hdr, closes and
+# starts the player (com.webos.app.photovideo, the webOS 3-5 player) and
+# reads the picture settings, whose "dimension" says which dynamic range the
+# panel is in. The README's last step removes both folders. POSIX sh for
+# busybox.
 #
 # Exit status: 0 HDR, 1 still SDR, 2 the player did not start or is not in
 # front, 3 inconclusive (HDR before the player started).
@@ -16,19 +18,51 @@
 # Every luna-send reads /dev/null: run as `sh -s` over SSH, a command that
 # reads stdin would swallow the rest of this script.
 
-dir=${LUMEN_HDR_DIR:-/tmp/lumen-hdr}
+stage=${LUMEN_HDR_STAGE:-/var/lib/lumen/stage/hdr}
+dir=${LUMEN_HDR_DIR:-/var/lib/lumen-hdr}
 player=com.webos.app.photovideo
 limit=30 # seconds to wait for playback to start and the picture mode to follow
 
-video=
-for candidate in "$dir/loop.mp4" "$dir/loop.mkv"; do
+staged=
+for candidate in "$stage/loop.mp4" "$stage/loop.mkv"; do
     if [ -f "$candidate" ]; then
-        video=$candidate
+        staged=$candidate
         break
     fi
 done
-if [ -z "$video" ]; then
-    echo "no loop in $dir: copy one to $dir/loop.mp4 first (studio/tv/README.md)"
+if [ -z "$staged" ]; then
+    echo "no loop in $stage: push one to $stage/loop.mp4 first (studio/tv/README.md)"
+    exit 1
+fi
+
+# Root's stage is root's alone, and LG's player may not run as root, so the
+# loop plays from a copy in a folder that anyone may read and only root may
+# write: nothing an app does there can swap the file or redirect the copy.
+umask 022
+mkdir -p "$dir"
+if [ -L "$dir" ] || [ ! -d "$dir" ]; then
+    echo "$dir is not a real folder; nothing copied"
+    exit 1
+fi
+# Split on purpose: mode, links, owner's uid.
+# shellcheck disable=SC2046
+set -- $(ls -ldn "$dir")
+case $1 in
+    d????[!w]??[!w]*) ;;
+    *)
+        echo "$dir is writable by others ($1); nothing copied"
+        exit 1
+        ;;
+esac
+if [ "$3" != "$(id -u)" ]; then
+    echo "$dir is not this user's (uid $3); nothing copied"
+    exit 1
+fi
+rm -f "$dir/loop.mp4" "$dir/loop.mkv"
+video=$dir/${staged##*/}
+# cp keeps the staged file's 0600, so the mode is set after.
+if ! cp "$staged" "$video" || ! chmod 0644 "$video"; then
+    echo "could not copy $staged to $dir"
     exit 1
 fi
 
@@ -43,7 +77,7 @@ state() {
     echo "$1: pictureMode=$(field pictureMode) dynamicRange=$(field dynamicRange)"
 }
 
-echo "loop: $video ($(wc -c <"$video") bytes)"
+echo "loop: $video ($(wc -c <"$video") bytes), copied from $staged"
 
 # A player left open from an earlier run would only come to the front, still
 # playing the earlier loop: close it first.

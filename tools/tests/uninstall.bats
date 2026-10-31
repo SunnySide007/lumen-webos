@@ -68,9 +68,10 @@ EOF
     [ "$status" -eq 0 ]
     grep -qx 'remove|io.github.sunnyside007.lumen.shell' "$CALLS"
     grep -qx 'run|rm -rf /var/lib/lumen' "$CALLS"
+    grep -qx 'run|rm -rf /var/lib/lumen-hdr' "$CALLS"
     grep -qx 'remove|com.beb.plxnative' "$CALLS"
     grep -qx 'remote|remove' "$CALLS"
-    [ "$(wc -l <"$CALLS")" -eq 11 ]
+    [ "$(wc -l <"$CALLS")" -eq 12 ]
     [[ "$output" == *"Cold boot"* ]]
 }
 

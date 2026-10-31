@@ -4,9 +4,12 @@
 
 setup() {
     SCRIPT="$BATS_TEST_DIRNAME/../../studio/tv/hdr-check.sh"
+    # Root's stage, where tools/tv.sh push puts the loop, and the folder the
+    # script copies it to for the player; the script makes the second.
+    export LUMEN_HDR_STAGE="$BATS_TEST_TMPDIR/stage/hdr"
     export LUMEN_HDR_DIR="$BATS_TEST_TMPDIR/lumen-hdr"
     export STUB_DIR="$BATS_TEST_TMPDIR/stub"
-    mkdir -p "$LUMEN_HDR_DIR" "$STUB_DIR/bin"
+    mkdir -p "$LUMEN_HDR_STAGE" "$STUB_DIR/bin"
 
     # luna-send answers like the B9 (docs/device/recon-*.txt): picture settings
     # with a dimension block, which reads HDR once the player has launched.
@@ -53,7 +56,7 @@ run_like_tv_sh() {
 }
 
 @test "an HDR switch is reported" {
-    printf 'video' >"$LUMEN_HDR_DIR/loop.mp4"
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mp4"
     run_like_tv_sh
     [ "$status" -eq 0 ]
     [[ "$output" == *"before: pictureMode=expert2 dynamicRange=sdr"* ]]
@@ -63,20 +66,20 @@ run_like_tv_sh() {
 }
 
 @test "a player left open is closed before the test" {
-    printf 'video' >"$LUMEN_HDR_DIR/loop.mp4"
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mp4"
     run_like_tv_sh
     head -n 1 "$STUB_DIR/calls" | grep -q "closeByAppId.*com.webos.app.photovideo"
 }
 
 @test "the player gets the loop as a file URL" {
-    printf 'video' >"$LUMEN_HDR_DIR/loop.mp4"
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mp4"
     run_like_tv_sh
     grep -qF "\"id\":\"com.webos.app.photovideo\"" "$STUB_DIR/calls"
     grep -qF "\"fullPath\":\"file://$LUMEN_HDR_DIR/loop.mp4\"" "$STUB_DIR/calls"
 }
 
 @test "the launch payload is valid JSON" {
-    printf 'video' >"$LUMEN_HDR_DIR/loop.mkv"
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mkv"
     run_like_tv_sh
     run python3 -c 'import json, sys; p = json.load(open(sys.argv[1])); e = p["params"]["payload"][0]; print(p["id"], e["fullPath"], e["dlnaInfo"]["protocolInfo"].split(":")[2])' "$STUB_DIR/launch.json"
     [ "$status" -eq 0 ]
@@ -84,7 +87,7 @@ run_like_tv_sh() {
 }
 
 @test "staying in SDR fails, after polling" {
-    printf 'video' >"$LUMEN_HDR_DIR/loop.mp4"
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mp4"
     STUB_PLAYER=sdr run_like_tv_sh
     [ "$status" -eq 1 ]
     [[ "$output" == *"RESULT: still SDR (dynamicRange=sdr) after 30 s"* ]]
@@ -92,21 +95,21 @@ run_like_tv_sh() {
 }
 
 @test "a launch that fails is not reported as SDR" {
-    printf 'video' >"$LUMEN_HDR_DIR/loop.mp4"
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mp4"
     STUB_PLAYER=fails run_like_tv_sh
     [ "$status" -eq 2 ]
     [[ "$output" == *"RESULT: the player did not start"* ]]
 }
 
 @test "another app in front is not reported as SDR" {
-    printf 'video' >"$LUMEN_HDR_DIR/loop.mp4"
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mp4"
     STUB_PLAYER=sdr STUB_FRONT=com.webos.app.home run_like_tv_sh
     [ "$status" -eq 2 ]
     [[ "$output" == *"RESULT: the player is not in front (com.webos.app.home)"* ]]
 }
 
 @test "HDR before the player starts is inconclusive" {
-    printf 'video' >"$LUMEN_HDR_DIR/loop.mp4"
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mp4"
     STUB_BEFORE=hdr run_like_tv_sh
     [ "$status" -eq 3 ]
     [[ "$output" == *"RESULT: inconclusive"* ]]
@@ -114,7 +117,7 @@ run_like_tv_sh() {
 }
 
 @test "an mkv loop is used when there is no mp4" {
-    printf 'video' >"$LUMEN_HDR_DIR/loop.mkv"
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mkv"
     run_like_tv_sh
     [ "$status" -eq 0 ]
     grep -qF "file://$LUMEN_HDR_DIR/loop.mkv" "$STUB_DIR/calls"
@@ -123,7 +126,50 @@ run_like_tv_sh() {
 @test "a missing loop is reported before anything runs" {
     run_like_tv_sh
     [ "$status" -ne 0 ]
-    [[ "$output" == *"no loop in $LUMEN_HDR_DIR"* ]]
+    [[ "$output" == *"no loop in $LUMEN_HDR_STAGE"* ]]
+    [ ! -f "$STUB_DIR/calls" ]
+}
+
+@test "the player gets a copy that anyone may read, outside the stage" {
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mp4"
+    chmod 0600 "$LUMEN_HDR_STAGE/loop.mp4"
+    run_like_tv_sh
+    [ "$status" -eq 0 ]
+    [ "$(cat "$LUMEN_HDR_DIR/loop.mp4")" = video ]
+    [[ "$(ls -ln "$LUMEN_HDR_DIR/loop.mp4")" == -rw-r--r--* ]]
+    [[ "$(ls -ldn "$LUMEN_HDR_DIR")" == drwxr-xr-x* ]]
+    [[ "$output" == *"copied from $LUMEN_HDR_STAGE/loop.mp4"* ]]
+}
+
+@test "an earlier copy of the other kind is removed" {
+    mkdir -p "$LUMEN_HDR_DIR"
+    printf 'old' >"$LUMEN_HDR_DIR/loop.mp4"
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mkv"
+    run_like_tv_sh
+    [ "$status" -eq 0 ]
+    [ ! -e "$LUMEN_HDR_DIR/loop.mp4" ]
+    grep -qF "file://$LUMEN_HDR_DIR/loop.mkv" "$STUB_DIR/calls"
+}
+
+@test "a play folder others may write is refused" {
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mp4"
+    mkdir -p "$LUMEN_HDR_DIR"
+    chmod 0777 "$LUMEN_HDR_DIR"
+    run_like_tv_sh
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"writable by others"* ]]
+    [ ! -e "$LUMEN_HDR_DIR/loop.mp4" ]
+    [ ! -f "$STUB_DIR/calls" ]
+}
+
+@test "a play folder that is a link is refused" {
+    printf 'video' >"$LUMEN_HDR_STAGE/loop.mp4"
+    mkdir -p "$BATS_TEST_TMPDIR/elsewhere"
+    ln -s "$BATS_TEST_TMPDIR/elsewhere" "$LUMEN_HDR_DIR"
+    run_like_tv_sh
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"is not a real folder"* ]]
+    [ ! -e "$BATS_TEST_TMPDIR/elsewhere/loop.mp4" ]
     [ ! -f "$STUB_DIR/calls" ]
 }
 
