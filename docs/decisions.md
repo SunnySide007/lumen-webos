@@ -150,6 +150,47 @@ the first two routes works, the pad needs a small root helper, and that
 helper needs a security review. Speed claims wait for measurements, because
 the B9 doesn't expose its clock speeds.
 
+## 8. The home loop behind adapters, tested through fakes (proposed)
+
+**Status.** Proposed on 2026-10-23, with the code that carries it out
+([specs/shell-mvp.md](specs/shell-mvp.md), "Home loop: deepening the
+loop"). It becomes accepted once `lumen-tv-check` on the B9 shows the same
+missed vsyncs, frame-3 times, key to frame and start-up as 3a89955.
+
+**Context.** The home loop (GLOSSARY.md) called SDL, GL and the clock from
+inside one 323-line function, and no test reached it. Three of the four bugs
+fixed in 5726aa3 lived there: the dip drawn at dt 0, a repeat after the
+release, and the `fps` window spanning a hide. The tests that touched the
+loop acted parts of it out by hand, and they had drifted from it. Each
+feature since the timing lines had added 180 to 451 lines to `app.rs`.
+
+**Decision.**
+
+- The loop runs behind **three adapters**, each a trait with the TV's
+  version and a test's (`home_loop/fake.rs`):
+  - **events**: SDL's queue on the TV.
+  - **screen**: SDL's window and GL on the TV; in tests, the real draw code
+    on the CPU atlas, with the uploads recorded.
+  - **wall clock**: the system's on the TV; in tests, a manual one that the
+    fakes move.
+- **The loop keeps every decision**: when to wait, draw, warm, take in
+  icons, read GL's flag and launch. The adapters only carry them out, so a
+  fake can record them. Paced motion, `--fixed-dt` and `--keys` stay
+  policies inside the loop.
+- **Generics, not `dyn`**, and a pass allocates nothing new.
+- **`run` keeps start-up**: SDL, the window and GL, the renderer, the
+  assets, listing the apps, the watch thread and the start phases. The
+  loop owns the rest, the `start:` line included.
+- The loop's behaviour is tested **at its interface**, through the fakes,
+  not by acting part of it out by hand.
+
+**Cost.** Three traits and a fake module have to keep step with the loop.
+The fakes paint with the real draw code but never call GL, so GL's own
+costs (uploads, the swap's wait) show only in a TV run, and the fake's
+slow-frame lines say `faults -` every time. Start-up hands the loop the
+moment its clock starts and the moment listing began, so the stamps, the
+deadlines and the watch's last input stay where they were.
+
 ## 9. Remote: Lumen's own control path, LG's second-screen gateway closed (proposed)
 
 **Status.** Proposed on 2026-10-28, before any of it was built. The owner

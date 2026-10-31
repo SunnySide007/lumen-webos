@@ -81,68 +81,8 @@ mod tests {
     use super::*;
 
     use lumen_core::apps::{Launcher, MockLauncher};
-    use lumen_core::focus::Dir;
-    use lumen_core::home::{BackAtTop, Effect, Home};
-    use lumen_core::input::{Action, Press};
 
-    use crate::draw;
-
-    /// The atlas uploads in each burst of a walk over the mock grid (R×4, D,
-    /// R, D, L, U, U, OK, BACK), drawn at 60 Hz as `--fixed-dt 0.016667`
-    /// draws it. With `warmed`, `warm` ran after the first frame and its
-    /// uploads went then.
-    fn uploads_per_burst(warmed: bool) -> Vec<usize> {
-        use Dir::{Down, Left, Right, Up};
-        let mut home = Home::new(MockLauncher::default().list().unwrap(), BackAtTop::Exit);
-        let mut assets = Assets::new().expect("the built-in font parses");
-        let mut batch = Batch::default();
-        draw::home(&mut batch, &home.view(), &mut assets);
-        home.frame_drawn();
-        if warmed {
-            warm(home.apps(), &mut assets);
-        }
-        assets.atlas.take_uploads();
-        let frame = Duration::from_nanos(16_666_667);
-        let mut now = Duration::ZERO;
-        let mut bursts = Vec::new();
-        let walk = [Right, Right, Right, Right, Down, Right, Down, Left, Up, Up];
-        let presses = walk
-            .into_iter()
-            .map(Action::Move)
-            .chain([Action::Select, Action::Back]);
-        for action in presses {
-            now += Duration::from_millis(500);
-            let press = Press {
-                action,
-                repeat: false,
-            };
-            if let Some(Effect::Launch(id)) = home.handle(press, now) {
-                home.launched(&id, &Ok(()), now);
-            }
-            let mut uploads = 0;
-            loop {
-                home.advance_to(now);
-                if home.is_settled() {
-                    break;
-                }
-                draw::home(&mut batch, &home.view(), &mut assets);
-                uploads += assets.atlas.take_uploads().len();
-                home.frame_drawn();
-                now += frame;
-            }
-            bursts.push(uploads);
-        }
-        bursts
-    }
-
-    #[test]
-    fn warm_titles_leave_no_upload_for_a_burst() {
-        let cold = uploads_per_burst(false);
-        assert_eq!(cold.len(), 12);
-        assert!(cold.iter().sum::<usize>() > 0, "{cold:?}");
-        let warmed = uploads_per_burst(true);
-        assert!(warmed.iter().all(|&n| n == 0), "{warmed:?}, cold {cold:?}");
-    }
+    // That warm titles leave no upload for a burst is the home loop's test.
 
     #[test]
     fn warming_makes_each_title_once() {

@@ -337,8 +337,8 @@ Each is a step in the check list.
   `stdoutString`. Not added: new log-line formats are the owner's call.
   Until then the line is in `lg-icons/status`.
 * **Re-listing after a change,** so a first copy or a new app's icon shows
-  without a restart. It needs a hook in `app.rs`: the refresh thread sets a
-  flag when the script prints `changed`, and the main loop, when idle,
+  without a restart. It needs a hook in `home_loop.rs`: the refresh thread
+  sets a flag when the script prints `changed`, and the home loop, when idle,
   calls `list` again and redraws.
 * **Making the first copy automatic** once the hand test passes: ship an
   empty `lg-icons/` in the IPK, which opens the shell's gate on the first

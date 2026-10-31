@@ -395,10 +395,19 @@ pub trait Launcher {
   | `script` | the `--keys` parser and timeline |
 
 * **`lumen-shell`:** `sdl.rs` decodes key-down and key-up in both layouts,
-  window and app-lifecycle events, logs the first raw events, and binds
-  `SDL_WaitEventTimeout`; `app.rs` runs the loop above and turns effects into
-  launcher calls; `draw.rs` turns `home`'s view into a `render::Batch`. The
-  hello-gles scene goes; the GL details it showed stay in the log.
+  window and app-lifecycle events, logs the first raw events, binds
+  `SDL_WaitEventTimeout`, and is the home loop's events on the TV. `app.rs`
+  is start-up: the options, SDL, the window and GL, the renderer and the
+  assets, listing the apps and the luna watch. `home_loop.rs` runs the home
+  loop (GLOSSARY.md) behind three adapters, events, screen and wall clock
+  (decision 8), and holds their traits; under it, `home_loop/shell.rs`
+  turns events into presses and effects and launches, `home_loop/clock.rs`
+  keeps the loop's time (real, paced or fixed), and `home_loop/fake.rs`
+  holds the tests' adapters. `screen.rs` is the TV's screen: the window, its
+  GL context, the renderer, the assets and the batch. `frame_stats.rs` owns
+  the `drew`, `slow frame` and `fps` lines. `draw.rs` turns `home`'s view
+  into a `render::Batch`. The hello-gles scene goes; the GL details it
+  showed stay in the log.
 * B2 adds `atlas.rs` (the shelf packer and pending uploads), `text.rs`
   (Inter through fontdue, a glyph cache, fitting with an ellipsis) and
   `icons.rs` (PNG decoding with limits, premultiplied); `render.rs` gains the
@@ -686,6 +695,107 @@ has not been read yet. Stage 2 waits. Stage 3 went ahead from a spike on the
 PC: hardware float first ("Measured on the B9", 16), then springs stepped by
 whole vsyncs and glyphs made ahead (the stage-3 paragraph above), not yet
 run on the TV.
+
+### Home loop: deepening the loop (plan, approved 2026-10-23)
+
+`run_surface` in `app.rs` holds the order of a pass (GLOSSARY.md): 323
+lines, 15 mutable locals, and no test reaches it. Three of the four bugs
+fixed in 5726aa3 lived there (the dip drawn at dt 0, a repeat after the
+release, the `fps` window over a hide), and the tests that touch it act
+part of it out by hand and have drifted: the dip test launches at `now`
+where the loop uses `clock.shows(now)`, and unpaced. Each feature since the
+timing lines added 180 to 451 lines to `app.rs`. This plan puts the home
+loop behind an interface a test can drive. It changes no behaviour.
+
+**Shape.**
+
+* The home loop runs passes until the shell leaves, behind three adapters,
+  each with the TV's version and a test's:
+  * **events**: SDL's queue. The next event, a wait until a given time,
+    hiding the pointer.
+  * **screen**: SDL's window and GL. Paint a view and swap, take in
+    finished icons, say whether icons are still loading, warm the glyphs,
+    the refresh rate, GL's error flag, a screenshot.
+  * **clock**: the system clock; in tests a manual one that the fakes move.
+    A wait jumps to the deadline or the next event, and a swap moves on by
+    the frame time the test picks (16.7 ms, or 30 ms for a slow frame).
+* The loop keeps every decision: when to wait, draw, warm, take in icons,
+  read GL's flag and launch. The adapters only carry them out, so a fake
+  can record them.
+* Paced motion and `--fixed-dt`'s step stay policies inside the loop,
+  picked from the options and the vsync answer as now. `--keys` stays in
+  the loop too: a scripted key falls due on the loop's clock, which under
+  `--fixed-dt` no adapter knows.
+* `run` in `app.rs` keeps start-up: SDL, its hints, the window and GL
+  context, the renderer, the assets, listing apps, the watch thread and the
+  start phases. It hands the loop its adapters, the apps, the options and
+  the start times. The loop owns the rest, the `start:` line included.
+  `Shell` becomes its internal part and keeps its name.
+* The screen's report of a frame carries its split, uploads, bytes, glyphs
+  and fault reading: `getrusage` after the swap on the TV, none from the
+  fake, so its slow-frame lines say `faults -` every run.
+* The adapters are generics, not `dyn`, and a pass allocates nothing new.
+
+**Files.** `app.rs`: `Options` and `run`. `home_loop.rs`: the loop and the
+three traits, with private `home_loop/shell.rs` and `home_loop/clock.rs`.
+`screen.rs`: the TV's screen (window, renderer, assets, batch). `sdl.rs`:
+the TV's events, as an impl of the trait. `home_loop/fake.rs`
+(`#[cfg(test)]`): the fakes. The fake screen paints with the real draw code
+and the CPU atlas, and records the uploads instead of calling GL.
+
+**Before the seam, two smaller deepenings.**
+
+* **Input fires its own repeats.** `Input::key_up` gets the release's
+  stamp. `key_down` and `key_up` each return every press owed up to and
+  including that event, repeats due first; `poll(now)` stays for passes
+  with no key event. `Shell::tick` and `repeats_due` go, and the
+  click-as-OK path uses the same two calls. The three release tests move
+  from `app.rs` to lumen-core, on plain `Duration`s.
+* **`frame_stats.rs` absorbs `Burst`.** It takes "a frame showed at t, with
+  its split and fault reading" and "the burst is over: idle, launch or
+  exit", and returns the lines to log and whether to read GL's error flag
+  now. It owns the burst counters, the one-second `fps` window, the vsyncs
+  skipped, the slow-frame cap, the fault deltas, and the `drew` and `fps`
+  formats, pinned by its tests. Reading the fault counters stays outside,
+  passed in. `launch_pending` shrinks to "burst over: launch", then the
+  launch.
+
+**Tests.** `Shell`'s 34 tests stay, as internal tests of the home loop.
+`Burst`'s 6 move to `frame_stats.rs`, and the `Options` tests stay in
+`app.rs`. The 7 tests that act out part of the loop by hand (`Clock` ×3,
+`launch_pending` ×2, `icons_arrived`, `keys_done`) are replaced by tests at
+the home loop's interface, starting with the three bugs above.
+`warm_titles_leave_no_upload_for_a_burst` moves there too, and warms as the
+TV does: 50 ms into the first settle, while shown.
+
+**Commits,** on `refactor/loop-pass` from c35e7e4, each passing
+`make check`:
+
+1. docs: `GLOSSARY.md` and this plan
+2. Input fires its own repeats
+3. `frame_stats.rs` absorbs `Burst`
+4. a pure move of `run_surface`, `Shell` and `Clock` into `home_loop/`: no
+   seam, tests unchanged
+5. the seam: the traits, `screen.rs`, `sdl.rs`'s impl, the fakes, the
+   replaced tests, decision 8 (proposed) in decisions.md, and "Code" above
+
+**Checks.** No behaviour changes: every flag, log line and line order
+stays, and anything found on the way gets its own commit and test. After
+each code commit, the simulator (`tools/sim.ps1`) plays the same key walk
+with `--fixed-dt 0.016667 --screenshot-when-settled`, at the commit and at
+c35e7e4: the PNGs must be byte-identical, and the log lines the same and in
+the same order, times aside. At the end, one `lumen-tv-check` run of the
+tip, against the last run (3a89955 on 2026-10-23, whose binary c35e7e4
+shares): missed vsyncs, frame-3 times, key to frame and start-up must not
+change.
+
+**Not in this plan.** Stage 2's switches: nothing is built for them;
+`keepalive` would go in the loop, `finish`, `flat` and `mediump` in the
+screen, and `warm` is done. The watch thread counts "last input" by taking
+a paced pass time from real time, up to 33 ms off: a follow-up. A frame
+painter that owns the atlas rule, `Home` saying when the dip has shown, one
+source for the log-line formats, and one luna client for calls and
+subscriptions stay candidates of their own.
 
 ## Input diagnostics
 
