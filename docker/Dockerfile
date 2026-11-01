@@ -8,7 +8,7 @@
 # Every download is pinned to a version and, where the source publishes one, a
 # checksum, so two builds of the same commit use the same tools.
 
-FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+FROM ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c
 
 # webosbrew's buildroot SDK: GCC 12 targeting arm-webos-linux-gnueabi, the
 # same toolchain family plx-native and moonlight-tv build with.
