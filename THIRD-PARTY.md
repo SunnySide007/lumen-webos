@@ -6,7 +6,7 @@ any of them is marked at the point of use with its origin and license.
 | Project | Used for | License |
 |---|---|---|
 | [Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel) | Root access, boot hooks (`/var/lib/webosbrew/init.d`), SSH, failsafe mode | MIT |
-| [Glasshouse](https://github.com/rorygallagher2024/glasshouse) | The privacy and debloat layer, installed as-is. Its research on webOS 4 key filters, home takeover and blocklists informs `takeover/` and `profiles/` | MIT |
+| [Glasshouse](https://github.com/rorygallagher2024/glasshouse) | Not installed (decision 13). Its research on webOS 4 key filters, home takeover, ACR and blocklists informs `takeover/` and `profiles/`, and its host names may be imported with their notice (decision 11) | MIT |
 | [plx-native](https://github.com/GLinnik21/plx-native) | The Plex client Lumen pins. Its measured GPU budgets, Liquid Glass notes and build approach inform `shell/`. The `getauxval` shims in `shell/.../compat.rs` and `lumen-guard`'s `sys.rs` follow its `src/compat/getauxval.c`. The PlxNative name and brand are excluded from its license (see its TRADEMARKS.md) and are not used here | GPL-3.0-or-later |
 | [webosbrew/custom-screensaver](https://github.com/webosbrew/custom-screensaver) and [aabytt/custom-screensaver-aerial](https://github.com/aabytt/custom-screensaver-aerial) | The QML screensaver bind mount that `ambient/` will build on | MIT |
 | [webosbrew/SDL-webOS](https://github.com/webosbrew/SDL-webOS) | The webOS remote's scancodes (`SDL_SCANCODE_WEBOS_*`) and SDL hints | zlib |

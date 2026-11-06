@@ -351,3 +351,123 @@ medium or low confidence.
 * **Other stacks:** WinUI 3 or WPF (native look, Composition animations, C#)
   and Wails (Go on WebView2) give no web animations, or bring in a third
   language.
+
+## Research of 2026-11-05
+
+Three reports, read only from public sources and never run against the TV,
+behind decisions 10 to 17. The full reports, with every source and what
+each claim was checked against, are in `tools/out/research-20261105/`
+(git-ignored). "Verified" below means seen on a webOS 4.x set, by the B9,
+plx-native's 49SM9000 (4.10.2, the same GPU and driver) or Glasshouse's B8
+and C9.
+
+### Below SDL: the compositor, the app manager, the bus
+
+* **The compositor's protocol** is webOS OSE's
+  [webos-wayland-extensions](https://github.com/webosose/webos-wayland-extensions)
+  (Apache-2.0): a shell surface driven by string properties and states,
+  keys as ordinary Wayland keyboard events. LG's TV build is an older
+  variant whose opcodes differ, which
+  [SDL-webOS](https://github.com/webosbrew/SDL-webOS) (Zlib) maps at run
+  time. EGL needs libwayland's own display object, so a client links the
+  TV's `libwayland-client` rather than speaking the wire protocol itself.
+  [Kodi](https://github.com/xbmc/xbmc) (GPL-2.0-or-later) ships such a
+  client on LG TVs. Medium: claimed for 4.x by shipping projects, not
+  measured on the B9.
+* **A Home press with the home app in front** becomes an app-manager
+  relaunch. The app manager delivers it to whoever holds the app's
+  lifecycle registration, which in Lumen today is LG's SDL. A keep-alive
+  pause spares only an app registered with lifecycle version 2; it kills
+  the others ([sam](https://github.com/webosose/sam), Apache-2.0, 2018 and
+  current). High for OSE; the B9's own capture matches the launch call.
+* **The bus hub** judges a client by its executable path and role files,
+  not by its uid, so root gets no luna access by being root
+  ([luna-service2](https://github.com/webosose/luna-service2), Apache-2.0).
+  Homebrew Channel's elevation writes such files under `/var` only. Verified
+  on the B9: `lumen-ctl`'s library route was refused to root.
+* **The screensaver:** the power service asks its subscribers before it
+  starts the screensaver, and `ack:false` holds it off (Kodi, SDL-webOS).
+  On the B9, LG's saver starts 110 to 116 s after the last key, over a
+  full-screen app too. Whether the B9 honours another app's `ack:false` is
+  untested.
+* **HDR from Rust:** plx-native plays HDR10 and Dolby Vision profiles 5 and
+  8 on the video plane under its Rust UI, through `libplayerAPIs` and ACB,
+  on webOS 4.10.2. Verified on the 49SM9000. Nobody has tested a seamless
+  loop.
+
+### The GPU
+
+* LG's EGL on driver r12p0 takes damage regions without advertising them:
+  a 480 x 270 region cut GPU work by 92.8% and took a scrolling grid from
+  46–53 to 60 fps; buffer age is 2, and asking for it blocked a swap for 13
+  to 16 ms
+  ([plx-native](https://github.com/GLinnik21/plx-native/blob/main/docs/egl-partial-update-and-damage.md)).
+  The compositor costs about 4 ms of CPU per present whatever the app
+  does. Verified on the 49SM9000.
+* OpenGL ES 3.2, which the B9's driver reports, requires ETC2 and ASTC. An
+  ASTC 4x4 hero is 1.23 MB against 4.92 MB in RGBA, a crossfade 2.46 MB
+  against 9.83 ([astcenc](https://github.com/ARM-software/astc-encoder),
+  Apache-2.0, 5.7.1). Banding on smooth gradients is the risk, unmeasured.
+
+### Toolkits, crates and other homes
+
+* No UI toolkit has a published measurement on a Midgard-class GPU. Slint's
+  GPL option is GPL-3.0-only, and its royalty-free license excludes
+  embedded systems; the toolkits would bring 53 to 333 crates against
+  Lumen's 20 or so. Every native LG home released this autumn hand-writes
+  its renderer.
+* Patterns worth taking, all reusable under GPL-3.0-or-later: damage found
+  by diffing draw lists, an ASTC loader and a shader-binary cache
+  ([Lounge](https://github.com/YashwanthKamireddi/lounge), MIT); a glyph
+  atlas cached on disk
+  ([Vision](https://github.com/fatgue/lg-vision-launcher), MIT); freeing
+  textures when hidden (Lounge holds 25 MB, Home Native 39 MB, against LG
+  Home's 108 MB); Android's FocusFinder beam rule for irregular layouts
+  (Apache-2.0).
+* More than ten native LG homes appeared in three weeks; none takes over
+  Home on webOS 4.5. A web launcher also named Lumen
+  (`ammar027/lumen-webos`, MIT) runs on webOS 6 and later only.
+  plx-native 0.9.0 was tagged stable on 2026-10-23.
+
+### Privacy
+
+* **Resolvers.** Mullvad's public DNS closed on 2026-11-02, and Mullvad
+  now sponsors Quad9
+  ([Mullvad](https://mullvad.net/en/blog/2026/9/3/shutting-down-our-public-encrypted-dns-servers-and-sponsoring-quad9-instead));
+  dns0.eu closed in 2025. Quad9, a Swiss foundation, records no client
+  addresses ([policy 1.1, 2026-06-24](https://quad9.net/privacy/policy/))
+  and passes no client subnet on 9.9.9.9. Both checked by the project
+  manager on 2026-11-05.
+* **TLS in Rust on this target:** rustls with ring and webpki-roots (about
+  54 KB of roots, CDLA-Permissive-2.0) on a plain socket. aws-lc-rs doesn't
+  list `armv7-unknown-linux-gnueabi`
+  ([platforms](https://aws.github.io/aws-lc-rs/platform_support.html)), and
+  hickory's encrypted transports need tokio. TLS needs a correct clock,
+  and webOS 4 sets its clock from LG's servers.
+* **ACR.** On webOS 4.10, LG's `acr2` reads the consent flag
+  `acrOnAllowed`, not `acrAllowed`, and starts at boot whatever the flags
+  say, though without sockets
+  ([Glasshouse #629](https://github.com/rorygallagher2024/glasshouse/issues/629),
+  a C9). With ACR opted in, LG sent about 4.1 to 4.6 MB per 10 minutes of
+  HDMI viewing to `alphonso.tv`; opting out stopped it
+  ([IMC 2024](https://arxiv.org/abs/2409.06203)).
+* **UEI's `iconnectivity`** sweeps the home network with reverse lookups;
+  Glasshouse 0.139.0 holds it down with a stand-in. Guard's log of
+  2026-10-31 has a lookup of `www.ueiwsp.com`, a UEI name, on the B9.
+* **Lists:** hagezi's LG list is GPL-3.0
+  ([hagezi](https://github.com/hagezi/dns-blocklists)) and now covers
+  `cdpbeacon2`; Perflyst's SmartTV list is MIT
+  ([Perflyst](https://github.com/Perflyst/PiHoleBlocklist)); Level1Techs'
+  has no license, so it is only referenced.
+* **The LAN.** Bitdefender confirmed a pairing bypass and a root command
+  injection on ports 3000/3001 on a 2019 webOS 4.9.7 set
+  ([2024](https://www.bitdefender.com/blog/labs/vulnerabilities-identified-in-lg-webos)),
+  and no fixed webOS 4.5 firmware has been seen. The October 2026 chain was
+  tested on webOS 7.5.7 only
+  ([SSD](https://ssd-disclosure.com/lg-webos-sync-demo-preauth-rce/)).
+  156.147.0.0/16 is LG's (`LG-NET-KR`,
+  [ARIN](https://rdap.arin.net/registry/ip/156.147.69.32)).
+* **The Nest Wifi Pro** has a guest network, custom DNS, per-device pause
+  and inbound port forwarding, but no outbound rule for one device
+  ([Google](https://support.google.com/googlehome/answer/6274503?hl=en)),
+  so the TV stays the place where blocking happens.

@@ -1,21 +1,24 @@
 # ambient: HDR screensavers (Phase 2, not started)
 
-A replacement for webOS's screensaver that plays HDR10 and Dolby Vision video
-loops, since the TV's graphics layer is always SDR and only its video plane can
-show HDR.
+Lumen's own screensaver, played by the shell (decision 16). The TV's graphics
+layer is always SDR, and only its video plane can show HDR, so the loops play
+there, under the shell's own clear surface.
 
-* **Mechanism:** a bind mount over
-  `/usr/palm/applications/com.webos.app.screensaver/qml/main.qml`, as
-  [webosbrew/custom-screensaver](https://github.com/webosbrew/custom-screensaver)
-  does. Phase 0's recon confirms the file exists on the B9.
-* **Playback:** QML's `Video` element. If it cannot do HDR on webOS 4.5, an
-  ambient mode inside the shell plays the loops through LG's native media
-  pipeline instead.
-* **Sources:** original loops from `studio/`, Apple aerials streamed at run
-  time (opt-in, never bundled), and the owner's own videos from USB, a LAN
-  folder or Plex.
-* **OLED care:** nothing static on screen, a slowly drifting clock, and LG's
-  screen-off after a set time.
-* **Upstream:** offered to Glasshouse as an "HDR video" screensaver. These
-  files will be dual-licensed MIT for that. Until it lands, Glasshouse's
-  screensaver stays on "LG default" so only one tool owns the mount.
+* **Mechanism:** with Lumen in front, the shell subscribes to the power
+  service's screensaver request and answers `ack:false`, which holds LG's
+  screensaver off, then shows its own. With another app in front, LG's
+  screensaver runs as today. If Lumen dies, its subscription goes with it and
+  LG's screensaver comes back by itself. Nothing is mounted over LG's files.
+  (The earlier plan, a QML file bind-mounted over LG's screensaver, is
+  dropped.)
+* **Playback:** LG's media libraries, loaded at run time (`libplayerAPIs` and
+  ACB, the route plx-native proved for HDR10 and Dolby Vision 5 and 8 on
+  webOS 4.10.2). A seamless-loop spike comes first: nobody has tested one.
+* **Sources:** original loops from `studio/`, and the owner's own videos from
+  the PC or a LAN folder. The TV streams nothing for the screensaver
+  (decision 12).
+* **OLED care:** nothing static on screen, the picture moving and dimming
+  slowly, and LG's Screen Off after 2 hours with no key pressed; any key
+  wakes it.
+* **Later trial:** taking over from other apps when they sit idle, with a key
+  going back to the app.

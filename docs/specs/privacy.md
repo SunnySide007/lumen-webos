@@ -7,6 +7,22 @@ there: a lookup log that survives the TV being turned off replaces the 24 h
 capture, and the work goes below `/etc/hosts`, to the senders, the addresses
 and the home network.
 
+**Changed on 2026-11-05** (decisions 11 to 13, from research.md's
+"Research of 2026-11-05"):
+
+* G2 blocks **by default**: only allowlisted names resolve, with suffix
+  carve-outs, a denied list in the Privacy panel, and learning windows the
+  owner starts from the phone or the PC.
+* G3's upstream is **Quad9** over DNS over TLS (P4), with a logged fallback
+  in clear only while the clock is wrong or Quad9 is down.
+* Ports 3000/3001, DLNA, AirPlay and HomeKit close (P9, P10).
+* S1 grows by ACR's consent flags and `acr2`, and UEI's network scanner.
+* Glasshouse is never installed (P2).
+* The Privacy panel is read-only, and only the owner's devices loosen
+  anything.
+
+The sections below are updated where they state these.
+
 ## Where it starts
 
 Measured on the B9 (OLED55B9PUA, firmware 05.50.00, webOS 4.10.2, kernel
@@ -27,7 +43,7 @@ off. Toggling them again gains nothing.
 | Name | Probably | On a list |
 |---|---|---|
 | `aic.cdplauncher.lgtvcommon.com` | LG Home's content | none |
-| `aic.cdpbeacon2.lgtvcommon.com` | a usage beacon | none (public lists have `cdpbeacon`, not `cdpbeacon2`) |
+| `aic.cdpbeacon2.lgtvcommon.com` | a usage beacon | hagezi's LG list since 2026-10-30 (by its whole domain); not on the others |
 | `aic.cdpsvc.lgtvcommon.com` | content discovery | none |
 | `aic.homeprv.lgtvcommon.com` | home promotions | candidate list has only `us.homeprv…` |
 | `aic.netflixvoice.lgtvcommon.com` | voice in Netflix | none |
@@ -128,20 +144,23 @@ From the setting down to the wire; each catches what the one above misses.
 |---|---|---|---|---|
 | 1 | LG's switches | ACR, ad profiles, recommendations | LG Settings | done |
 | 2 | LG Home out of the way | launcher, beacon and promotion calls at their source | the shell as home (Phase 3) | measure with layer 3's log once the shell owns Home |
-| 3 | Names | telemetry, ads, AI, ThinQ, with suffix rules | Lumen Guard, below | G1 (log only) built; rebuilt around `resolv.conf` after its first by-hand run (2026-10-31); the new hook passed by hand the same day and runs as a boot hook since 16:10 UTC |
+| 3 | Names | everything not allowlisted (decision 11), with suffix carve-outs | Lumen Guard, below | G1 (log only) built; rebuilt around `resolv.conf` after its first by-hand run (2026-10-31); the new hook passed by hand the same day and runs as a boot hook since 16:10 UTC. G2 blocks by default |
 | 4 | Senders | LG jobs that report | stop them at run time, one per check, from the list above; never `tvdataexchanger` or `alwaysready` | measured; four proposed for S1 |
-| 5 | Addresses | hard-coded endpoints, public resolvers | iptables `OUTPUT` rules; LG-owned addresses only, never AWS or CDN ranges (the store is on AWS: five us-west-2 addresses) | possible: netfilter measured |
+| 5 | Addresses | hard-coded endpoints, public resolvers | iptables `OUTPUT` rules; LG-owned addresses only, never AWS or CDN ranges (the store is on AWS: five us-west-2 addresses) | possible: netfilter measured. Decided: one reject for LG's 156.147.0.0/16 (`LG-NET-KR`) once a capture shows the store doesn't need it |
 | 6 | Identifiers | the MAC inside the TV's IPv6 address | IPv6 off in LG's settings | done 2026-10-28: `ipv6Enable` false, no IPv6 address on `wlan0` |
-| 7 | The home network | other devices reaching the TV's services | iptables `INPUT` rules for ports nobody uses; SSH by key only | measured; port 11111 proposed for S1 |
-| 8 | The ISP | lookups readable on the wire | Guard forwards over DNS-over-TLS | owner's choice (P4) |
+| 7 | The home network | other devices reaching the TV's services | iptables `INPUT` rules for ports nobody uses; SSH by key only | port 11111 closed by S1. Decided: 3000/3001, DLNA (1103, 1537, 1551, 1830, 1833, 1973), AirPlay 7000 and HomeKit, one at a time with a casting check; `--syn` for ports inside the ephemeral range |
+| 8 | The ISP | lookups readable on the wire | Guard forwards to Quad9 over DNS over TLS (G3) | decided (P4). Until G3, the Nest's DNS points at Quad9 for the whole house |
 
 Layer 7 matters more on a rooted set. Updates stay blocked (safety rule 8),
 so the TV never gets LG's security fixes. In October 2026 a chain giving
 root from the LAN without a PIN was
 [published for webOS 7.5](https://thehackernews.com/2026/10/lg-smart-tvs-vulnerable-to-pre-auth.html),
 through port 3001, which listens on this TV too; whether webOS 4.5 is
-affected is not known. A TV that can't be patched should offer the LAN as
-little as possible.
+affected is not known. Older bugs sit on the same ports: Bitdefender
+confirmed a pairing bypass and a root command injection there on a 2019
+webOS 4.9.7 set in 2024 (CVE-2023-6317, CVE-2023-6319), and no fixed
+webOS 4.5 firmware has been seen. A TV that can't be patched should offer
+the LAN as little as possible.
 
 ## Lumen Guard
 
@@ -320,10 +339,11 @@ Each is undone by a reboot until it becomes a boot hook, and each ends with
 | S0 | `tools/recon.sh --privacy`, the read-only survey | done: two runs on 2026-10-28 (above) |
 | S1 | Quick fixes. Owner, in LG Settings: IPv6 off. By hand over SSH, undone by a reboot: `initctl stop` for `uploadd`, `rdxd`, `crashreportd` and `remotelogger`; an `INPUT` rule rejecting tcp 11111 from the LAN; P9 and P10's answers. Then one boot hook for whatever passed. `nsu.lge.com` waits for Guard (G2) | each checked; the checklist passes, also after a cold boot with the hook. Applied by hand 2026-10-28 06:30 UTC with `profiles/privacy/s1-apply.sh` (undo: `s1-undo.sh` or a reboot): the four jobs stayed stopped, tcp 11111 no longer answers from the LAN, DIAL still does; the owner's checklist passed the same day. A full backup (`tools/backup.sh`) was taken at 06:52 UTC, before any boot hook. The boot hook (`profiles/privacy/lumen-privacy`, SHA-256 `35747be3…`) was installed with `tools/privacy-hook.sh install` at 07:00 UTC, the first persistent change. After a reboot at 07:03:49 UTC it added the rule and stopped all four jobs at 07:04:23, about 37 s into the boot; tcp 11111 again didn't answer from the LAN, and DIAL did. The owner's quick check came after the reboot of 2026-10-31 16:10 UTC, with S1's and Guard's hooks both running: Netflix, YouTube and casting all work. **Reinstalled** with its log in `/var/lib/lumen/log` rather than `/tmp`, after a backup (`Lumen-backups/20261031T170258Z`): `tools/privacy-hook.sh install` at 17:05 UTC (SHA-256 `b1d9b4c8…`), staged in `/var/lib/lumen/stage` and checked there. After a reboot at 17:09:56 UTC it added the rule and stopped all four jobs at 17:10:29, logging only to `/var/lib/lumen/log/lumen-privacy.log` with the install run kept as `.log.1`; the owner's check passed again |
 | G1 | Guard, log only: forwards everything | a week of names across power-offs, summarised like the capture. Built 2026-10-30 (`shell/crates/lumen-guard`, `profiles/privacy/lumen-guard`, `tools/guard.sh`). The redirect design was tried by hand on the B9 on 2026-10-31 and failed open as designed. The hook was rebuilt around `resolv.conf`, a design proven by hand the same day. The new hook passed its by-hand run on 2026-10-31 15:25 to 15:54 UTC: one read-only mount, both rules, 940 kB resident, Netflix's own resolver (8.8.8.8) caught by the rules, the kill switch failing open in 5 s, a Wi-Fi drop survived, a hung Guard failing open in 2 min 51 s, nothing left after `guard-undo.sh`. P11 decided and tried by hand the same day; the hook now names connman second. **Installed** after a backup (`Lumen-backups/20261031T160857Z`): `tools/guard.sh install` at 16:10 UTC (hook SHA-256 `75d2ae6d…`), then a reboot over SSH at 16:10:51. The hook started 37 s into the boot and Guard was answering a second later: both nameserver lines, the read-only mount, both rules, 104 lookups in its first 90 s with no upstream error or timeout; S1's hook ran alongside as before. After that boot the owner checked Netflix, YouTube and casting: all work. The week of log runs from 2026-10-31 16:11 UTC. **Reinstalled** with its log in `/var/lib/lumen/log` rather than `/tmp`, after the same backup as S1's (`20261031T170258Z`): `tools/guard.sh install` at 17:07 UTC (hook SHA-256 `3ca099ec…`, binary `bcb81e80…`); its one run found Guard running and did nothing. After a reboot at 17:09:56 UTC, Guard started from the new binary at 17:10:29 with both nameserver lines, the mount and both rules, and answered 43 lookups in its first minute with no upstream error or timeout. Its log is in a `drwx------` folder of root's, and nothing of Lumen's was left in `/tmp`. The owner's check passed again, and the week of log goes on (the lookup log was kept) |
-| G2 | Guard blocks: required hosts and the confirmed list | the store-safe check and the checklist pass, also after a cold boot |
-| G3 | Encrypted upstream (P4) | lookups leave the TV only to the chosen resolver |
+| S2 | S1's additions (decision 11), each after a read-only look at its values: LG's ACR consent flags off (`acrOnAllowed`, `acrAdAllowed`, `additional1Allowed`) and `acr2` held down from boot; UEI's `iconnectivity` held down by a do-nothing stand-in mounted over it in RAM; the `INPUT` rules for 3000/3001, the DLNA ports, 7000 and HomeKit, one at a time | each checked with casting, Netflix and the store; then folded into `lumend` (decision 14) |
+| G2 | Guard blocks by default (decision 11): only the allowlist resolves; suffix carve-outs from Lumen's measured names and the imported lists (hagezi, Perflyst, Glasshouse's names, each in its own file with its license); learning windows started from the owner's devices; the owner's own additions kept off the public repository; `OUTPUT` reject for 156.147.0.0/16 once a capture clears it | the store-safe check and the checklist pass, also after a cold boot; a learning window adds and drops a name |
+| G3 | Encrypted upstream (P4): Quad9 over DNS over TLS (`dns.quad9.net`), rustls with ring and webpki-roots on a plain socket. Clear through the router only while the clock is implausible after a power cut or Quad9 is unreachable, logged and shown | lookups leave the TV only to Quad9, except the logged fallback |
 | G4 | Senders stopped, one job per check | each job's effect is recorded; the checklist passes |
-| G5 | Privacy panel in the shell | the owner sees today's blocked names and counts on the TV |
+| G5 | Privacy panel in the shell, read-only (decision 12): what is blocked, what was denied, each layer's state, the fallback if used | the owner sees today's blocked and denied names and counts on the TV, and nothing on the TV can loosen them |
 
 G1 replaces the Stage C capture of the runbook; G2 replaces Stages C7–D.
 
@@ -332,13 +352,13 @@ G1 replaces the Stage C capture of the runbook; G2 replaces Stages C7–D.
 | | Question | Recommendation |
 |---|---|---|
 | P1 | Run the survey | done 2026-10-28 |
-| P2 | Lumen Guard rather than Glasshouse's hosts blocker | yes, G1 first; decide on Glasshouse after a week of G1's log |
+| P2 | Lumen Guard rather than Glasshouse's hosts blocker | yes, G1 first. Decided 2026-11-05: Glasshouse is never installed (decision 13) |
 | P3 | Fail open (blocks lapse while Guard is down) or closed (lookups stop) | open: the store and the family's apps keep working |
-| P4 | Upstream: the router as today, or DNS-over-TLS to a resolver the owner picks. The ISP stops seeing names; the resolver sees them instead | the owner's call |
+| P4 | Upstream: the router as today, or DNS-over-TLS to a resolver the owner picks. The ISP stops seeing names; the resolver sees them instead | decided 2026-11-05: Quad9 only, over DNS over TLS (decision 11). Mullvad's public DNS closed on 2026-11-02 and dns0.eu in 2025 |
 | P5 | Try blocking Netflix's logging names | not by default; one trial with the checklist, if wanted |
 | P6 | IPv6: privacy addresses, or off | off: done by the owner in LG's settings, 2026-10-28 |
 | P7 | `lgtvonline.lge.com`, connman's online check | keep allowed until G1 shows how often it's fetched; then a trial block with the checklist |
 | P8 | Run the second survey (listening programs, reporting jobs' start-up) | done 2026-10-28 |
-| P9 | Does anyone at home use AirPlay or HomeKit (an iPhone, iPad or Mac)? | if not, reject tcp 7000 and 35254 from the LAN |
-| P10 | Ports 3000 and 3001: does the family use LG ThinQ, a phone remote app or Web Video Caster? | if not, reject them; if so, keep them open, since the router hands out addresses and a rule per phone would need fixed ones |
+| P9 | Does anyone at home use AirPlay or HomeKit (an iPhone, iPad or Mac)? | decided 2026-11-05: reject tcp 7000 and HomeKit's port from the LAN (its port, 35254 on 2026-10-28, is checked after a reboot) |
+| P10 | Ports 3000 and 3001: does the family use LG ThinQ, a phone remote app or Web Video Caster? | decided 2026-11-05: reject both |
 | P11 | After a fail-open, an app launched while Guard ran keeps asking 127.0.0.2 (its jail's copy of `resolv.conf`) and can't resolve until it is launched again. Accept that, or have Guard's file name connman's proxy second (`nameserver 127.0.0.2`, then `nameserver 127.0.0.1`), so glibc moves on to connman when nothing listens on 127.0.0.2 | decided 2026-10-31: name connman second. Tried by hand first: with both lines mounted and nothing on 127.0.0.2, lookups by new processes took 0.10 and 0.11 s against 0.05 and 0.08 s with connman alone (b9.md, "Resolver") |

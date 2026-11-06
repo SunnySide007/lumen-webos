@@ -348,6 +348,12 @@ the TV.
     hashed.
   * The PC app lists paired devices and revokes them.
   * Five wrong codes close pairing.
+  * **Roles (decision 12, 2026-11-05):** a paired device starts
+    **remote-only**: power, volume, inputs, apps, keys and picture presets.
+    **Owner** rights (privacy, learning windows, Lumen's settings, editing
+    the grid) are granted only from the PC app, over its SSH key, and the
+    PC can take them back. `lumen-remote` checks the role on every request,
+    and `lumen-ctl` checks it again for owner verbs.
 * **The rest of the web:** an unpaired browser gets only the pairing page.
   Requests from other origins are refused, and the cookie is `Secure`,
   `HttpOnly` and `SameSite=Strict`.
@@ -460,6 +466,24 @@ and a scan of the home's public address finds only the VPN's port, or none.
 **Answered on 2026-10-28:** the owner took every recommendation, D1–D13.
 D2 is applied by the privacy track. D8, D9, D10 and D11 are settled again by
 what R1 finds and by the open questions below.
+
+## Changes of 2026-11-05
+
+From the design session's decisions 10 to 14:
+
+* **Roles** for paired devices (R4, above): remote-only by default, owner
+  rights granted from the PC.
+* **Privacy is changed only from owner devices.** The TV's Privacy panel is
+  read-only. Remote gains owner-only verbs for Guard: allow or drop a name,
+  start a learning window, show the denied list.
+* **The grid is edited from Remote,** not on the TV: which apps sit in the
+  first row, their order, and what goes into "Other apps".
+* **Software comes from the PC:** Remote's PC app fetches and hash-checks
+  IPKs before they are pushed; the TV fetches none itself.
+* **D2 stands, and is extended** by privacy.md's port rules: DLNA, AirPlay
+  and HomeKit close too.
+* **Only Guard reaches the internet** from the TV; `lumen-remote` stays the
+  one LAN listener. Glasshouse, mentioned in risk 11, is never installed.
 
 ## Open questions
 

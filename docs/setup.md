@@ -28,8 +28,8 @@ Channel installed and SSH enabled in its settings:
    ```
 
 2. Add the **public** half (`~/.ssh/lumen_tv.pub`) to the TV's
-   `/home/root/.ssh/authorized_keys`. Glasshouse's Server tab can do this from a
-   browser; otherwise use Homebrew Channel's documented SSH setup. Once a key is
+   `/home/root/.ssh/authorized_keys` with Homebrew Channel's documented SSH
+   setup. Once a key is
    installed, Homebrew Channel turns off its default password.
 3. Copy `.env.example` to `.env` and set `TV_HOST` to the TV's address. A DHCP
    reservation on your router keeps the address from changing.
