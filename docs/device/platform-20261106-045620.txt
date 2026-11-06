@@ -1,0 +1,888 @@
+
+===== identity =====
+$ date -u
+Fri Nov  6 04:56:19 UTC 2026
+$ uname -r
+4.4.84-169.gld4tv.5
+uptime, seconds: 1594.63
+boot time, unix seconds: 1793939385
+$ luna com.webos.service.tv.systemproperty/getSystemInfo {"keys":["modelName","firmwareVersion","sdkVersion"]}
+{
+    "modelName": "OLED55B9PUA",
+    "firmwareVersion": "05.50.00",
+    "returnValue": true,
+    "sdkVersion": "4.10.0"
+}
+
+===== lumen =====
+pid 3702: uid 5727, binary /var/palm/jail/io.github.sunnyside007.lumen.shell/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-shell, root /var/palm/jail/io.github.sunnyside007.lumen.shell
+  mnt namespace the same as init; net namespace different from init, or unreadable
+  environment, four names only:
+    XDG_RUNTIME_DIR=/tmp/xdg
+    APPID=io.github.sunnyside007.lumen.shell
+  libraries loaded: wayland, EGL, GLES, SDL, luna, mali, webos
+    /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/lib/libEGL.so.1.4
+    /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/lib/libSDL2-2.0.so.0.4.1
+    /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/lib/libluna-service2.so.3.21.2
+    /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/lib/libmali.so.0.1
+    /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/lib/libwayland-client.so.0.3.0
+    /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/lib/libwayland-egl.so.0.1
+    /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/lib/libwayland-server.so.0.1.0
+    /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/lib/libwayland-starfish-client.so.1.0.0
+    /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/lib/libwayland-webos-client.so.1.0.0
+  sockets held: 9
+--- the jail, /var/palm/jail/io.github.sunnyside007.lumen.shell
+$ ls -ld /var/palm/jail/io.github.sunnyside007.lumen.shell
+drwxr-xr-x   14 5727     5000          4096 Oct 20 10:21 /var/palm/jail/io.github.sunnyside007.lumen.shell
+$ ls -ld /var/palm/jail/io.github.sunnyside007.lumen.shell/var
+dr-xr-xr-x    7 root     root          4096 Oct 20 10:21 /var/palm/jail/io.github.sunnyside007.lumen.shell/var
+$ ls -ld /var/palm/jail/io.github.sunnyside007.lumen.shell/var/run
+dr-xr-xr-x   13 5137     5000           680 Nov  6 04:31 /var/palm/jail/io.github.sunnyside007.lumen.shell/var/run
+$ ls -ld /var/palm/jail/io.github.sunnyside007.lumen.shell/tmp
+drwxrwxrwt   27 root     root          1600 Nov  6 04:55 /var/palm/jail/io.github.sunnyside007.lumen.shell/tmp
+$ ls -la /var/palm/jail/io.github.sunnyside007.lumen.shell/var/run
+total 40
+dr-xr-xr-x   13 5137     5000           680 Nov  6 04:31 .
+dr-xr-xr-x    7 root     root          4096 Oct 20 10:21 ..
+-rw-------    1 root     root             5 Jan  1  2019 PmLogDaemon.pid
+prw-------    1 root     root             0 Nov  6 04:30 am-monitor.req
+prw-------    1 root     root             0 Nov  6 04:30 am-monitor.resp
+prw-------    1 root     root             0 Nov  6 04:30 am-send.req
+prw-------    1 root     root             0 Nov  6 04:30 am-send.resp
+drwxr-xr-x    2 avahi    avahi           80 Jan  1  2019 avahi-daemon
+-rw-------    1 root     root             5 Jan  1  2019 configd.pid
+drwxr-xr-x    2 root     root            40 Jan  1  2019 connman
+srw-rw-rw-    1 root     root             0 Jan  1  2019 criu_service.socket
+srw-rw-rw-    1 root     root             0 Nov  6 04:31 criu_zygote_service.socket_com.webos.app.inputcommon.1746
+drwxr-xr-x    3 root     root            60 Jan  1  2019 db8
+drwxr-xr-x    2 messageb messageb        60 Jan  1  2019 dbus
+-rw-r--r--    1 root     root            73 Jan  1  2019 dbus.addr
+-rw-r--r--    1 root     root             5 Jan  1  2019 dbus.pid
+-rw-r--r--    1 root     root             5 Nov  6 04:30 dropbear.pid
+drwxr-xr-x    2 root     root            60 Jan  1  2019 ls2
+drwxr-xr-x    2 root     root            60 Jan  1  2019 luna-service2
+srwxrwxrwx    1 root     root             0 Nov  6 04:30 mdnsd
+-rw-r--r--    1 root     root             5 Nov  6 04:30 mdnsd.pid
+-rw-r--r--    1 root     root             5 Jan  1  2019 messagebus.pid
+drwxr-xr-x    2 root     root            60 Jan  1  2019 mount
+drwxr-xr-x    2 root     root            80 Nov  6 04:30 nyx
+-rw-------    1 root     root             5 Jan  1  2019 pmklogd.pid
+drwxr-xr-x    3 pulse    pulse          100 Jan  1  2019 pulse
+srwxr-xr-x    1 root     root             0 Jan  1  2019 sbm
+drwxr-xr-x    4 root     root            80 Jan  1  2019 tvconfig
+srw-------    1 root     root             0 Jan  1  2019 unified_service_server
+-rw-rw-r--    1 root     utmp             0 Jan  1  2019 utmp
+drwxr-x---    2 root     root            80 Jan  1  2019 wpa_supplicant
+lrwxrwxrwx    1 root     root             8 Jan  1  2019 xdg -> /tmp/xdg
+-rw-r--r--    1 root     root             5 Jan  1  2019 xinetd.pid
+-rw-------    1 root     root             0 Nov  6 04:30 xtables.lock
+$ mounts under the jail as init sees them: root, target, options, then type and source
+/ /var/palm/jail/io.github.sunnyside007.lumen.shell/tmp rw,relatime - tmpfs tmp rw
+/lib /var/palm/jail/io.github.sunnyside007.lumen.shell/lib ro,nosuid,relatime - overlay overlay ro,lowerdir=/mnt/bsppart/bsp:/
+/bin /var/palm/jail/io.github.sunnyside007.lumen.shell/bin ro,nosuid,relatime - overlay overlay ro,lowerdir=/mnt/bsppart/bsp:/
+/usr/bin /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/bin ro,nosuid,relatime - overlay overlay ro,lowerdir=/mnt/bsppart/bsp:/
+/usr/lib /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/lib ro,nosuid,relatime - overlay overlay ro,lowerdir=/mnt/bsppart/bsp:/
+/usr/palm/frameworks /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/palm/frameworks ro,nosuid,relatime - overlay overlay ro,lowerdir=/mnt/bsppart/bsp:/
+/usr/share /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/share ro,nosuid,relatime - overlay overlay ro,lowerdir=/mnt/bsppart/bsp:/
+/usr/share/fonts /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/share/fonts ro,nosuid,relatime - squashfs /dev/mmcblk0p33 ro
+/ /var/palm/jail/io.github.sunnyside007.lumen.shell/proc rw,relatime - proc none rw
+/var/run/pulse /var/palm/jail/io.github.sunnyside007.lumen.shell/var/run/pulse rw,relatime - tmpfs tmp rw
+/var/run/luna-service2 /var/palm/jail/io.github.sunnyside007.lumen.shell/var/run/luna-service2 rw,relatime - tmpfs tmp rw
+/usr/lib/qt5/plugins /var/palm/jail/io.github.sunnyside007.lumen.shell/usr/lib/qt5/plugins ro,nosuid,relatime - overlay overlay ro,lowerdir=/mnt/bsppart/bsp:/
+/snd /var/palm/jail/io.github.sunnyside007.lumen.shell/dev/snd rw,relatime - devtmpfs devtmpfs rw,size=479488k,nr_inodes=119872,mode=755
+/ /var/palm/jail/io.github.sunnyside007.lumen.shell/dev/shm rw,relatime - tmpfs tmpfs rw
+/ /var/palm/jail/io.github.sunnyside007.lumen.shell/dev/pts rw,relatime - devpts none rw,mode=600
+/dbgfrwk /var/palm/jail/io.github.sunnyside007.lumen.shell/tmp/dbgfrwk rw,relatime - tmpfs tmp rw
+/logdir /var/palm/jail/io.github.sunnyside007.lumen.shell/dev/logdir ro,nosuid,relatime - devtmpfs devtmpfs rw,size=479488k,nr_inodes=119872,mode=755
+/var/luna/preferences /var/palm/jail/io.github.sunnyside007.lumen.shell/var/luna/preferences ro,nosuid,relatime - ext4 /dev/mmcblk0p52 rw,data=ordered
+/var/palm/ls2-dev/services/pub /var/palm/jail/io.github.sunnyside007.lumen.shell/var/palm/ls2-dev/services/pub ro,nosuid,relatime - ext4 /dev/mmcblk0p52 rw,data=ordered
+/var/run /var/palm/jail/io.github.sunnyside007.lumen.shell/var/run rw,relatime - tmpfs tmp rw
+/etc/fonts /var/palm/jail/io.github.sunnyside007.lumen.shell/etc/fonts ro,nosuid,relatime - overlay overlay ro,lowerdir=/mnt/bsppart/bsp:/
+/etc/prefs/properties /var/palm/jail/io.github.sunnyside007.lumen.shell/etc/prefs/properties ro,nosuid,relatime - overlay overlay ro,lowerdir=/mnt/bsppart/bsp:/
+/etc/ssl /var/palm/jail/io.github.sunnyside007.lumen.shell/etc/ssl ro,nosuid,relatime - overlay overlay ro,lowerdir=/mnt/bsppart/bsp:/
+/mnt/lg/res /var/palm/jail/io.github.sunnyside007.lumen.shell/mnt/lg/res ro,nosuid,relatime - overlay overlay ro,lowerdir=/mnt/bsppart/bsp:/
+/mnt/lg/tvservice/res /var/palm/jail/io.github.sunnyside007.lumen.shell/mnt/lg/tvservice/res ro,nosuid,relatime - squashfs /dev/mmcblk0p29 ro
+/class/input /var/palm/jail/io.github.sunnyside007.lumen.shell/sys/class/input ro,nosuid,relatime - sysfs sys rw
+/class/net /var/palm/jail/io.github.sunnyside007.lumen.shell/sys/class/net ro,nosuid,relatime - sysfs sys rw
+/devices /var/palm/jail/io.github.sunnyside007.lumen.shell/sys/devices ro,nosuid,relatime - sysfs sys rw
+/dev /var/palm/jail/io.github.sunnyside007.lumen.shell/sys/dev ro,nosuid,relatime - sysfs sys rw
+/input /var/palm/jail/io.github.sunnyside007.lumen.shell/dev/input ro,nosuid,relatime - devtmpfs devtmpfs rw,size=479488k,nr_inodes=119872,mode=755
+/lg /var/palm/jail/io.github.sunnyside007.lumen.shell/dev/lg rw,relatime - devtmpfs devtmpfs rw,size=479488k,nr_inodes=119872,mode=755
+/usb /var/palm/jail/io.github.sunnyside007.lumen.shell/tmp/usb rw,relatime - tmpfs tmp rw
+/ /var/palm/jail/io.github.sunnyside007.lumen.shell/mnt/lg/ciplus/authcxt rw,relatime - ext4 /dev/mmcblk0p15 rw,data=ordered
+/cryptofs/apps/usr/palm/services/com.palmdts.devmode.service/binaries-armv71/opt/openssh /var/palm/jail/io.github.sunnyside007.lumen.shell/media/cryptofs/apps/usr/palm/services/com.palmdts.devmode.service/binaries-armv71/opt/openssh ro,nosuid,relatime - ext4 /dev/mmcblk0p53 rw,data=ordered
+/cryptofs/apps/usr/palm/services/com.palmdts.devmode.service/binaries-armv71/opt/devmode /var/palm/jail/io.github.sunnyside007.lumen.shell/media/cryptofs/apps/usr/palm/services/com.palmdts.devmode.service/binaries-armv71/opt/devmode ro,nosuid,relatime - ext4 /dev/mmcblk0p53 rw,data=ordered
+/developer /var/palm/jail/io.github.sunnyside007.lumen.shell/media/developer rw,nosuid,relatime - ext4 /dev/mmcblk0p53 rw,data=ordered
+/internal /var/palm/jail/io.github.sunnyside007.lumen.shell/media/internal ro,nosuid,relatime - ext4 /dev/mmcblk0p53 rw,data=ordered
+--- the app files: modes, owners, and their change times
+$ ls -la /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell
+total 1480
+drwxrwxrwx    3 root     root          4096 Oct 31 23:35 .
+drwxrwxrwx    7 root     root          4096 Oct 31 23:32 ..
+-rwxrwxrwx    1 root     root          4380 Oct 31 23:32 Inter-LICENSE.txt
+-rwxrwxrwx    1 root     root           379 Oct 31 23:35 appinfo.json
+drwxrwxrwx    2 root     root          4096 Oct 31 23:32 art
+-rwxrwxrwx    1 root     root         11578 Oct 31 23:32 icon130.png
+-rwxrwxrwx    1 root     root          4376 Oct 31 23:32 icon80.png
+-rwxrwxrwx    1 root     root         11201 Oct 31 23:32 lumen-icons.sh
+-rwxrwxrwx    1 root     root       1457328 Oct 31 23:32 lumen-shell
+$ stat /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell
+  File: /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell
+  Size: 4096      	Blocks: 8          IO Block: 4096   directory
+Device: b335h/45877d	Inode: 190785      Links: 3
+Access: (0777/drwxrwxrwx)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2026-10-31 23:35:15.000000000
+Modify: 2026-10-31 23:35:15.000000000
+Change: 2019-01-01 00:00:19.000000000
+
+$ stat /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/appinfo.json
+  File: /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/appinfo.json
+  Size: 379       	Blocks: 8          IO Block: 4096   regular file
+Device: b335h/45877d	Inode: 190787      Links: 1
+Access: (0777/-rwxrwxrwx)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2026-10-31 23:35:17.000000000
+Modify: 2026-10-31 23:35:17.000000000
+Change: 2019-01-01 00:00:19.000000000
+
+$ stat /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-shell
+  File: /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-shell
+  Size: 1457328   	Blocks: 2848       IO Block: 4096   regular file
+Device: b335h/45877d	Inode: 190790      Links: 1
+Access: (0777/-rwxrwxrwx)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2026-10-31 23:35:15.000000000
+Modify: 2026-10-31 23:32:27.000000000
+Change: 2019-01-01 00:00:19.000000000
+
+$ stat /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-icons.sh
+  File: /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-icons.sh
+  Size: 11201     	Blocks: 24         IO Block: 4096   regular file
+Device: b335h/45877d	Inode: 190961      Links: 1
+Access: (0777/-rwxrwxrwx)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2026-10-31 23:35:15.000000000
+Modify: 2026-10-31 23:32:27.000000000
+Change: 2019-01-01 00:00:19.000000000
+
+--- the hook logs, for their times
+$ ls -la /var/lib/lumen/log
+total 32
+drwx------    2 root     root          4096 Nov  6 04:30 .
+drwxr-xr-x    7 root     root          4096 Oct 31 18:01 ..
+-rw-r--r--    1 root     root           505 Nov  6 04:30 lumen-guard.log
+-rw-r--r--    1 root     root           505 Nov  6 03:24 lumen-guard.log.1
+-rw-r--r--    1 root     root           587 Nov  6 04:34 lumen-home.log
+-rw-r--r--    1 root     root           587 Nov  6 03:29 lumen-home.log.1
+-rw-r--r--    1 root     root           318 Nov  6 04:40 lumen-privacy.log
+-rw-r--r--    1 root     root           318 Nov  6 03:34 lumen-privacy.log.1
+
+===== bus =====
+$ ls-monitor -l lines for Lumen, the app manager, the compositor, power, memory and Homebrew Channel
+1578      	com.webos.launcher            	/usr/bin/surface-manager-starfish  	static              	CbELi2BI            
+1578      	com.webos.surfacemanager.systemui	/usr/bin/surface-manager-starfish  	static              	8YhGFL7j            
+2212      	com.webos.service.aos         	/usr/sbin/tvpowerd                 	static              	Q6UK3jde            
+1578      	com.webos.service.systemUIManager	/usr/bin/surface-manager-starfish  	static              	hoPmwPft            
+1692      	com.webos.applicationManager  	/usr/sbin/sam                      	static              	yfVYaPYD            
+3702      	(null)                        	/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-shell	unknown/client only 	7sDUbOLU            
+1578      	com.webos.coverUI             	/usr/bin/surface-manager-starfish  	static              	1yznjTno            
+1692      	com.webos.service.applicationmanager	/usr/sbin/sam                      	static              	qqfPABUP            
+1578      	com.webos.service.sysuicompmgr	/usr/bin/surface-manager-starfish  	static              	V5bQSGJR            
+1578      	com.webos.app.quickinputpicker	/usr/bin/surface-manager-starfish  	static              	78CnBq8c            
+1692      	com.webos.service.applicationManager	/usr/sbin/sam                      	static              	iNEuBJkS            
+1578      	com.webos.systemui.mobileconnection	/usr/bin/surface-manager-starfish  	static              	cc4sUtGs            
+1578      	com.webos.surfacemanager.screenSaver	/usr/bin/surface-manager-starfish  	static              	Nhvrb9hh            
+1578      	com.webos.surfacemanager.audio	/usr/bin/surface-manager-starfish  	unknown/client only 	77o5Gi13            
+2212      	com.webos.service.tvpower     	/usr/sbin/tvpowerd                 	static              	RQaiTg1c            
+1578      	com.webos.platformstarfish    	/usr/bin/surface-manager-starfish  	unknown/client only 	PiQsQwy3            
+2212      	com.webos.service.qbd         	/usr/sbin/tvpowerd                 	static              	VYYAAwqU            
+3185      	com.webos.media.tvpowermgr    	/usr/sbin/umediaserver             	unknown/client only 	xwY8Gygz            
+1578      	com.webos.surfacemanager.tips 	/usr/bin/surface-manager-starfish  	static              	ORPN3oGQ            
+1583      	com.webos.service.tv.tvpowerd 	/mnt/lg/tvservice/lgapp/tvservice  	unknown/client only 	BKoE94c9            
+1578      	com.webos.app.quicksettings   	/usr/bin/surface-manager-starfish  	static              	rVyRXI3S            
+1578      	com.webos.surfacemanager.hcap 	/usr/bin/surface-manager-starfish  	static              	8TPvUxPq            
+1578      	com.webos.surfacemanager      	/usr/bin/surface-manager-starfish  	static              	GvTtuKqU            
+3702      	io.github.sunnyside007.lumen.shell	/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-shell	unknown/client only 	T7jHS8sL            
+1578      	com.webos.surfacemanager.home 	/usr/bin/surface-manager-starfish  	static              	Oi9qxQF9            
+1696      	com.webos.memorymanager       	/usr/sbin/memchute                 	static              	GZ6DYJY5            
+1578      	com.webos.surfacemanager.windowext	/usr/bin/surface-manager-starfish  	static              	ejWScUY0            
+1578      	com.webos.starfish.keyfilters 	/usr/bin/surface-manager-starfish  	static              	mQUMp0ZV            
+1578      	com.webos.keyfilter.magicnumber	/usr/bin/surface-manager-starfish  	static              	NDVAcAfm            
+1578      	com.webos.systemui.notification	/usr/bin/surface-manager-starfish  	unknown/client only 	e0NrPybq            
+1578      	com.webos.service.recent      	/usr/bin/surface-manager-starfish  	static              	abtoIurO            
+1578      	com.webos.app.nudge           	/usr/bin/surface-manager-starfish  	static              	iNyvi3e6            
+$ ls-monitor -i com.webos.applicationManager
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.applicationManager' WITH UNIQUE NAME 'yfVYaPYD' AT HUB
+
+  "/":
+      "getForegroundAppInfo": {"provides":["private","activities.callbacks","configurator.callbacks","all","applications.internal"]}
+      "moveLaunchPoint": {"provides":["private","all","applications.internal"]}
+      "listAllHandlersForMimeByVerb": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "getAppLifeEvents": {"provides":["private","all","applications.internal"]}
+      "listLaunchPoints": {"provides":["private","activities.callbacks","configurator.callbacks","all","applications.internal"]}
+      "listApps": {"provides":["private","activities.callbacks","configurator.callbacks","all","applications.internal"]}
+      "removeLaunchPoint": {"provides":["private","all","applications.internal"]}
+      "searchApps": {"provides":["private","all","applications.internal"]}
+      "registerVerbsForRedirect": {"provides":["private","all","applications.internal"]}
+      "lockApp": {"provides":["private","all","applications.internal"]}
+      "removeAllContents": {"provides":["private","all","applications.internal"]}
+      "closeByAppId": {"provides":["private","activities.callbacks","all","applications.internal"]}
+      "getAllContents": {"provides":["private","all","applications.internal"]}
+      "getAppBasePath": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "getAppLifeStatus": {"provides":["private","activities.callbacks","all","applications.internal"]}
+      "registerApp": {"provides":["private","applications","public","all","applications.internal"]}
+      "getAppInfo": {"provides":["private","all","applications.internal"]}
+      "changeRunningAppId": {"provides":["private","all","applications.internal"]}
+      "setContents": {"provides":["private","public","all","applications.internal"]}
+      "listAllHandlersForUrlPattern": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "running": {"provides":["private","activities.callbacks","all","applications.internal"]}
+      "launchVirtualApp": {"provides":["private","all","applications.internal"]}
+      "getContents": {"provides":["private","public","all","applications.internal"]}
+      "registerNativeApp": {"provides":["private","applications","public","all","applications.internal"]}
+      "getHandlerForUrlByVerb": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "getHandlerForMimeType": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "notifySplashTimeout": {"provides":["private","all","applications.internal"]}
+      "launchDefaultApp": {"provides":["private","applications","all","applications.launch","applications.internal"]}
+      "getAppStatus": {"provides":["private","configurator.callbacks","all","applications.internal"]}
+      "removeContent": {"provides":["private","all","applications.internal"]}
+      "launch": {"provides":["private","activities.callbacks","configurator.callbacks","applications","public","ares.webos.cli","all","applications.launch","applications.internal"]}
+      "addVirtualApp": {"provides":["private","all","applications.internal"]}
+      "mimeTypeForExtension": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "listAllHandlersForMime": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "registerVerbsForResource": {"provides":["private","all","applications.internal"]}
+      "getHandlerForUrl": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "getHandlerForMimeTypeByVerb": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "notifyAlertClosed": {"provides":["private","all","applications.internal"]}
+      "listAllHandlersForMultipleUrlPattern": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "listAllHandlersForUrlByVerb": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "removeVirtualApp": {"provides":["private","all","applications.internal"]}
+      "listExtensionMap": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "listAllHandlersForMultipleMime": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "setOrder": {"provides":["private","all","applications.internal"]}
+      "open": {"provides":["private","applications","public","all","applications.launch","applications.internal"]}
+      "updateLaunchPoint": {"provides":["private","all","applications.internal"]}
+      "getAppLoadStatus": {"provides":["private","public","all","applications.internal"]}
+      "pause": {"provides":["private","all","applications.internal"]}
+      "addLaunchPoint": {"provides":["private","all","applications.internal"]}
+      "listAllHandlersForUrl": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "closeAllApps": {"provides":["private","all","applications.internal"]}
+      "onLaunch": {"provides":["private","all","applications.internal"]}
+      "getHandlerForExtension": {"provides":["private","applications","public","all","applications.query","applications.internal"]}
+      "isPromotionalAppOn": {"provides":["private","applications","public","all","applications.internal"]}
+      "close": {"provides":["private","all","applications.internal"]}
+  "/dev":
+      "closeByAppId": {"provides":["ares.webos.cli","all"]}
+      "listApps": {"provides":["private","applications.dev","ares.webos.cli","all","applications.internal"]}
+      "running": {"provides":["private","applications.dev","ares.webos.cli","all","applications.internal"]}
+$ ls-monitor -i com.webos.service.tvpower
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.tvpower' WITH UNIQUE NAME 'RQaiTg1c' AT HUB
+
+  "/power":
+      "registerActiveStandbyRequest": {"provides":["private","tv.management","all"]}
+      "registerScreenSaverRequest": {"provides":["private","tv.management","all","public"]}
+      "sendPowerOffRequestAck": {"provides":["private","tv.management","all"]}
+      "getPowerState": {"provides":["activities.callbacks","private","tv.management","configurator.callbacks","all"]}
+      "registerPrepareActiveStandby": {"provides":["private","tv.management","all","public"]}
+      "sendActiveStandbyRequestAck": {"provides":["private","tv.management","all"]}
+      "responsePreparePowerOff": {"provides":["private","tv.management","all","public"]}
+      "getClientList": {"provides":["private","tv.management","all"]}
+      "sendPreparePowerOffAck": {"provides":["private","tv.management","all"]}
+      "responseSuspendRequest": {"provides":["private","tv.management","all"]}
+      "sendPrepareActiveStandbyAck": {"provides":["private","tv.management","all"]}
+      "registerPrepareSuspend": {"provides":["private","tv.management","all","public"]}
+      "powerOn": {"provides":["private","tv.management","all"]}
+      "registerPowerOffRequest": {"provides":["private","tv.management","all"]}
+      "sendPreparePowerOnAck": {"provides":["private","tv.management","all"]}
+      "turnOffScreen": {"provides":["private","tv.management","all"]}
+      "turnOnScreen": {"provides":["private","tv.management","all"]}
+      "registerPreparePowerOn": {"provides":["private","tv.management","all","public"]}
+      "registerSuspendRequest": {"provides":["private","tv.management","all"]}
+      "responseActiveStandbyRequest": {"provides":["private","tv.management","all"]}
+      "setScreenBlock": {"provides":["private","tv.management","all"]}
+      "responsePrepareActiveStandby": {"provides":["private","tv.management","all","public"]}
+      "getPowerOnReason": {"provides":["private","tv.management","all"]}
+      "responsePrepareSuspend": {"provides":["private","tv.management","all","public"]}
+      "powerOff": {"provides":["private","tv.management","all"]}
+      "test": {"provides":["private","all"]}
+      "reboot": {"provides":["private","tv.management","all"]}
+      "setPowerInitState": {"provides":["private","tv.management","all"]}
+      "setPowerOnReason": {"provides":["private","tv.management","all"]}
+      "registerPrepareResume": {"provides":["private","tv.management","all","public"]}
+      "responsePowerOffRequest": {"provides":["private","tv.management","all"]}
+      "responsePreparePowerOn": {"provides":["private","tv.management","all","public"]}
+      "turnOnScreenSaver": {"provides":["private","tv.management","all"]}
+      "responseScreenSaverRequest": {"provides":["private","tv.management","all","public"]}
+      "responsePrepareResume": {"provides":["private","tv.management","all","public"]}
+      "registerPreparePowerOff": {"provides":["private","tv.management","all","public"]}
+$ ls-monitor -i com.webos.memorymanager
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.memorymanager' WITH UNIQUE NAME 'GZ6DYJY5' AT HUB
+
+  "/":
+      "getUnitList": {"provides":["system","applications.internal","private","all"]}
+      "getCustomThreshold": {"provides":["system","applications.internal","private","all"]}
+      "getCurrentMemState": {"provides":["system","applications.internal","private","all"]}
+      "getGroupInfo": {"provides":["system","applications.internal","all"]}
+      "getCloseAppId": {"provides":["system","applications.internal","private","all"]}
+      "startMemNotifier": {"provides":["system","applications.internal","private","all"]}
+      "setRequiredMemory": {"provides":["system","applications.internal","private","all"]}
+      "sendLowMemPopupTest": {"provides":["system","applications.internal","private","all"]}
+      "getEFS": {"provides":["system","applications.internal","private","all"]}
+      "setMriHelper": {"provides":["system","applications.internal","all"]}
+  "/com/webos/memory":
+$ ls-monitor -i com.webos.service.memorymanager
+Service 'com.webos.service.memorymanager' is not registered at hub
+$ ls-monitor -i com.webos.pmlogd
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.pmlogd' WITH UNIQUE NAME 'RYk8H692' AT HUB
+
+  "/":
+      "getBackupLogs": {"provides":["all"]}
+      "backuplogs": {"provides":["system.debug","all","private"]}
+      "subscribeOnRotations": {"provides":["system.debug","all","private"]}
+      "forcerotate": {"provides":["system.debug","all","private"]}
+      "enableNewWhitelist": {"provides":["system.debug","all"]}
+      "setBackupLogs": {"provides":["all"]}
+$ ls-monitor -i com.webos.service.ics
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.ics' WITH UNIQUE NAME 'dHZk67xg' AT HUB
+
+  "/":
+      "getCurrentChannelNumber": {"provides":["private","all"]}
+      "getNewDeviceInfo": {"provides":["private","all"]}
+      "getMsoEncDecString": {"provides":["private","all"]}
+      "getUeiAppList": {"provides":["private","all"]}
+      "sendDirectCommand": {"provides":["private","all"]}
+      "getCurrentChannelNumberDirect": {"provides":["private","all"]}
+      "getToastMsg": {"provides":["private","all"]}
+      "setNewDevicePort": {"provides":["private","all"]}
+  "/blaster":
+      "subscribeChannelChange": {"provides":["private","all"]}
+      "setDeviceBrand": {"provides":["private","all"]}
+      "getAutoLookUpVersion": {"provides":["private","all"]}
+      "startDetectDevices": {"provides":["private","all"]}
+      "startService": {"provides":["private","all"]}
+      "setChannel": {"provides":["private","all"]}
+      "getKeyTestResult": {"provides":["private","all"]}
+      "clearSettingCash": {"provides":["private","all"]}
+      "getUEICountryCode": {"provides":["private","all"]}
+      "addDevice": {"provides":["private","all"]}
+      "getIrDbVersion": {"provides":["private","all"]}
+      "getBrandList": {"provides":["private","all"]}
+      "delDevice": {"provides":["private","all"]}
+      "setDeviceType": {"provides":["private","all"]}
+      "setCradleFlag": {"provides":["private","all"]}
+      "sendCommand": {"provides":["private","all"]}
+      "nextKeyTest": {"provides":["private","all"]}
+      "getKeyList": {"provides":["private","all"]}
+      "getDevices": {"provides":["private","all"]}
+      "isSupported": {"provides":["private","all"]}
+      "startKeyTest": {"provides":["private","all"]}
+  "/debug":
+      "setDebugCmd": {"provides":["private","all"]}
+$ ls-monitor -i com.webos.service.acr
+
+METHODS AND SIGNALS REGISTERED BY SERVICE 'com.webos.service.acr' WITH UNIQUE NAME '2LpEyTJT' AT HUB
+
+  "/":
+      "getACRSolutionStatus": {"provides":["private","all"]}
+      "dumpCapture": {"provides":["private","all"]}
+      "getCaptureSpeed": {"provides":["private","all"]}
+      "getContentProperty": {"provides":["private","public","tv.services","all"]}
+      "getCurrentChannelInfo": {"provides":["private","all"]}
+      "startAcr": {"provides":["private","activities.callbacks","configurator.callbacks","tv.services","all"]}
+      "getVideoCaptureStatus": {"provides":["private","all"]}
+      "getAudioCaptureStatus": {"provides":["private","all"]}
+      "sendLChannelInfo": {"provides":["private","all"]}
+      "getACRAppStatus": {"provides":["private","all"]}
+      "removeSignals": {"provides":["private","all"]}
+      "setACRsetting": {"provides":["private","all"]}
+      "getACRstatus": {"provides":["private","all"]}
+      "getACRLaunchFlag": {"provides":["private","all"]}
+      "oneShotCapture": {"provides":["private","all"]}
+--- LG SDL under /usr/lib: the files, and the strings about key policy and the life cycle
+$ ls -l /usr/lib/libSDL2-2.0.so.0
+lrwxrwxrwx    1 root     root            20 Aug 27  2025 /usr/lib/libSDL2-2.0.so.0 -> libSDL2-2.0.so.0.4.1
+$ ls -l /usr/lib/libSDL2-2.0.so.0.4.1
+-rwxr-xr-x    1 root     root        648212 Aug 27  2025 /usr/lib/libSDL2-2.0.so.0.4.1
+SDL_HINT_WEBOS_REGISTER_APP
+SDL_WEBOS_ACCESS_POLICY_KEYS_BACK
+SDL_WEBOS_ACCESS_POLICY_KEYS_EXIT
+SDL_WEBOS_CURSOR_SLEEP_TIME
+SDL_WEBOS_DEBUG
+WEBOSAUDIO
+WEBOS_
+_WEBOS_ACCESS_POLICY_FORCESTRETCH
+_WEBOS_ACCESS_POLICY_KEYS_BACK
+_WEBOS_ACCESS_POLICY_KEYS_EXIT
+luna://com.webos.applicationManager/getAppInfo
+luna://com.webos.applicationManager/registerApp
+luna://com.webos.applicationManager/registerNativeApp
+nativeLifeCycleInterfaceVersion
+relaunch
+$ ls -l /usr/lib/libSDL2_image-2.0.so.0
+lrwxrwxrwx    1 root     root            26 Aug 27  2025 /usr/lib/libSDL2_image-2.0.so.0 -> libSDL2_image-2.0.so.0.0.1
+$ ls -l /usr/lib/libSDL2_image-2.0.so.0.0.1
+-rwxr-xr-x    1 root     root         31208 Aug 27  2025 /usr/lib/libSDL2_image-2.0.so.0.0.1
+(none matched)
+$ ls -l /usr/lib/libSDL2_mixer-2.0.so.0
+lrwxrwxrwx    1 root     root            26 Aug 27  2025 /usr/lib/libSDL2_mixer-2.0.so.0 -> libSDL2_mixer-2.0.so.0.0.1
+$ ls -l /usr/lib/libSDL2_mixer-2.0.so.0.0.1
+-rwxr-xr-x    1 root     root         44312 Aug 27  2025 /usr/lib/libSDL2_mixer-2.0.so.0.0.1
+(none matched)
+$ ls -l /usr/lib/libSDL2_net-2.0.so.0
+lrwxrwxrwx    1 root     root            24 Aug 27  2025 /usr/lib/libSDL2_net-2.0.so.0 -> libSDL2_net-2.0.so.0.0.1
+$ ls -l /usr/lib/libSDL2_net-2.0.so.0.0.1
+-rwxr-xr-x    1 root     root         10904 Aug 27  2025 /usr/lib/libSDL2_net-2.0.so.0.0.1
+(none matched)
+$ ls -l /usr/lib/libSDL2_ttf-2.0.so.0
+lrwxrwxrwx    1 root     root            25 Aug 27  2025 /usr/lib/libSDL2_ttf-2.0.so.0 -> libSDL2_ttf-2.0.so.0.14.0
+$ ls -l /usr/lib/libSDL2_ttf-2.0.so.0.14.0
+-rwxr-xr-x    1 root     root         20972 Aug 27  2025 /usr/lib/libSDL2_ttf-2.0.so.0.14.0
+(none matched)
+--- bus role and permission files; the contents of those for Lumen and Homebrew Channel
+--- /var/luna-service2-dev/roles.d
+com.beb.plxnative.storage.service.json
+com.github.gprot42.webosterminal.app.json
+com.github.gprot42.webosterminal.service.service.json
+com.open.hidden.menu.app.json
+org.webosbrew.hbchannel.app.json
+org.webosbrew.hbchannel.service.service.json
+--- /var/luna-service2-dev/roles.d/org.webosbrew.hbchannel.app.json
+{
+	"appId": "org.webosbrew.hbchannel",
+	"type": "regular",
+	"allowedNames": ["org.webosbrew.hbchannel-*"],
+	"permissions": [
+		{
+			"service":"org.webosbrew.hbchannel-*",
+			"outbound":["*"]
+		}
+	]
+}
+
+--- /var/luna-service2-dev/roles.d/org.webosbrew.hbchannel.service.service.json
+{"appId":"org.webosbrew.hbchannel.service","type":"regular","allowedNames":["org.webosbrew.hbchannel.service","*","com.webos.service.capture.client*"],"permissions":[{"service":"org.webosbrew.hbchannel.service","outbound":["*"]},{"service":"*","inbound":["*"],"outbound":["*"]},{"service":"com.webos.service.capture.client*","inbound":["*"],"outbound":["*"]}]}--- /var/luna-service2-dev/services.d
+com.beb.plxnative.storage.service
+com.github.gprot42.webosterminal.service.service
+org.webosbrew.hbchannel.service.service
+--- /var/luna-service2-dev/services.d/org.webosbrew.hbchannel.service.service
+[D-BUS Service]
+Name=org.webosbrew.hbchannel.service
+Exec=/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/run-js-service -n /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service
+Type=dynamic
+--- /var/luna-service2-dev/client-permissions.d
+com.beb.plxnative.app.json
+com.beb.plxnative.storage.service.json
+com.github.gprot42.webosterminal.app.json
+com.github.gprot42.webosterminal.service.service.json
+com.open.hidden.menu.app.json
+io.github.sunnyside007.lumen.shell.app.json
+org.webosbrew.hbchannel.app.json
+org.webosbrew.hbchannel.service.root.json
+org.webosbrew.hbchannel.service.service.json
+--- /var/luna-service2-dev/client-permissions.d/io.github.sunnyside007.lumen.shell.app.json
+{"io.github.sunnyside007.lumen.shell":["public"]}
+--- /var/luna-service2-dev/client-permissions.d/org.webosbrew.hbchannel.app.json
+{"org.webosbrew.hbchannel-*":["public","org.webosbrew.hbchannel.service.group"]}
+--- /var/luna-service2-dev/client-permissions.d/org.webosbrew.hbchannel.service.root.json
+{"org.webosbrew.hbchannel.service*":["all"]}--- /var/luna-service2-dev/client-permissions.d/org.webosbrew.hbchannel.service.service.json
+{"org.webosbrew.hbchannel.service*":["public"]}
+--- /var/luna-service2-dev/api-permissions.d
+com.beb.plxnative.storage.api.json
+com.github.gprot42.webosterminal.service.api.json
+org.webosbrew.hbchannel.service.api.json
+org.webosbrew.hbchannel.service.api.public.json
+--- /var/luna-service2-dev/api-permissions.d/org.webosbrew.hbchannel.service.api.json
+{"org.webosbrew.hbchannel.service.group":["org.webosbrew.hbchannel.service/*"],"ares.webos.cli":["org.webosbrew.hbchannel.service/*"]}
+--- /var/luna-service2-dev/api-permissions.d/org.webosbrew.hbchannel.service.api.public.json
+{"public":["org.webosbrew.hbchannel.service/*"]}--- /var/luna-service2-dev/manifests.d
+com.beb.plxnative.json
+com.github.gprot42.webosterminal.json
+com.open.hidden.menu.json
+io.github.sunnyside007.lumen.shell.json
+org.webosbrew.hbchannel.json
+--- /var/luna-service2-dev/manifests.d/io.github.sunnyside007.lumen.shell.json
+{"id":"io.github.sunnyside007.lumen.shell","roleFilesPrv":["/var/palm/ls2-dev/roles/prv/io.github.sunnyside007.lumen.shell.json"],"roleFilesPub":["/var/palm/ls2-dev/roles/pub/io.github.sunnyside007.lumen.shell.json"],"version":"0.0.1","clientPermissionFiles":["/var/luna-service2-dev/client-permissions.d/io.github.sunnyside007.lumen.shell.app.json"]}
+--- /var/luna-service2-dev/manifests.d/org.webosbrew.hbchannel.json
+{"id":"org.webosbrew.hbchannel","serviceFiles":["/var/luna-service2-dev/services.d/org.webosbrew.hbchannel.service.service"],"roleFiles":["/var/luna-service2-dev/roles.d/org.webosbrew.hbchannel.service.service.json","/var/luna-service2-dev/roles.d/org.webosbrew.hbchannel.app.json"],"apiPermissionFiles":["/var/luna-service2-dev/api-permissions.d/org.webosbrew.hbchannel.service.api.json","/var/luna-service2-dev/api-permissions.d/org.webosbrew.hbchannel.service.api.public.json"],"version":"0.7.3","clientPermissionFiles":["/var/luna-service2-dev/client-permissions.d/org.webosbrew.hbchannel.service.service.json","/var/luna-service2-dev/client-permissions.d/org.webosbrew.hbchannel.app.json","/var/luna-service2-dev/client-permissions.d/org.webosbrew.hbchannel.service.root.json"]}--- /var/luna-service2-dev/groups.d
+(absent)
+--- /var/palm/ls2-dev/roles/pub
+com.beb.plxnative.json
+io.github.sunnyside007.lumen.shell.json
+--- /var/palm/ls2-dev/roles/pub/io.github.sunnyside007.lumen.shell.json
+{
+    "role": {
+    "exeName":"/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-shell",
+    "type": "regular",
+    "allowedNames": ["com.webos.media.client.*","com.webos.rm.client.*","com.webos.pipeline.*","io.github.sunnyside007.lumen.shell",""]
+    },
+    "permissions": [
+        {
+         "service":"com.webos.media.client.*",
+         "outbound":["com.webos.media"],
+         "inbound":["com.webos.media"]
+        },
+        {
+         "service":"com.webos.rm.client.*",
+         "outbound":["com.webos.media"],
+         "inbound":["com.webos.media"]
+        },
+        {
+         "service":"com.webos.pipeline.*",
+         "outbound":["com.webos.pipelinectrl.*"],
+         "inbound":["com.webos.pipelinectrl.*"]
+        },
+        {
+         "service":"io.github.sunnyside007.lumen.shell",
+         "outbound":["*"],
+         "inbound":[]
+        }
+    ]
+}
+
+--- /var/palm/ls2-dev/roles/prv
+com.beb.plxnative.json
+io.github.sunnyside007.lumen.shell.json
+--- /var/palm/ls2-dev/roles/prv/io.github.sunnyside007.lumen.shell.json
+{
+    "role": {
+    "exeName":"/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-shell",
+    "type": "regular",
+    "allowedNames": ["com.webos.media.client.*","com.webos.rm.client.*","com.webos.pipeline.*","io.github.sunnyside007.lumen.shell",""]
+    },
+    "permissions": [
+        {
+         "service":"com.webos.media.client.*",
+         "outbound":["com.webos.media"],
+         "inbound":["com.webos.media"]
+        },
+        {
+         "service":"com.webos.rm.client.*",
+         "outbound":["com.webos.media"],
+         "inbound":["com.webos.media"]
+        },
+        {
+         "service":"com.webos.pipeline.*",
+         "outbound":["com.webos.pipelinectrl.*"],
+         "inbound":["com.webos.pipelinectrl.*"]
+        },
+        {
+         "service":"io.github.sunnyside007.lumen.shell",
+         "outbound":["*"],
+         "inbound":[]
+        }
+    ]
+}
+
+--- /var/palm/ls2-dev/services/pub
+(none matched)
+--- /var/palm/ls2-dev/services/prv
+(absent)
+
+===== app-manager =====
+$ luna com.webos.service.config/getConfigs {"configNames":["com.webos.applicationManager.keepAliveApps","com.webos.service.nop.screenSaverTimeout"]}
+{
+    "missingConfigs": [
+        "com.webos.service.nop.screenSaverTimeout"
+    ],
+    "subscribed": false,
+    "configs": {
+        "com.webos.applicationManager.keepAliveApps": [
+            "com.webos.app.tvguidejpn",
+            "com.webos.app.voice",
+            "com.webos.app.tips",
+            "com.webos.app.voiceagent",
+            "com.webos.app.livemenu",
+            "com.webos.app.tvhotkey",
+            "com.webos.app.voiceview",
+            "com.webos.app.dvrpopup",
+            "com.webos.app.home",
+            "com.webos.app.fullhome",
+            "airplay",
+            "com.webos.app.googleassistant"
+        ]
+    },
+    "returnValue": true
+}
+$ luna com.webos.applicationManager/getAppInfo {"id":"io.github.sunnyside007.lumen.shell"}
+{
+    "appInfo": {
+        "defaultWindowType": "card",
+        "bgColor": "#000000",
+        "CPApp": false,
+        "systemApp": false,
+        "version": "0.0.1",
+        "vendor": "Lumen",
+        "hasPromotion": false,
+        "tileSize": "normal",
+        "largeIcon": "icon130.png",
+        "lockable": true,
+        "transparent": false,
+        "appDescription": "A clean, fast home screen for rooted LG TVs (Phase 0: hello-gles)",
+        "checkUpdateOnLaunch": true,
+        "icon": "icon80.png",
+        "spinnerOnLaunch": true,
+        "handlesRelaunch": false,
+        "unmovable": false,
+        "id": "io.github.sunnyside007.lumen.shell",
+        "noSplashOnLaunch": false,
+        "inAppSetting": false,
+        "privilegedJail": false,
+        "inspectable": true,
+        "title": "Lumen",
+        "resolution": "1920x1080",
+        "deeplinkingParams": "",
+        "trustLevel": "default",
+        "visible": true,
+        "folderPath": "/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell",
+        "accessibility": {
+            "supportsAudioGuidance": false
+        },
+        "main": "lumen-shell",
+        "removable": true,
+        "type": "native",
+        "disableBackHistoryAPI": false,
+        "iconColor": "#0b0f1c",
+        "installTime": 0
+    },
+    "appId": "io.github.sunnyside007.lumen.shell",
+    "returnValue": true
+}
+--- /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/appinfo.json
+{
+  "id": "io.github.sunnyside007.lumen.shell",
+  "version": "0.0.1",
+  "vendor": "Lumen",
+  "type": "native",
+  "main": "lumen-shell",
+  "title": "Lumen",
+  "appDescription": "A clean, fast home screen for rooted LG TVs (Phase 0: hello-gles)",
+  "icon": "icon80.png",
+  "largeIcon": "icon130.png",
+  "iconColor": "#0b0f1c",
+  "bgColor": "#000000",
+  "resolution": "1920x1080"
+}
+$ files named sam under /etc and /usr/share
+/etc/init/sam.conf
+/etc/palm/sam-conf-tv.json
+/etc/palm/sam-conf.json
+/etc/palm/schemas/sam
+/usr/share/alsa/speaker-test/sample_map.csv
+/usr/share/iconnectivity/sample_data
+/usr/share/localization/sam
+/usr/share/luna-service2/manifests.d/sam.manifest.json
+--- /etc/init/sam.conf: lines about keep-alive, preload, the life cycle and memory
+26:    export LD_PRELOAD=/usr/lib/libsystrim.so.3
+--- /etc/palm/sam-conf-tv.json: lines about keep-alive, preload, the life cycle and memory
+(none matched)
+--- /etc/palm/sam-conf.json: lines about keep-alive, preload, the life cycle and memory
+37:    "DevModePath": "/var/luna/preferences/devmode_enabled",
+--- /usr/share/luna-service2/manifests.d/sam.manifest.json: lines about keep-alive, preload, the life cycle and memory
+(none matched)
+
+===== screensaver =====
+screenmanager: (not found)
+screensaver: (not found)
+nopd: /usr/sbin/nopd
+pid 2515: uid 0, binary /usr/sbin/nopd, root /
+  mnt namespace the same as init; net namespace different from init, or unreadable
+$ initctl list, jobs matching screen|saver|nop
+nopd start/running, process 2515
+second-screen-gateway stop/waiting
+$ luna com.webos.service.tvpower/power/getPowerState {}
+{
+    "state": "Active",
+    "returnValue": true
+}
+$ luna com.webos.settingsservice/getSystemSettings {"category":"option","keys":["screenSaverTimer","screenSaver","autoPowerOff","standbyMode"]}
+{
+    "subscribed": false,
+    "category": "option",
+    "method": "getSystemSettings",
+    "returnValue": false,
+    "errorText": "There is no matched result from DB"
+}
+
+===== memory =====
+MemTotal:        1688532 kB
+MemFree:           29608 kB
+MemAvailable:     320408 kB
+Cached:           267448 kB
+SwapTotal:        614396 kB
+SwapFree:         454400 kB
+memorymanager: (not found)
+memmanager: (not found)
+lmkd: (not found)
+$ initctl list, jobs matching mem|lmk
+memchute-ready stop/waiting
+memchute start/running, process 1696
+$ /etc files with mem in the name
+/etc/palm/memorymanager-conf.json
+$ the system log: lines naming Lumen with memory, reclaim, close, pause or oom (the last 40)
+(none matched)
+$ the kernel log: low memory
+(none matched)
+
+===== acr =====
+$ luna com.webos.settingsservice/getSystemSettings {"category":"general","keys":["acrOnAllowed","acrAdAllowed","additional1Allowed","acrAllowed","generalTermsAllowed","doNotSellMyPersonalInformation"]}
+{
+    "subscribed": false,
+    "category": "general",
+    "method": "getSystemSettings",
+    "returnValue": false,
+    "errorText": "There is no matched result from DB"
+}
+$ luna com.webos.settingsservice/getSystemSettings {"category":"option","keys":["livePlus","acrOnAllowed","acrAdAllowed","additional1Allowed"]}
+{
+    "subscribed": false,
+    "category": "option",
+    "errorKey": [
+        "acrAdAllowed",
+        "acrOnAllowed",
+        "additional1Allowed"
+    ],
+    "settings": {
+        "livePlus": "off"
+    },
+    "returnValue": false,
+    "method": "getSystemSettings"
+}
+acr2: /usr/sbin/acr2
+$ ls -l /usr/sbin/acr2
+-rwxr-xr-x    1 root     root        545140 Aug 27  2025 /usr/sbin/acr2
+$ the consent names in its strings
+GeneralTermsAllowed
+InterestBasedAdAllowed
+LivePlusAllowed
+_ZN4core10Controller13IsEulaAllowedEv
+_ZN9interface15SettingsService13IsEulaAllowedEv
+_ZNK4core10Controller19EulaLivePlusAllowedEv
+_ZNK4core10Controller23EulaGeneralTermsAllowedEv
+_ZNK4core10Controller31EulaDataPartnerAgreementAllowedEv
+_ZNK4core10Controller37EulaInterestBasedAdvertisementAllowedEv
+_ZNK4core14SolutionLoader19EulaLivePlusAllowedEv
+_ZNK4core14SolutionLoader23EulaGeneralTermsAllowedEv
+_ZNK4core14SolutionLoader31EulaDataPartnerAgreementAllowedEv
+_ZNK4core14SolutionLoader37EulaInterestBasedAdvertisementAllowedEv
+_ZThn4_NK4core10Controller19EulaLivePlusAllowedEv
+_ZThn4_NK4core10Controller23EulaGeneralTermsAllowedEv
+_ZThn4_NK4core10Controller31EulaDataPartnerAgreementAllowedEv
+_ZThn4_NK4core10Controller37EulaInterestBasedAdvertisementAllowedEv
+acrAdAllowed
+acrOnAllowed
+additional1Allowed
+dataPartnerAgreementAllowed
+doNotSellMyInformation
+doNotSellMyPersonalInformation
+generalTermsAllowed
+gerneralTermsAllowed
+interestBasedAdAllowed
+livePlus
+livePlusAllowed
+livePlusOn
+acr2: not running
+$ initctl list, jobs matching acr
+pacrunner start/running, process 2918
+
+===== guard-log =====
+log: 5648 lines, first 1793428315, last 1793940989 (unix seconds)
+alphonso.tv: lookups 0
+lgsmartad.com: lookups 2, first 1793491111, last 1793491111; the first times: 1793491111 1793491111
+lgads.tv: lookups 0
+elastic.lgwebostv.com: lookups 0
+ueiwsp.com: lookups 36, first 1793461523, last 1793939432; the first times: 1793461523 1793461523 1793461524 1793461524 1793463095 1793463095 1793463096 1793463096 1793466138 1793466138 1793466138 1793466138 1793466639 1793466639 1793466640 1793466640 1793467526 1793467526 1793467527 1793467527
+reverse lookups of private addresses: 1; other reverse lookups: 6
+  unix day 20757: 1
+--- UEI's program, which the sweeps are put down to
+iconnectivity: /usr/sbin/iconnectivity
+pid 2764: uid 0, binary /usr/sbin/iconnectivity, root /
+  mnt namespace the same as init; net namespace different from init, or unreadable
+  pid 2764 holds 15 sockets
+$ initctl list, jobs matching iconnect|^ics|uei
+(none matched)
+
+===== lan-chain =====
+$ apps named like sync-demo or cmp-client under /usr/palm/applications
+/usr/palm/applications/com.webos.app.sync-demo
+/usr/palm/applications/com.webos.app.cmp-client
+pmlogd: (not found)
+
+===== ports =====
+table bound-to:port program
+tcp any:1665 /usr/sbin/upnpd
+tcp any:18181 /usr/sbin/xinetd
+tcp any:1847 /usr/sbin/upnpd
+tcp any:1889 /usr/sbin/upnpd
+tcp any:1926 /usr/sbin/upnpd
+tcp any:1954 /usr/sbin/upnpd
+tcp any:2041 /usr/sbin/upnpd
+tcp any:22 /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear
+tcp any:3000 /usr/sbin/xinetd
+tcp any:3001 /usr/sbin/xinetd
+tcp any:36866 /usr/sbin/xinetd
+tcp any:7000 /usr/sbin/airplay
+tcp any:9080 /media/cryptofs/apps/usr/palm/applications/netflix/bin/netflix.bin
+tcp loopback:39956 /usr/sbin/airplay
+tcp loopback:46402 /usr/sbin/airplay
+tcp loopback:46606 /usr/sbin/airplay
+tcp loopback:53 /usr/sbin/connmand
+tcp one-address:53 /var/lib/lumen/guard/lumen-guard
+tcp6 any:22 /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear
+tcp6 any:39729 /usr/sbin/homekit
+tcp6 loopback:53 /usr/sbin/connmand
+udp any:1900 /media/cryptofs/apps/usr/palm/applications/netflix/bin/netflix.bin
+udp any:1900 /usr/sbin/upnpd
+udp any:34990 /usr/sbin/mdnsd
+udp any:5353 /usr/sbin/mdnsd
+udp any:5353 avahi-daemon: running [LGwebOSTV.local]
+udp any:57816 avahi-daemon: running [LGwebOSTV.local]
+udp loopback:53 /usr/sbin/connmand
+udp one-address:1900 /usr/sbin/ssc
+udp one-address:53 /var/lib/lumen/guard/lumen-guard
+udp6 any:5353 /usr/sbin/mdnsd
+udp6 any:55921 /usr/sbin/mdnsd
+udp6 loopback:53 /usr/sbin/connmand
+ip_local_port_range: 32768	60999
+USB drives mounted now: 0
+
+===== lg-addresses =====
+update: /usr/sbin/update
+$ 156.147. addresses in its strings
+156.147.69.32:8080
+$ files under /etc naming 156.147.
+(none matched)
+$ TCP connections now to 156.147.0.0/16: address, port, state
+(none matched)
+
+===== clock =====
+$ luna com.palm.systemservice/clock/getTime {}
+    "source": "system",
+        "source": "system",
+    "systemTimeSource": "sdp",
+        "source": "monotonic",
+    "returnValue": true,
+    "utc": 1793941049
+$ luna com.palm.systemservice/time/getSystemTime {}
+    "returnValue": true,
+    "utc": 1793941049,
+    "timeValid": true,
+    "systemTimeSource": "sdp",
+        "source": "monotonic",
+--- /sys/class/rtc/rtc0/name
+(absent)
+--- /sys/class/rtc/rtc0/date
+(absent)
+--- /sys/class/rtc/rtc0/time
+(absent)
+--- /sys/class/rtc/rtc0/since_epoch
+(absent)
+ntpd: (not found)
+sntp: (not found)
+chronyd: (not found)
+timesyncd: (not found)
+$ /etc files for time keeping
+(none matched)
+
+===== end =====
+platform survey complete
