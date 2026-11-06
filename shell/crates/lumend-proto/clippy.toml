@@ -1,0 +1,11 @@
+# Decision 14: lumend and the shell open no network socket. The protocol
+# crate both of them use is held to the same rule. Unix sockets stay allowed.
+disallowed-types = [
+    { path = "std::net::TcpListener", reason = "no network socket (decision 14)" },
+    { path = "std::net::TcpStream", reason = "no network socket (decision 14)" },
+    { path = "std::net::UdpSocket", reason = "no network socket (decision 14)" },
+]
+disallowed-methods = [
+    { path = "libc::socket", reason = "no raw socket: std's UnixStream is the only one (decision 14)" },
+    { path = "libc::socketpair", reason = "no raw socket: std's UnixStream is the only one (decision 14)" },
+]

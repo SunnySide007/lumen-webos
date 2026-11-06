@@ -33,6 +33,7 @@ EOF
     [[ "$output" == *"tools/tv.sh script profiles/privacy/guard-undo.sh"* ]]
     [[ "$output" == *"tools/tv.sh script takeover/filter-undo.sh"* ]]
     [[ "$output" == *"tools/tv.sh script takeover/undo.sh"* ]]
+    [[ "$output" == *"tools/tv.sh script profiles/lumend/remove.sh"* ]]
     [[ "$output" == *"tools/tv.sh remove io.github.sunnyside007.lumen.shell   (only if the default home was set back)"* ]]
     [[ "$output" == *"  tools/remote.sh remove"* ]]
     [[ "$output" == *"lumen-capture"* ]]
@@ -71,7 +72,7 @@ EOF
     grep -qx 'run|rm -rf /var/lib/lumen-hdr' "$CALLS"
     grep -qx 'remove|com.beb.plxnative' "$CALLS"
     grep -qx 'remote|remove' "$CALLS"
-    [ "$(wc -l <"$CALLS")" -eq 12 ]
+    [ "$(wc -l <"$CALLS")" -eq 13 ]
     [[ "$output" == *"Cold boot"* ]]
 }
 
@@ -188,4 +189,14 @@ EOF
 @test "the dry run marks the steps that wait for the restores" {
     run "$UNINSTALL" --glasshouse
     [[ "$output" == *"rm -rf /var/lib/tvweb /media/developer/temp/glasshouse-install'   (only if the restores above succeeded)"* ]]
+}
+
+@test "lumend goes first, before route D's undo and Lumen's app" {
+    run "$UNINSTALL" --yes
+    [ "$status" -eq 0 ]
+    lumend=$(grep -nx 'script|.*/profiles/lumend/remove.sh' "$CALLS" | cut -d: -f1)
+    filter=$(grep -nx 'script|.*/takeover/filter-undo.sh' "$CALLS" | cut -d: -f1)
+    [ "$lumend" = 1 ] && [ -n "$filter" ]
+    [ "$lumend" -lt "$filter" ]
+    [ -f "$(sed -n 's/^script|\(.*lumend\/remove\.sh\)$/\1/p' "$CALLS")" ]
 }

@@ -1,0 +1,15 @@
+# Decision 14: lumend opens no network socket; only Guard reaches the
+# internet. Clippy refuses std's network types and libc's raw sockets in this
+# crate (with -D warnings in make lint, for the PC and the TV builds), and a
+# port survey on the TV checks it. Unix sockets stay allowed: they are the
+# shell's link.
+disallowed-types = [
+    { path = "std::net::TcpListener", reason = "no network socket in lumend (decision 14)" },
+    { path = "std::net::TcpStream", reason = "no network socket in lumend (decision 14)" },
+    { path = "std::net::UdpSocket", reason = "no network socket in lumend (decision 14)" },
+]
+disallowed-methods = [
+    { path = "libc::socket", reason = "no raw socket in lumend: std's UnixListener is the only one (decision 14)" },
+    { path = "libc::socketpair", reason = "no raw socket in lumend (decision 14)" },
+    { path = "std::process::Command::new", reason = "programs start only through run::spawn, with fixed absolute paths" },
+]

@@ -6,6 +6,7 @@
 #   tools/dev.sh make kern-table      # Inter's kerning table (shell/assets/fonts/)
 #   tools/dev.sh make guard    # Lumen Guard for the TV (dist/guard/)
 #   tools/dev.sh make ctl      # lumen-ctl for Lumen Remote (dist/ctl/)
+#   tools/dev.sh make lumend   # lumend, its stand-in and its door (dist/lumend/)
 #
 # Talking to the TV (install, launch, logs, recon) is tools/tv.sh, which runs on
 # the host so it can use your SSH key.
@@ -17,9 +18,11 @@ TARGET  := armv7-unknown-linux-gnueabi
 BIN     := shell/target/$(TARGET)/release/lumen-shell
 GUARD   := shell/target/$(TARGET)/release/lumen-guard
 CTL     := shell/target/$(TARGET)/release/lumen-ctl
+LUMEND  := shell/target/$(TARGET)/release/lumend
+STANDIN := shell/target/$(TARGET)/release/lumen-standin
 STAGE   := dist/stage/$(APP_ID)
 
-.PHONY: all build-tv ipk capture-tools kern-table guard ctl test lint check clean
+.PHONY: all build-tv ipk capture-tools kern-table guard ctl lumend licenses test lint check clean
 
 all: ipk
 
@@ -50,6 +53,15 @@ ctl:
 	mkdir -p dist/ctl
 	install -m 0755 $(CTL) dist/ctl/lumen-ctl
 	@ls -l dist/ctl/lumen-ctl
+
+# Lumen's root daemon for the TV (tools/lumend.sh push); not part of check,
+# which builds and tests it with the rest of the workspace.
+lumend:
+	cd shell && cargo build --release --target $(TARGET) -p lumend
+	mkdir -p dist/lumend
+	install -m 0755 $(LUMEND) $(STANDIN) dist/lumend/
+	install -m 0644 profiles/lumend/lumend dist/lumend/door
+	@ls -l dist/lumend/
 
 # ares-package (LG's packager) writes the control fields the webosbrew
 # repository checks for, which a hand-made .ipk would lack. It also makes every
@@ -90,9 +102,14 @@ lint:
 	cd shell && cargo fmt --all --check
 	cd shell && cargo clippy --workspace --all-targets -- -D warnings
 	cd shell && cargo clippy --workspace --release --target $(TARGET) --all-targets -- -D warnings
-	shellcheck tools/*.sh tools/recon/*.sh tools/backup/*.sh tools/capture/*.sh profiles/glasshouse/*.sh profiles/privacy/*.sh profiles/remote/*.sh profiles/privacy/lumen-privacy profiles/privacy/lumen-guard takeover/*.sh takeover/lumen-home packaging/shell/*.sh .githooks/pre-push
+	shellcheck tools/*.sh tools/recon/*.sh tools/backup/*.sh tools/capture/*.sh profiles/glasshouse/*.sh profiles/privacy/*.sh profiles/remote/*.sh profiles/lumend/*.sh profiles/lumend/lumend profiles/privacy/lumen-privacy profiles/privacy/lumen-guard takeover/*.sh takeover/lumen-home packaging/shell/*.sh .githooks/pre-push
 
-check: lint test
+# Every crate in Cargo.lock under a license Lumen's GPL-3.0-or-later can meet,
+# and every direct dependency named in THIRD-PARTY.md (tools/licenses.py).
+licenses:
+	cd shell && cargo metadata --format-version 1 --locked | python3 -I ../tools/licenses.py ../THIRD-PARTY.md
+
+check: lint licenses test
 
 clean:
 	rm -rf dist

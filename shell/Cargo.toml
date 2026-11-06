@@ -5,8 +5,10 @@ members = [
     "crates/lumen-shell",
     "crates/lumen-guard",
     "crates/lumen-ctl",
+    "crates/lumend-proto",
+    "crates/lumend",
 ]
-# lumen-guard and lumen-ctl build for Linux only, so a plain `cargo run` or
+# lumen-guard, lumen-ctl and lumend build for Linux only, so a plain `cargo run` or
 # `cargo build` on the PC (tools/sim.ps1) means the shell and its core; make
 # passes --workspace.
 default-members = ["crates/lumen-core", "crates/lumen-shell"]

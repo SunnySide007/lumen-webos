@@ -13,11 +13,11 @@ any of them is marked at the point of use with its origin and license.
 | [openlgtv/buildroot-nc4](https://github.com/openlgtv/buildroot-nc4) | The cross-compiling toolchain in `docker/Dockerfile` | GPL-2.0 (toolchain) |
 | [webos-galaxy-launcher](https://github.com/guntiss/webos-galaxy-launcher) | Reference for installing an `.ipk` over SSH (`tools/tv.sh install`) | not stated |
 | [SDL](https://github.com/libsdl-org/SDL) | Window, GL context and input; loaded at run time | zlib |
-| [libloading](https://github.com/nagisa/rust_libloading) | Loading SDL2 at run time | ISC |
+| [libloading](https://github.com/nagisa/rust_libloading) | Loading SDL2 at run time; `lumen-ctl` and `lumend` load libluna-service2 the same way | ISC |
 | [png](https://github.com/image-rs/image-png) | Decoding app icons (`shell/.../icons.rs`) | MIT or Apache-2.0 |
 | [fontdue](https://github.com/mooman219/fontdue) | Rasterising text (`shell/.../text.rs`) | MIT, Apache-2.0 or Zlib |
-| [serde_json](https://github.com/serde-rs/json) | Reading the TV's app and input lists from luna (`shell/.../luna.rs`); `lumen-ctl`'s JSON lines and luna answers | MIT or Apache-2.0 |
-| [libc](https://github.com/rust-lang/libc) | The C calls `std` lacks in Lumen Guard (the DSCP mark, `poll`, SIGTERM, the local date) and in `lumen-ctl` (signals, `_exit`, `getauxval`) | MIT or Apache-2.0 |
+| [serde_json](https://github.com/serde-rs/json) | Reading the TV's app and input lists from luna (`shell/.../luna.rs`); `lumen-ctl`'s JSON lines and luna answers; `lumend`'s luna calls, replies and the TV's permission files | MIT or Apache-2.0 |
+| [libc](https://github.com/rust-lang/libc) | The C calls `std` lacks in Lumen Guard (the DSCP mark, `poll`, SIGTERM, the local date) and in `lumen-ctl` (signals, `_exit`, `getauxval`); in `lumend`, signals, `mount`, `kill`, inotify, `SO_PEERCRED` and the link trial's uid change | MIT or Apache-2.0 |
 | [Inter](https://github.com/rsms/inter) 4.1 | The shell's typeface: `shell/assets/fonts/Inter-SemiBold.ttf`, unmodified, built into the binary, with its licence beside it (`Inter-LICENSE.txt`); its kerning, read out of the font's GPOS table into `Inter-SemiBold.kern` by `tools/font/kern_table.py` and built in too | SIL Open Font License 1.1 |
 | [Inter](https://github.com/rsms/inter), through [Fontsource](https://github.com/fontsource/font-files) | The typeface of the Remote web front-end, bundled in `remote/ui` (variable, Latin subset) | OFL-1.1 |
 
