@@ -44,8 +44,13 @@ on_hub() {
 }
 
 luna() {
-    case "$1" in
-        */get*|*/list*) ;;
+    case $1 in
+        */*) ;;
+        *) echo "luna $1: refused, not a service and a method"; return ;;
+    esac
+    # The last part of the path is the method, so a/getX/setY is refused.
+    case ${1##*/} in
+        get* | list*) ;;
         *) echo "luna $1: refused, not a get or list method"; return ;;
     esac
     if ! on_hub "${1%%/*}"; then

@@ -328,8 +328,9 @@ EOF
 
 @test "the luna guard refuses every method but get and list" {
     for s in $SURVEYS; do
-        # The platform survey also checks the hub's list (on_hub): both
-        # services the allowed calls name are on it.
+        # Every survey also checks the hub's list (on_hub): both services the
+        # allowed calls name are on it. The method is the path's last part,
+        # so a get in the middle of one does not let a set through.
         { echo 'T=""'
           printf 'hub="%s"\n' "$(printf '1 com.webos.audio x\n2 com.webos.applicationManager x')"
           sed -n '/^on_hub() {/,/^}/p;/^luna() {/,/^}/p' "$s"; } >"$TMP/luna-guard.sh"
@@ -338,11 +339,12 @@ EOF
         run env PATH="$TMP/bin:$PATH" sh -c ". '$TMP/luna-guard.sh'
             luna com.webos.service.tvpower/power/turnOffScreen '{}'
             luna com.webos.audio/setMuted '{\"muted\":true}'
+            luna com.webos.audio/getStatus/setMuted '{\"muted\":true}'
             luna com.webos.applicationManager/launch '{}'
             luna getaway '{}'
             luna com.webos.audio/getStatus '{}'
             luna com.webos.applicationManager/listApps '{}'"
-        [ "$(grep -c 'refused' <<<"$output")" -eq 4 ] || { echo "$s: $output"; false; }
+        [ "$(grep -c 'refused' <<<"$output")" -eq 5 ] || { echo "$s: $output"; false; }
         [ "$(wc -l <"$CALLS")" -eq 2 ] || { echo "$s: $(cat "$CALLS")"; false; }
         refute_grep -E 'turnOffScreen|setMuted|launch ' "$CALLS"
     done
