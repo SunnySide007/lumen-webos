@@ -60,6 +60,8 @@ case $4 in
     *) echo '{ "returnValue": true }' ;;
 esac
 EOF
+    # The hub lists every service the remote survey uses but one,
+    # com.webos.service.audio, which it must then leave alone.
     cat >"$TMP/bin/ls-monitor" <<'EOF'
 #!/bin/sh
 echo "ls-monitor $*" >>"$CALLS"
@@ -70,6 +72,15 @@ case $1 in
         echo '  700  com.webos.service.tvpower        /usr/sbin/tvpower             static'
         echo '  701  org.example.rcu.bridge           /media/x/rcu.so               dynamic'
         echo '  702  com.webos.service.keymanager     /usr/sbin/keymanager          static'
+        echo '  703  com.webos.audio                  /usr/sbin/audiod              static'
+        echo '  704  com.webos.applicationManager     /usr/sbin/sam                 static'
+        echo '  705  com.webos.settingsservice        /usr/sbin/settingsservice     static'
+        echo '  706  com.webos.service.ime            /usr/sbin/imemanager          static'
+        echo '  707  com.webos.service.eim            /usr/sbin/eim                 static'
+        echo '  708  com.webos.service.tv.systemproperty /usr/sbin/sysprop          static'
+        echo '  709  com.webos.notification           /usr/sbin/notificationmgr     static'
+        echo '  710  com.webos.service.config         /usr/sbin/configd             static'
+        echo '  711  com.webos.service.connectionmanager /usr/sbin/connmgr          static'
         ;;
     -i) echo "methods of $2: /category method" ;;
     *) echo 'FORBIDDEN ls-monitor call'; exit 99 ;;
@@ -458,7 +469,7 @@ EOF
     run_remote
     [ "$status" -eq 0 ]
     # luna-send: always -n 1 -f, always a get or list method.
-    [ "$(grep -c '^luna-send' "$CALLS")" -ge 14 ]
+    [ "$(grep -c '^luna-send' "$CALLS")" -ge 13 ]
     [ -z "$(grep '^luna-send' "$CALLS" | grep -v -E '^luna-send -n 1 -f luna://[A-Za-z0-9._/-]+/(get|list)[A-Za-z]* ')" ]
     for method in tv.systemproperty/getSystemInfo tvpower/power/getPowerState audio/getVolume \
         applicationManager/getForegroundAppInfo eim/getAllInputStatus connectionmanager/getstatus; do
@@ -481,6 +492,24 @@ EOF
     for svc in com.webos.service.networkinput org.example.rcu.bridge com.webos.service.keymanager; do
         grep -q -x "ls-monitor -i $svc" "$CALLS"
     done
+}
+
+@test "the remote survey calls and asks about only what is on the hub already" {
+    run_remote
+    [ "$status" -eq 0 ]
+    # com.webos.service.audio is not on the fake hub's list: neither asked
+    # about nor called, since either could make the hub start it.
+    [[ "$output" == *"ls-monitor -i com.webos.service.audio: not on the hub now, so not asked"* ]]
+    [[ "$output" == *"luna com.webos.service.audio/master/getVolume: not on the hub now, so not called"* ]]
+    refute_grep -F 'com.webos.service.audio' "$CALLS"
+    listed=$("$TMP/bin/ls-monitor" -l | awk 'NR > 1 { print $2 }')
+    : >"$TMP/asked"
+    grep -o -E '^luna-send -n 1 -f luna://[^/]+' "$CALLS" | sed 's|.*luna://||' >>"$TMP/asked"
+    grep -E '^ls-monitor -i ' "$CALLS" | awk '{ print $3 }' >>"$TMP/asked"
+    [ -s "$TMP/asked" ]
+    while read -r svc; do
+        grep -q -x -F "$svc" <<<"$listed" || { echo "not on the hub: $svc"; false; }
+    done <"$TMP/asked"
 }
 
 @test "the remote survey withholds the input devices' Phys and Uniq" {
@@ -506,7 +535,9 @@ EOF
     [ "${lines[${#lines[@]}-1]}" = "remote survey complete" ]
     [[ "$output" == *"ls-monitor: absent on this TV"* ]]
     [[ "$output" == *"(not on PATH)"* ]]
-    [[ "$output" == *"(no answer)"* ]]
+    # With no list of the hub, nothing on the bus is called.
+    [[ "$output" == *"luna com.webos.service.tvpower/power/getPowerState: not on the hub now, so not called"* ]]
+    refute_grep -E '^\$ luna [A-Za-z0-9.]+/' <<<"$output"
 }
 
 # --- guards on the platform survey ------------------------------------------

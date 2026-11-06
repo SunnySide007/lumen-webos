@@ -28,6 +28,9 @@
 # its key type; no private key, host key, password hash or process environment
 # is read. Input devices' Phys and Uniq values, which can hold Bluetooth
 # addresses, are withheld here, and redact.py masks them again.
+# Nothing on the bus is called or asked about unless the hub lists it as
+# there already: a call to a dynamic service starts its program (on
+# 2026-11-06 the platform survey started LG's acr2 by asking about it).
 # It runs under the TV's busybox sh, so it sticks to POSIX shell.
 #
 # The two variables below exist so tests/recon.bats can point the survey at
@@ -61,6 +64,13 @@ showfile() {
     done
 }
 
+# Whether a bus name is on the hub's list now. A call to a name that is not
+# can make the hub start its program, so nothing is called or asked about
+# unless it is there already.
+on_hub() {
+    printf '%s\n' "$hub" | awk -v s="$1" '$2 == s { found = 1 } END { exit !found }'
+}
+
 luna() {
     case $1 in
         */*) ;;
@@ -70,6 +80,10 @@ luna() {
         get* | list*) ;;
         *) echo "luna $1: refused, not a get or list method"; return ;;
     esac
+    if ! on_hub "${1%%/*}"; then
+        echo "luna $1: not on the hub now, so not called (a call could start it)"
+        return
+    fi
     printf '$ luna %s %s\n' "$1" "$2"
     # shellcheck disable=SC2086
     $T luna-send -n 1 -f "luna://$1" "$2" </dev/null 2>&1 || echo '(no answer)'
@@ -173,6 +187,13 @@ key_options() {
     ' "$1"
 }
 
+# Who is on the bus before anything is called (on_hub). Without ls-monitor
+# the list is empty, and nothing on the bus is called at all.
+hub=""
+if command -v ls-monitor >/dev/null 2>&1; then
+    hub=$(lsmon -l)
+fi
+
 section identity
 show date -u
 show id
@@ -249,19 +270,22 @@ show ls -ld /home/root /home/root/.ssh
 # registered with the hub, ls-monitor -i what one service offers (a build of
 # the hub without introspection prints nothing). Then read-only calls.
 section luna-methods
-registered=""
+registered=$hub
 if command -v ls-monitor >/dev/null 2>&1; then
-    registered=$(lsmon -l)
     printf '%s\n' "$registered"
     for svc in com.webos.service.tvpower com.webos.audio com.webos.service.audio \
         com.webos.applicationManager com.webos.settingsservice com.webos.service.ime \
         com.webos.service.eim com.webos.service.tv.systemproperty \
         com.webos.notification com.webos.service.config \
         com.webos.service.connectionmanager; do
-        lsmon -i "$svc"
+        if on_hub "$svc"; then
+            lsmon -i "$svc"
+        else
+            echo "ls-monitor -i $svc: not on the hub now, so not asked (asking could start it)"
+        fi
     done
 else
-    echo 'ls-monitor: absent on this TV, so no list of services or methods (the calls below still run)'
+    echo 'ls-monitor: absent on this TV, so no list of services, and nothing on the bus is called'
 fi
 # Dotted names in the list, which is a table of pid, name, binary and type.
 input_services=$(printf '%s\n' "$registered" \
@@ -271,7 +295,11 @@ printf '\n-- registered services with input, rcu, key or remote in the name\n'
 if [ -n "$input_services" ]; then
     # shellcheck disable=SC2086
     for svc in $input_services; do
-        lsmon -i "$svc"
+        if on_hub "$svc"; then
+            lsmon -i "$svc"
+        else
+            echo "ls-monitor -i $svc: not on the hub now, so not asked (asking could start it)"
+        fi
     done
 else
     echo '(none)'
