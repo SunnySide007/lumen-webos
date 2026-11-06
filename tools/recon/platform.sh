@@ -32,6 +32,9 @@
 # WAYLAND_DISPLAY, XDG_RUNTIME_DIR, DISPLAY_ID). Guard's log comes out as
 # counts and times, never the names a reverse lookup asked for. The clock's
 # answers lose their time zone, city and country.
+# Nothing on the bus is called or asked about unless the hub lists it as
+# there already: a call to a dynamic service starts its program, and the
+# first runs of 2026-11-06 started LG's acr2 by asking about it.
 # It runs under the TV's busybox sh, so it sticks to POSIX shell.
 #
 # The variables below exist so tests/recon.bats can point the survey at
@@ -93,6 +96,14 @@ existing() {
     done | or_none
 }
 
+# Whether a bus name is on the hub's list now. A call to a name that is not
+# can make the hub start its program: a dynamic service, as LG's acr2 is
+# (the survey's runs of 2026-11-06 started it that way). So nothing is
+# called or asked about unless it is there already.
+on_hub() {
+    printf '%s\n' "$hub" | awk -v s="$1" '$2 == s { found = 1 } END { exit !found }'
+}
+
 luna() {
     case $1 in
         */*) ;;
@@ -102,6 +113,10 @@ luna() {
         get* | list*) ;;
         *) echo "luna $1: refused, not a get or list method"; return ;;
     esac
+    if ! on_hub "${1%%/*}"; then
+        echo "luna $1: not on the hub now, so not called (a call could start it)"
+        return
+    fi
     printf '$ luna %s %s\n' "$1" "$2"
     # shellcheck disable=SC2086
     $T luna-send -n 1 -f "luna://$1" "$2" </dev/null 2>&1 || echo '(no answer)'
@@ -132,7 +147,7 @@ lsmon() {
 # Of a clock answer, the lines about its source, the time and errors; never a
 # time zone, city or country.
 clock_lines() {
-    grep -E '^\$ luna |^\(no answer\)|refused|[Ss]ource|"utc"|returnValue|[Ee]rror|[Vv]alid' \
+    grep -E '^\$ luna |^\(no answer\)|refused|not on the hub|[Ss]ource|"utc"|returnValue|[Ee]rror|[Vv]alid' \
         | grep -v -i -E 'zone|city|country|"tz"' | or_none
 }
 
@@ -216,6 +231,13 @@ jobs_matching() {
     fi
 }
 
+# Who is on the bus before anything is called (on_hub). Without ls-monitor
+# the list is empty, and nothing on the bus is called at all.
+hub=""
+if command -v ls-monitor >/dev/null 2>&1; then
+    hub=$(lsmon -l)
+fi
+
 section identity
 show date -u
 show uname -r
@@ -270,14 +292,17 @@ if [ -d "$LUMEN_LOGS" ]; then show ls -la "$LUMEN_LOGS"; else echo "$LUMEN_LOGS:
 # Facts 1, 2 and 4.
 section bus
 if command -v ls-monitor >/dev/null 2>&1; then
-    registered=$(lsmon -l)
     printf '$ ls-monitor -l lines for Lumen, the app manager, the compositor, power, memory and Homebrew Channel\n'
-    printf '%s\n' "$registered" \
+    printf '%s\n' "$hub" \
         | grep -i -E "$APP_ID|applicationmanager|surface|tvpower|memory|hbchannel|webosbrew" | or_none
     for svc in com.webos.applicationManager com.webos.service.tvpower com.webos.memorymanager \
         com.webos.service.memorymanager com.webos.pmlogd com.webos.service.ics \
         com.webos.service.acr; do
-        lsmon -i "$svc"
+        if on_hub "$svc"; then
+            lsmon -i "$svc"
+        else
+            echo "ls-monitor -i $svc: not on the hub now, so not asked (asking could start it)"
+        fi
     done
 else
     echo 'ls-monitor: absent on this TV'

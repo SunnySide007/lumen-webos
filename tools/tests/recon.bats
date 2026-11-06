@@ -132,15 +132,28 @@ echo 'screensaver stop/waiting'
 echo 'memorymanager start/running, process 410'
 echo 'acr2 start/running, process 911'
 EOF
-    # A service whose introspection never answers, in a client that ignores
-    # TERM.
+    # The hub lists the services the survey calls, but not LG's acr service
+    # (dynamic: a call would start it) or a memory manager by the other
+    # name. One listed service's introspection never answers, in a client
+    # that ignores TERM.
     cat >"$TMP/bin/ls-monitor" <<'EOF'
 #!/bin/sh
 echo "ls-monitor $*" >>"$CALLS"
 case $1 in
-    -l) echo '  700  com.webos.service.tvpower        /usr/sbin/tvpower             static' ;;
+    -l)
+        echo 'PID   SERVICE                              EXE                  TYPE'
+        echo '700   com.webos.service.tvpower            /usr/sbin/tvpowerd   static'
+        echo '701   com.webos.service.tv.systemproperty  /usr/sbin/sysprop    static'
+        echo '702   com.webos.service.config             /usr/sbin/configd    static'
+        echo '703   com.webos.applicationManager         /usr/sbin/sam        static'
+        echo '704   com.webos.settingsservice            /usr/sbin/settings   static'
+        echo '705   com.palm.systemservice               /usr/sbin/sysservice static'
+        echo '706   com.webos.memorymanager              /usr/sbin/memchute   static'
+        echo '707   com.webos.pmlogd                     /usr/sbin/PmLogDaemon static'
+        echo '708   com.webos.service.ics                /usr/sbin/iconnectivity dynamic'
+        ;;
     -i)
-        if [ "$2" = com.webos.service.acr ]; then
+        if [ "$2" = com.webos.service.ics ]; then
             trap '' TERM
             exec sleep 60
         fi
@@ -299,7 +312,11 @@ EOF
 
 @test "the luna guard refuses every method but get and list" {
     for s in $SURVEYS; do
-        { echo 'T=""'; sed -n '/^luna() {/,/^}/p' "$s"; } >"$TMP/luna-guard.sh"
+        # The platform survey also checks the hub's list (on_hub): both
+        # services the allowed calls name are on it.
+        { echo 'T=""'
+          printf 'hub="%s"\n' "$(printf '1 com.webos.audio x\n2 com.webos.applicationManager x')"
+          sed -n '/^on_hub() {/,/^}/p;/^luna() {/,/^}/p' "$s"; } >"$TMP/luna-guard.sh"
         make_fakes
         : >"$CALLS"
         run env PATH="$TMP/bin:$PATH" sh -c ". '$TMP/luna-guard.sh'
@@ -520,9 +537,28 @@ EOF
     done
     [[ "$output" != *FORBIDDEN* ]]
     [[ "$output" != *refused* ]]
-    # The acr service that never answers is given up on, not waited for (the
+    # The service that never answers is given up on, not waited for (the
     # shell may say "Killed" first).
-    grep -A 2 -F '$ ls-monitor -i com.webos.service.acr' <<<"$output" | grep -q -x '(no answer)'
+    grep -A 2 -F '$ ls-monitor -i com.webos.service.ics' <<<"$output" | grep -q -x '(no answer)'
+}
+
+@test "the platform survey calls and asks about only what is on the hub already" {
+    run_platform
+    [ "$status" -eq 0 ]
+    # The acr service is not listed, so it is neither asked about nor called:
+    # either would make the hub start LG's acr2.
+    [[ "$output" == *"ls-monitor -i com.webos.service.acr: not on the hub now, so not asked"* ]]
+    refute_grep -F 'com.webos.service.acr' "$CALLS"
+    refute_grep -x 'ls-monitor -i com.webos.service.memorymanager' "$CALLS"
+    # Every luna-send and ls-monitor -i names a service the fake hub lists.
+    listed=$("$TMP/bin/ls-monitor" -l | awk 'NR > 1 { print $2 }')
+    : >"$TMP/asked"
+    grep -o -E '^luna-send -n 1 -f luna://[^/]+' "$CALLS" | sed 's|.*luna://||' >>"$TMP/asked"
+    grep -E '^ls-monitor -i ' "$CALLS" | awk '{ print $3 }' >>"$TMP/asked"
+    [ -s "$TMP/asked" ]
+    while read -r svc; do
+        grep -q -x -F "$svc" <<<"$listed" || { echo "not on the hub: $svc"; false; }
+    done <"$TMP/asked"
 }
 
 @test "the platform survey shows the shell's four names and nothing else of its environment" {
@@ -633,6 +669,8 @@ EOF
     [ "$status" -eq 0 ]
     [ "${lines[${#lines[@]}-1]}" = "platform survey complete" ]
     [[ "$output" == *"ls-monitor: absent on this TV"* ]]
-    [[ "$output" == *"(no answer)"* ]]
+    # With no list of the hub, nothing on the bus is called.
+    [[ "$output" == *"luna com.webos.service.tv.systemproperty/getSystemInfo: not on the hub now, so not called"* ]]
+    [[ "$output" != *'$ luna '* ]]
     [[ "$output" == *"/var/lib/lumen/guard/lookups.log: (absent)"* ]]
 }
