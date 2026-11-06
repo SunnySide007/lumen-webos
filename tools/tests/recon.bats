@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
-# Checks tools/recon.sh's options, and that the privacy, remote and platform
-# surveys only read. The guards read the surveys as text. The rest run the
-# remote and platform surveys, and recon.sh --remote, against fake luna-send,
-# ls-monitor, dropbear and initctl programs and fixture files, with a stand-in
-# for tools/tv.sh in a temporary copy of the tools. None of these reach a TV.
+# Checks tools/recon.sh's options, and that the device, privacy, remote and
+# platform surveys only read. The guards read the surveys as text. The rest
+# run the surveys, and recon.sh --remote, against fake luna-send, ls-monitor,
+# dropbear and initctl programs and fixture files, with a stand-in for
+# tools/tv.sh in a temporary copy of the tools. None of these reach a TV.
 
 setup() {
     TMP="$BATS_TEST_TMPDIR"
@@ -11,7 +11,9 @@ setup() {
     RECON="$TOOLS/recon.sh"
     REMOTE="$TOOLS/recon/remote.sh"
     PLATFORM="$TOOLS/recon/platform.sh"
-    SURVEYS="$TOOLS/recon/privacy.sh $REMOTE $PLATFORM"
+    DEVICE="$TOOLS/recon/device.sh"
+    PRIVACY="$TOOLS/recon/privacy.sh"
+    SURVEYS="$DEVICE $PRIVACY $REMOTE $PLATFORM"
     FIXTURES="$BATS_TEST_DIRNAME/fixtures/remote"
     PFIX="$BATS_TEST_DIRNAME/fixtures/platform"
     CALLS="$TMP/calls"
@@ -57,11 +59,13 @@ echo "luna-send $*" >>"$CALLS"
 case $4 in
     */getSystemInfo) echo '{ "modelName": "OLED55B9PUA", "firmwareVersion": "05.50.00", "returnValue": true, "sdkVersion": "4.10.0" }' ;;
     */getstatus) echo '{ "wifi": { "ssid": "HomeNet-5G", "ipAddress": "192.168.1.50", "gateway": "192.168.1.1", "bssid": "aa:bb:cc:dd:ee:01", "displayName": "HomeNet-5G", "state": "connected" } }' ;;
+    */listApps) printf '{\n    "apps": [\n        {\n            "id": "com.example.player",\n            "title": "Player"\n        },\n        {\n            "id": "com.example.sync-demo"\n        }\n    ],\n    "returnValue": true\n}\n' ;;
     *) echo '{ "returnValue": true }' ;;
 esac
 EOF
     # The hub lists every service the remote survey uses but one,
-    # com.webos.service.audio, which it must then leave alone.
+    # com.webos.service.audio, which it must then leave alone, and neither
+    # bluetooth2 nor wifi, which the device survey asks.
     cat >"$TMP/bin/ls-monitor" <<'EOF'
 #!/bin/sh
 echo "ls-monitor $*" >>"$CALLS"
@@ -302,10 +306,11 @@ EOF
 }
 
 @test "no survey writes a file" {
-    # Every redirection goes to /dev/null or to another descriptor.
+    # Every redirection goes to /dev/null or to another descriptor. The
+    # device survey's masks print the text <redacted>, which is no redirection.
     for s in $SURVEYS; do
         run sh -c "grep -v -E '^[[:space:]]*#' '$s' \
-            | sed -e 's/[0-9]*>&[0-9]//g' -e 's|[0-9]*>/dev/null||g' | grep -n '>'"
+            | sed -e 's/[0-9]*>&[0-9]//g' -e 's|[0-9]*>/dev/null||g' -e 's/<redacted>//g' | grep -n '>'"
         [ "$status" -eq 1 ] || { echo "$s: $output"; false; }
     done
 }
@@ -538,6 +543,65 @@ EOF
     # With no list of the hub, nothing on the bus is called.
     [[ "$output" == *"luna com.webos.service.tvpower/power/getPowerState: not on the hub now, so not called"* ]]
     refute_grep -E '^\$ luna [A-Za-z0-9.]+/' <<<"$output"
+}
+
+# --- the device and privacy surveys -----------------------------------------
+
+@test "the device and privacy surveys run ls-monitor once, only with -l" {
+    for s in $DEVICE $PRIVACY; do
+        run sh -c "grep -v -E '^[[:space:]]*#' '$s' | grep 'ls-monitor' \
+            | grep -v -E '^[[:space:]]*(printf|echo|\[)|command -v'"
+        [ "$status" -eq 0 ]
+        [ "$output" = '    hub=$($T ls-monitor -l </dev/null 2>/dev/null)' ] || { echo "$s: $output"; false; }
+    done
+}
+
+@test "the device and privacy surveys call only what the hub lists already" {
+    make_fakes
+    listed=$("$TMP/bin/ls-monitor" -l | awk 'NR > 1 { print $2 }')
+    for s in $DEVICE $PRIVACY; do
+        : >"$CALLS"
+        PATH="$TMP/bin:$PATH" run sh "$s"
+        [ "$status" -eq 0 ]
+        [ "$(head -n 1 "$CALLS")" = 'ls-monitor -l' ] || { echo "$s: $(cat "$CALLS")"; false; }
+        [ "$(grep -c '^ls-monitor' "$CALLS")" -eq 1 ]
+        [ "$(grep -c '^luna-send ' "$CALLS")" -ge 3 ]
+        # Every luna-send names a service the fake hub lists.
+        called=$(grep '^luna-send ' "$CALLS" | grep -o -E 'luna://[^/]+' | sed 's|luna://||' | sort -u)
+        for svc in $called; do
+            grep -q -x -F "$svc" <<<"$listed" || { echo "$s called $svc"; false; }
+        done
+    done
+    [ "${lines[${#lines[@]}-1]}" = "privacy survey complete" ]
+}
+
+@test "the device survey leaves bluetooth2 and wifi alone when the hub doesn't list them" {
+    make_fakes
+    PATH="$TMP/bin:$PATH" run sh "$DEVICE"
+    [ "$status" -eq 0 ]
+    [ "${lines[${#lines[@]}-1]}" = "recon complete" ]
+    for call in bluetooth2/adapter/getStatus bluetooth2/device/getStatus wifi/getstatus; do
+        [[ "$output" == *"luna com.webos.service.$call: not on the hub now, so not called"* ]]
+    done
+    refute_grep -E 'bluetooth2|wifi' "$CALLS"
+    # What the hub lists is still asked, and listApps comes out as its ids.
+    grep -q -x 'luna-send -n 1 -f luna://com.webos.applicationManager/listApps {}' "$CALLS"
+    apps=$(grep -A 2 -x -F '$ luna com.webos.applicationManager/listApps {}' <<<"$output" | tail -n 2)
+    [ "$apps" = "$(printf 'com.example.player\ncom.example.sync-demo')" ]
+}
+
+@test "the device and privacy surveys call nothing on the bus without ls-monitor" {
+    # Only luna-send is on PATH, so there is no list of the hub.
+    make_fakes
+    rm "$TMP/bin/ls-monitor"
+    for s in $DEVICE $PRIVACY; do
+        : >"$CALLS"
+        PATH="$TMP/bin:$PATH" run sh "$s"
+        [ "$status" -eq 0 ]
+        [[ "$output" == *"ls-monitor: no list of services (absent or no answer), so nothing on the bus is called"* ]]
+        [[ "$output" == *"luna com.webos.service.tv.systemproperty/getSystemInfo: not on the hub now, so not called"* ]]
+        [ ! -s "$CALLS" ] || { echo "$s: $(cat "$CALLS")"; false; }
+    done
 }
 
 # --- guards on the platform survey ------------------------------------------

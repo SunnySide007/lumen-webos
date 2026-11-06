@@ -7,6 +7,10 @@
 # sockets, processes and upstart jobs, and calls luna-send on get* and list*
 # methods only (luna() refuses anything else). iptables only lists, and only
 # when its tables are already in the kernel, so nothing loads a module.
+# Nothing on the bus is called unless the hub lists it as there already
+# (ls-monitor -l, its only use here): a call to a dynamic service starts its
+# program (on 2026-11-06 the platform survey started LG's acr2 by asking
+# about it). Without the list nothing on the bus is called.
 # Secrets never print: the root password shows as set, empty or locked, SSH
 # keys as a count, IPv6 addresses as their kind.
 # It runs under the TV's busybox sh, so it sticks to POSIX shell.
@@ -36,19 +40,40 @@ showfile() {
     done
 }
 
+# Whether a bus name is on the hub's list now. A call to a name that is not
+# can make the hub start its program, so nothing is called unless it is there
+# already.
+on_hub() {
+    printf '%s\n' "$hub" | awk -v s="$1" '$2 == s { found = 1 } END { exit !found }'
+}
+
 luna() {
     case "$1" in
         */get*|*/list*) ;;
         *) echo "luna $1: refused, not a get or list method"; return ;;
     esac
+    if ! on_hub "${1%%/*}"; then
+        echo "luna $1: not on the hub now, so not called (a call could start it)"
+        return
+    fi
     printf '$ luna %s %s\n' "$1" "$2"
     # shellcheck disable=SC2086
     $T luna-send -n 1 -f "luna://$1" "$2" </dev/null 2>&1 || echo '(no answer)'
 }
 
+# Who is on the bus before anything is called (on_hub). ls-monitor runs only
+# with -l: with no option it would ask the hub to route every client's
+# messages to it.
+hub=""
+if command -v ls-monitor >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    hub=$($T ls-monitor -l </dev/null 2>/dev/null)
+fi
+
 section identity
 show date -u
 show uname -r
+[ -n "$hub" ] || echo 'ls-monitor: no list of services (absent or no answer), so nothing on the bus is called'
 luna com.webos.service.tv.systemproperty/getSystemInfo \
     '{"keys":["modelName","firmwareVersion","sdkVersion"]}'
 

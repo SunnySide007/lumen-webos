@@ -4,7 +4,11 @@
 #
 # Nothing here writes to the TV: it reads files under /proc, /sys, /etc, /usr
 # and /var, lists directories and processes, and calls luna-send on get*/list*
-# methods only.
+# methods only (luna() refuses anything else).
+# Nothing on the bus is called unless the hub lists it as there already
+# (ls-monitor -l, its only use here): a call to a dynamic service starts its
+# program (on 2026-11-06 the platform survey started LG's acr2 by asking
+# about it). Without the list nothing on the bus is called.
 # It runs under the TV's busybox sh, so it sticks to POSIX shell.
 
 # Older busybox (webOS 4) spells it `timeout -t SECS`, newer `timeout SECS`.
@@ -32,16 +36,41 @@ showfile() {
     done
 }
 
+# Whether a bus name is on the hub's list now. A call to a name that is not
+# can make the hub start its program, so nothing is called unless it is there
+# already.
+on_hub() {
+    printf '%s\n' "$hub" | awk -v s="$1" '$2 == s { found = 1 } END { exit !found }'
+}
+
 luna() {
+    case "$1" in
+        */get*|*/list*) ;;
+        *) echo "luna $1: refused, not a get or list method"; return ;;
+    esac
+    if ! on_hub "${1%%/*}"; then
+        echo "luna $1: not on the hub now, so not called (a call could start it)"
+        return
+    fi
     printf '$ luna %s %s\n' "$1" "$2"
     # shellcheck disable=SC2086
-    $T luna-send -n 1 -f "luna://$1" "$2" 2>&1 || echo '(no answer)'
+    $T luna-send -n 1 -f "luna://$1" "$2" </dev/null 2>&1 || echo '(no answer)'
 }
+
+# Who is on the bus before anything is called (on_hub). ls-monitor runs only
+# with -l: with no option it would ask the hub to route every client's
+# messages to it.
+hub=""
+if command -v ls-monitor >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    hub=$($T ls-monitor -l </dev/null 2>/dev/null)
+fi
 
 section identity
 show date -u
 show uptime
 show uname -a
+[ -n "$hub" ] || echo 'ls-monitor: no list of services (absent or no answer), so nothing on the bus is called'
 showfile /etc/starfish-release /etc/os-release
 for key in webos_name webos_release webos_build_id webos_imagename webos_release_codename core_os_kernel_version; do
     printf '%s: ' "$key"
@@ -103,10 +132,9 @@ showfile /usr/palm/applications/com.webos.app.screensaver/appinfo.json
 showfile /usr/palm/applications/com.webos.app.home/appinfo.json
 
 section installed-apps
-printf '$ listApps (ids)\n'
-# shellcheck disable=SC2086
-$T luna-send -n 1 luna://com.webos.applicationManager/listApps '{}' 2>/dev/null \
-    | grep -o '"id": *"[^"]*"' | sed 's/.*"id": *"//; s/"$//' | sort -u
+# luna prints one key a line; of the answer only the app ids are kept.
+luna com.webos.applicationManager/listApps '{}' \
+    | sed -n -e 's/^[[:space:]]*"id": *"\([^"]*\)".*/\1/p' -e '/^\$ luna /p' -e '/^luna /p' -e '/^(no answer)$/p'
 show ls /media/developer/apps/usr/palm/applications
 luna com.webos.applicationManager/getForegroundAppInfo '{}'
 
@@ -197,12 +225,10 @@ done
 show ls /etc/bluetooth
 # The adapter's and paired devices' names can be personal, so they're masked
 # here; redact.py masks their addresses.
-for call in adapter/getStatus device/getStatus; do
-    printf '$ luna com.webos.service.bluetooth2/%s {}\n' "$call"
-    # shellcheck disable=SC2086
-    $T luna-send -n 1 -f "luna://com.webos.service.bluetooth2/$call" '{}' 2>&1 \
-        | sed 's/"name": *"[^"]*"/"name": "<redacted>"/g'
-done
+luna com.webos.service.bluetooth2/adapter/getStatus '{}' \
+    | sed 's/"name": *"[^"]*"/"name": "<redacted>"/g'
+luna com.webos.service.bluetooth2/device/getStatus '{}' \
+    | sed 's/"name": *"[^"]*"/"name": "<redacted>"/g'
 
 section usb
 for dev in /sys/bus/usb/devices/*; do
@@ -221,9 +247,7 @@ for nic in /sys/class/net/*; do
 done
 showfile /proc/net/wireless
 # The network's name also appears as displayName, which redact.py doesn't mask.
-printf '$ luna com.webos.service.wifi/getstatus {}\n'
-# shellcheck disable=SC2086
-$T luna-send -n 1 -f luna://com.webos.service.wifi/getstatus '{}' 2>&1 \
+luna com.webos.service.wifi/getstatus '{}' \
     | sed 's/"displayName": *"[^"]*"/"displayName": "<redacted>"/g'
 
 section audio
