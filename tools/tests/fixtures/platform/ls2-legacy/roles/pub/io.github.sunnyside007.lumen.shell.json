@@ -1,0 +1,8 @@
+{
+    "role": {
+        "exeName": "/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-shell",
+        "type": "regular",
+        "allowedNames": ["io.github.sunnyside007.lumen.shell*"]
+    },
+    "permissions": [{ "service": "io.github.sunnyside007.lumen.shell*", "outbound": ["legacy-outbound-shown"] }]
+}

@@ -1,0 +1,8 @@
+1793577600 - - allow
+1793577660 A lgsmartad.com would-block
+1793577700 PTR 5.0.0.10.in-addr.arpa allow
+1793577701 PTR 7.20.16.172.in-addr.arpa allow
+1793577800 PTR 8.8.8.8.in-addr.arpa allow
+1793577801 PTR 4.3.2.110.in-addr.arpa allow
+1793577900 A tracking.alphonso.tv would-block
+1793577950 A cut-off

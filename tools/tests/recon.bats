@@ -1,17 +1,19 @@
 #!/usr/bin/env bats
-# Checks tools/recon.sh's options, and that the privacy and remote surveys only
-# read. The guards at the top read both surveys as text. The rest run the
-# remote survey, and recon.sh --remote, against fake luna-send, ls-monitor and
-# dropbear programs and fixture files, with a stand-in for tools/tv.sh in a
-# temporary copy of the tools. None of these reach a TV.
+# Checks tools/recon.sh's options, and that the privacy, remote and platform
+# surveys only read. The guards read the surveys as text. The rest run the
+# remote and platform surveys, and recon.sh --remote, against fake luna-send,
+# ls-monitor, dropbear and initctl programs and fixture files, with a stand-in
+# for tools/tv.sh in a temporary copy of the tools. None of these reach a TV.
 
 setup() {
     TMP="$BATS_TEST_TMPDIR"
     TOOLS="$BATS_TEST_DIRNAME/.."
     RECON="$TOOLS/recon.sh"
     REMOTE="$TOOLS/recon/remote.sh"
-    SURVEYS="$TOOLS/recon/privacy.sh $REMOTE"
+    PLATFORM="$TOOLS/recon/platform.sh"
+    SURVEYS="$TOOLS/recon/privacy.sh $REMOTE $PLATFORM"
     FIXTURES="$BATS_TEST_DIRNAME/fixtures/remote"
+    PFIX="$BATS_TEST_DIRNAME/fixtures/platform"
     CALLS="$TMP/calls"
     : >"$CALLS"
     export CALLS
@@ -107,6 +109,75 @@ run_remote() {
         run sh "$REMOTE"
 }
 
+# The remote fakes, with a luna-send that answers the clock with a place in
+# it, and an initctl that refuses anything but list.
+make_platform_fakes() {
+    make_fakes
+    cat >"$TMP/bin/luna-send" <<'EOF'
+#!/bin/sh
+echo "luna-send $*" >>"$CALLS"
+case $4 in
+    */getSystemInfo) echo '{ "modelName": "OLED55B9PUA", "firmwareVersion": "05.50.00", "returnValue": true }' ;;
+    */getConfigs) printf '{\n    "configs": {\n        "com.webos.applicationManager.keepAliveApps": [ "com.webos.app.home" ]\n    },\n    "returnValue": true\n}\n' ;;
+    */clock/getTime) printf '{\n    "source": "sdp",\n    "utc": 1793491200,\n    "timeZone": "America/Chicago",\n    "returnValue": true\n}\n' ;;
+    */time/getSystemTime) printf '{\n    "utc": 1793491200,\n    "systemTimeSource": "sdp",\n    "timezone": "America/Chicago",\n    "TZ": "CST",\n    "City": "Chicago",\n    "Country": "United States",\n    "offset": -360,\n    "returnValue": true\n}\n' ;;
+    *) echo '{ "returnValue": true }' ;;
+esac
+EOF
+    cat >"$TMP/bin/initctl" <<'EOF'
+#!/bin/sh
+echo "initctl $*" >>"$CALLS"
+[ "$*" = list ] || { echo 'FORBIDDEN initctl call'; exit 97; }
+echo 'screensaver stop/waiting'
+echo 'memorymanager start/running, process 410'
+echo 'acr2 start/running, process 911'
+EOF
+    chmod +x "$TMP/bin/luna-send" "$TMP/bin/initctl"
+}
+
+# The parts of the TV that are not fixture files: a jail, a hook log folder,
+# and a library and programs made of strings between bytes that are not
+# text, as in a binary.
+make_platform_tree() {
+    mkdir -p "$TMP/tv/jail/var/run" "$TMP/tv/jail/tmp" "$TMP/tv/log" "$TMP/tv/lib" "$TMP/tv/bin"
+    : >"$TMP/tv/log/lumen-home.txt"
+    printf '\177ELF\0\1\2SDL_WEBOS_ACCESS_POLICY_KEYS_BACK\0SDL_VideoInit\0\3luna://com.webos.applicationManager/registerNativeApp\0' \
+        >"$TMP/tv/lib/libSDL2-2.0.so.0"
+    ln -s libSDL2-2.0.so.0 "$TMP/tv/lib/libSDL2.so"
+    printf '\177ELF\0acrOnAllowed\0\2livePlus\0hello\0' >"$TMP/tv/bin/acr2"
+    printf '\177ELF\0collectAllLog\0' >"$TMP/tv/bin/pmlogd"
+    printf '\177ELF\0https://156.147.69.32:443/check\0' >"$TMP/tv/bin/update"
+    printf '\177ELF\0' >"$TMP/tv/bin/iconnectivity"
+}
+
+# A shell for the survey to find: a copy of sleep named lumen-shell, with the
+# names it may read and two it must not.
+start_fake_shell() {
+    mkdir -p "$TMP/proc"
+    cp "$(command -v sleep)" "$TMP/proc/lumen-shell"
+    env -i APPID=io.github.sunnyside007.lumen.shell WAYLAND_DISPLAY=wayland-0 \
+        XDG_RUNTIME_DIR=/tmp/xdg PLEX_TOKEN=not-for-the-report-1 HOME=/not-for-the-report-2 \
+        "$TMP/proc/lumen-shell" 60 >/dev/null 2>&1 3>&- &
+    echo $! >>"$TMP/pids"
+}
+
+# The platform survey against the fakes, the fixture files and the tree.
+run_platform() {
+    make_platform_fakes
+    make_platform_tree
+    PATH="$TMP/bin:$PATH" \
+        PLATFORM_SURVEY_APP_DIR="$PFIX/app" \
+        PLATFORM_SURVEY_JAIL="$TMP/tv/jail" \
+        PLATFORM_SURVEY_LUMEN_LOGS="$TMP/tv/log" \
+        PLATFORM_SURVEY_GUARD_LOG="$PFIX/guard/lookups" \
+        PLATFORM_SURVEY_LIB="$TMP/tv/lib" \
+        PLATFORM_SURVEY_BINDIRS="$TMP/tv/bin" \
+        PLATFORM_SURVEY_LS2="$PFIX/ls2" \
+        PLATFORM_SURVEY_LS2_LEGACY="$PFIX/ls2-legacy" \
+        PLATFORM_SURVEY_APPS="$PFIX/apps" \
+        run sh "$PLATFORM"
+}
+
 # A copy of the tools with a stand-in tv.sh: it records the script it was asked
 # to run, and runs it here (against the fakes) when FAKE_TV_RUNS is set.
 make_fake_repo() {
@@ -129,12 +200,13 @@ EOF
 @test "an unknown option fails with usage before anything connects" {
     run "$RECON" --frobnicate
     [ "$status" -eq 2 ]
-    [[ "$output" == *"usage: tools/recon.sh [--privacy|--remote]"* ]]
+    [[ "$output" == *"usage: tools/recon.sh [--privacy|--remote|--platform]"* ]]
 }
 
 @test "recon.sh picks the survey and the report name from its option" {
     make_fake_repo
-    for pair in "|device.sh|recon" "--privacy|privacy.sh|privacy" "--remote|remote.sh|remote"; do
+    for pair in "|device.sh|recon" "--privacy|privacy.sh|privacy" "--remote|remote.sh|remote" \
+        "--platform|platform.sh|platform"; do
         option=${pair%%|*}
         rest=${pair#*|}
         script=${rest%%|*}
@@ -227,42 +299,47 @@ EOF
 
 # --- guards on the remote survey --------------------------------------------
 
-@test "the remote survey calls ls-monitor only through its -l and -i guard" {
+@test "the remote and platform surveys call ls-monitor only through their -l and -i guard" {
     # No option would start monitoring, which changes how the hub routes
     # messages; -s and -m call other services' private methods.
-    run sh -c "grep -v -E '^[[:space:]]*#' '$REMOTE' | grep 'ls-monitor' \
-        | grep -v -E '^[[:space:]]*(printf|echo)|command -v'"
-    [ "$status" -eq 0 ]
-    [ "${#lines[@]}" -eq 1 ]
-    [[ "$output" == *'$T ls-monitor "$@" </dev/null'* ]]
-    # Every call, wherever it is in a line, is lsmon -l or lsmon -i SERVICE.
-    options=$(code "$REMOTE" | grep -o -E 'lsmon +-[A-Za-z-]+' | sort -u)
-    [ "$options" = "$(printf 'lsmon -i\nlsmon -l')" ]
-    assert_no_code "$REMOTE" 'lsmon +[^- ]|lsmon *$'
-    assert_no_code "$REMOTE" 'lsmon -l +[^ )]'
+    for s in $REMOTE $PLATFORM; do
+        run sh -c "grep -v -E '^[[:space:]]*#' '$s' | grep 'ls-monitor' \
+            | grep -v -E '^[[:space:]]*(printf|echo)|command -v'"
+        [ "$status" -eq 0 ]
+        [ "${#lines[@]}" -eq 1 ] || { echo "$s: $output"; false; }
+        [[ "$output" == *'$T ls-monitor "$@" </dev/null'* ]]
+        # Every call, wherever it is in a line, is lsmon -l or lsmon -i SERVICE.
+        options=$(code "$s" | grep -o -E 'lsmon +-[A-Za-z-]+' | sort -u)
+        [ "$options" = "$(printf 'lsmon -i\nlsmon -l')" ] || { echo "$s: $options"; false; }
+        assert_no_code "$s" 'lsmon +[^- ]|lsmon *$'
+        assert_no_code "$s" 'lsmon -l +[^ )]'
+    done
 }
 
 @test "the ls-monitor guard allows -l and -i SERVICE and nothing else" {
-    { echo 'T=""'; sed -n '/^lsmon() {/,/^}/p' "$REMOTE"; } >"$TMP/lsmon-guard.sh"
     make_fakes
-    run env PATH="$TMP/bin:$PATH" sh -c ". '$TMP/lsmon-guard.sh'
-        lsmon
-        lsmon -m
-        lsmon -s
-        lsmon -v com.webos.audio
-        lsmon -i
-        lsmon -i com.webos.audio extra
-        lsmon -i 'a;reboot'
-        lsmon -i '\$(reboot)'
-        lsmon -l -m
-        lsmon --list"
-    [ "$(grep -c 'refused' <<<"$output")" -eq 10 ]
-    [ ! -s "$CALLS" ]
-    run env PATH="$TMP/bin:$PATH" sh -c ". '$TMP/lsmon-guard.sh'
-        lsmon -l
-        lsmon -i com.webos.service.tv.systemproperty"
-    [ "$status" -eq 0 ]
-    [ "$(cat "$CALLS")" = "$(printf 'ls-monitor -l\nls-monitor -i com.webos.service.tv.systemproperty')" ]
+    for s in $REMOTE $PLATFORM; do
+        { echo 'T=""'; sed -n '/^lsmon() {/,/^}/p' "$s"; } >"$TMP/lsmon-guard.sh"
+        : >"$CALLS"
+        run env PATH="$TMP/bin:$PATH" sh -c ". '$TMP/lsmon-guard.sh'
+            lsmon
+            lsmon -m
+            lsmon -s
+            lsmon -v com.webos.audio
+            lsmon -i
+            lsmon -i com.webos.audio extra
+            lsmon -i 'a;reboot'
+            lsmon -i '\$(reboot)'
+            lsmon -l -m
+            lsmon --list"
+        [ "$(grep -c 'refused' <<<"$output")" -eq 10 ] || { echo "$s: $output"; false; }
+        [ ! -s "$CALLS" ]
+        run env PATH="$TMP/bin:$PATH" sh -c ". '$TMP/lsmon-guard.sh'
+            lsmon -l
+            lsmon -i com.webos.service.tv.systemproperty"
+        [ "$status" -eq 0 ]
+        [ "$(cat "$CALLS")" = "$(printf 'ls-monitor -l\nls-monitor -i com.webos.service.tv.systemproperty')" ]
+    done
 }
 
 @test "the remote survey runs dropbear only with -V" {
@@ -274,12 +351,14 @@ EOF
     [ -z "$(grep '^dropbear ' "$CALLS" | grep -v -x 'dropbear -V')" ]
 }
 
-@test "the remote survey gives tr -c a range, never a class: busybox's tr -c gets a class backwards" {
+@test "the remote and platform surveys give tr -c a range, never a class: busybox's tr -c gets a class backwards" {
     # With tr -c '[:print:]' busybox swaps the printable bytes for newlines and
-    # keeps the rest, so the search of dropbear's binary finds nothing. GNU tr
-    # does it right, so only this text check can catch it here.
-    assert_no_code "$REMOTE" "tr +-[a-z]*c[a-z]* +[\"']?\\[:"
-    code "$REMOTE" | grep -q "tr -c ' -~'"
+    # keeps the rest, so the search of a binary finds nothing. GNU tr does it
+    # right, so only this text check can catch it here.
+    for s in $REMOTE $PLATFORM; do
+        assert_no_code "$s" "tr +-[a-z]*c[a-z]* +[\"']?\\[:"
+        code "$s" | grep -q "tr -c ' -~'"
+    done
 }
 
 @test "the remote survey reads no private key, host key, password hash or process environment" {
@@ -393,4 +472,132 @@ EOF
     [[ "$output" == *"ls-monitor: absent on this TV"* ]]
     [[ "$output" == *"(not on PATH)"* ]]
     [[ "$output" == *"(no answer)"* ]]
+}
+
+# --- guards on the platform survey ------------------------------------------
+
+@test "the platform survey runs initctl only to list jobs" {
+    run sh -c "grep -v -E '^[[:space:]]*#' '$PLATFORM' | grep -o -E 'initctl +[A-Za-z-]+' | sort -u"
+    [ "$output" = "initctl list" ]
+}
+
+@test "the platform survey reads no key or password hash, and an environment only for four names" {
+    assert_no_code "$PLATFORM" 'shadow|host_key|id_(rsa|ed25519|ecdsa|dsa)|\.pem|known_hosts|authorized_keys'
+    # environ is read in one place, straight into the grep for the four names.
+    [ "$(code "$PLATFORM" | grep -c -E 'environ($|[^m])')" -eq 1 ]
+    code "$PLATFORM" | grep -A 1 -E 'environ($|[^m])' \
+        | grep -q -F "| grep -E '^(APPID|WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DISPLAY_ID)='"
+}
+
+# --- the platform survey against fakes --------------------------------------
+
+@test "the platform survey runs to its last line and has all its sections" {
+    start_fake_shell
+    run_platform
+    [ "$status" -eq 0 ]
+    [ "${lines[${#lines[@]}-1]}" = "platform survey complete" ]
+    for section in identity lumen bus app-manager screensaver memory acr guard-log \
+        lan-chain ports lg-addresses clock end; do
+        [[ "$output" == *"===== $section ====="* ]]
+    done
+    [[ "$output" != *FORBIDDEN* ]]
+    [[ "$output" != *refused* ]]
+}
+
+@test "the platform survey shows the shell's four names and nothing else of its environment" {
+    start_fake_shell
+    run_platform
+    [[ "$output" == *"binary $TMP/proc/lumen-shell, root /"* ]]
+    [[ "$output" == *"    APPID=io.github.sunnyside007.lumen.shell"* ]]
+    [[ "$output" == *"    WAYLAND_DISPLAY=wayland-0"* ]]
+    [[ "$output" == *"    XDG_RUNTIME_DIR=/tmp/xdg"* ]]
+    refute_grep -F 'not-for-the-report' <<<"$output"
+    [[ "$output" != *"the shell is not running"* ]]
+}
+
+@test "the platform survey says when the shell is not running" {
+    run_platform
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"(the shell is not running: facts 1, 5 and 9 need it; open Lumen and run the survey again)"* ]]
+}
+
+@test "the platform survey asks only for get and list methods, and lists upstart jobs only" {
+    run_platform
+    [ "$status" -eq 0 ]
+    [ "$(grep -c '^luna-send' "$CALLS")" -eq 9 ]
+    [ -z "$(grep '^luna-send' "$CALLS" | grep -v -E '^luna-send -n 1 -f luna://[A-Za-z0-9._/-]+/(get|list)[A-Za-z]* ')" ]
+    grep -q -F 'getConfigs {"configNames":["com.webos.applicationManager.keepAliveApps"' "$CALLS"
+    grep -q -F 'getAppInfo {"id":"io.github.sunnyside007.lumen.shell"}' "$CALLS"
+    grep -q -F 'getSystemSettings {"category":"general","keys":["acrOnAllowed","acrAdAllowed","additional1Allowed"' "$CALLS"
+    [ "$(grep -c '^ls-monitor -l$' "$CALLS")" -eq 1 ]
+    [ -z "$(grep '^ls-monitor' "$CALLS" | grep -v -E '^ls-monitor (-l|-i [A-Za-z0-9._-]+)$')" ]
+    grep -q -x 'ls-monitor -i com.webos.applicationManager' "$CALLS"
+    [ -n "$(grep '^initctl ' "$CALLS")" ]
+    [ -z "$(grep '^initctl ' "$CALLS" | grep -v -x 'initctl list')" ]
+}
+
+@test "the platform survey shows Guard's log as counts and times, never a reverse lookup's name" {
+    run_platform
+    [ "$status" -eq 0 ]
+    # The rotated file first; a cut-off line is skipped.
+    [[ "$output" == *"log: 13 lines, first 1793491200, last 1793577900 (unix seconds)"* ]]
+    [[ "$output" == *"alphonso.tv: lookups 2, first 1793491260, last 1793577900; the first times: 1793491260 1793577900"* ]]
+    [[ "$output" == *"lgsmartad.com: lookups 1, first 1793577660, last 1793577660"* ]]
+    [[ "$output" == *"lgads.tv: lookups 0"* ]]
+    [[ "$output" == *"elastic.lgwebostv.com: lookups 0"* ]]
+    [[ "$output" == *"ueiwsp.com: lookups 1, first 1793491500"* ]]
+    # 110.x is not 10.x, and 8.8.8.8 is not private.
+    [[ "$output" == *"reverse lookups of private addresses: 4; other reverse lookups: 2"* ]]
+    [[ "$output" == *"  unix day 20758: 2"$'\n'"  unix day 20759: 2"* ]]
+    refute_grep -E 'in-addr|arpa|lgtvsdp|notalphonso|cut-off' <<<"$output"
+    [[ "$output" == *"iconnectivity: $TMP/tv/bin/iconnectivity"* ]]
+}
+
+@test "the platform survey keeps the clock's source and drops its place" {
+    run_platform
+    clock=$(awk '/^===== clock =====$/, /^===== end =====$/' <<<"$output")
+    [[ "$clock" == *'"source": "sdp"'* ]]
+    [[ "$clock" == *'"systemTimeSource": "sdp"'* ]]
+    [[ "$clock" == *'"utc": 1793491200'* ]]
+    refute_grep -i -E 'zone|"tz"|offset' <<<"$clock"
+    refute_grep -i -E 'chicago|cst|united states' <<<"$output"
+}
+
+@test "the platform survey shows Lumen's and Homebrew Channel's role files and only names the rest" {
+    run_platform
+    [[ "$output" == *"--- $PFIX/ls2/roles.d/io.github.sunnyside007.lumen.shell.app.json"* ]]
+    [[ "$output" == *'"trustLevel": "dev"'* ]]
+    [[ "$output" == *"--- $PFIX/ls2/roles.d/org.webosbrew.hbchannel.service.role.json"* ]]
+    [[ "$output" == *"legacy-outbound-shown"* ]]
+    grep -q -x 'com.example.other.role.json' <<<"$output"
+    refute_grep -F 'not-shown-other' <<<"$output"
+    [[ "$output" == *"--- $PFIX/ls2/services.d"$'\n''(absent)'* ]]
+}
+
+@test "the platform survey finds what it looks for in the library and the programs" {
+    run_platform
+    grep -q -x 'SDL_WEBOS_ACCESS_POLICY_KEYS_BACK' <<<"$output"
+    grep -q -x 'luna://com.webos.applicationManager/registerNativeApp' <<<"$output"
+    refute_grep -x 'SDL_VideoInit' <<<"$output"
+    [[ "$output" == *"acr2: $TMP/tv/bin/acr2"* ]]
+    grep -q -x 'acrOnAllowed' <<<"$output"
+    grep -q -x 'livePlus' <<<"$output"
+    refute_grep -x 'hello' <<<"$output"
+    [[ "$output" == *"collectAllLog: found in pmlogd"* ]]
+    grep -q -x '156.147.69.32:443' <<<"$output"
+    grep -q -x "$PFIX/apps/com.example.sync-demo" <<<"$output"
+    refute_grep -F 'com.example.player' <<<"$output"
+    [[ "$output" == *'"main": "lumen-shell"'* ]]
+    [[ "$output" == *"$TMP/tv/jail/var/run"* ]]
+}
+
+@test "the platform survey goes on without ls-monitor, luna-send or initctl" {
+    # PATH has only the system's own programs, and the paths are the TV's,
+    # which are not here.
+    run sh "$PLATFORM"
+    [ "$status" -eq 0 ]
+    [ "${lines[${#lines[@]}-1]}" = "platform survey complete" ]
+    [[ "$output" == *"ls-monitor: absent on this TV"* ]]
+    [[ "$output" == *"(no answer)"* ]]
+    [[ "$output" == *"/var/lib/lumen/guard/lookups.log: (absent)"* ]]
 }
