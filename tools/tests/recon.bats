@@ -132,7 +132,24 @@ echo 'screensaver stop/waiting'
 echo 'memorymanager start/running, process 410'
 echo 'acr2 start/running, process 911'
 EOF
-    chmod +x "$TMP/bin/luna-send" "$TMP/bin/initctl"
+    # A service whose introspection never answers, in a client that ignores
+    # TERM.
+    cat >"$TMP/bin/ls-monitor" <<'EOF'
+#!/bin/sh
+echo "ls-monitor $*" >>"$CALLS"
+case $1 in
+    -l) echo '  700  com.webos.service.tvpower        /usr/sbin/tvpower             static' ;;
+    -i)
+        if [ "$2" = com.webos.service.acr ]; then
+            trap '' TERM
+            exec sleep 60
+        fi
+        echo "methods of $2: /category method"
+        ;;
+    *) echo 'FORBIDDEN ls-monitor call'; exit 99 ;;
+esac
+EOF
+    chmod +x "$TMP/bin/luna-send" "$TMP/bin/initctl" "$TMP/bin/ls-monitor"
 }
 
 # The parts of the TV that are not fixture files: a jail, a hook log folder,
@@ -502,6 +519,9 @@ EOF
     done
     [[ "$output" != *FORBIDDEN* ]]
     [[ "$output" != *refused* ]]
+    # The acr service that never answers is given up on, not waited for (the
+    # shell may say "Killed" first).
+    grep -A 2 -F '$ ls-monitor -i com.webos.service.acr' <<<"$output" | grep -q -x '(no answer)'
 }
 
 @test "the platform survey shows the shell's four names and nothing else of its environment" {
@@ -513,6 +533,17 @@ EOF
     [[ "$output" == *"    XDG_RUNTIME_DIR=/tmp/xdg"* ]]
     refute_grep -F 'not-for-the-report' <<<"$output"
     [[ "$output" != *"the shell is not running"* ]]
+}
+
+@test "the platform survey prints every time in UTC, whatever the TV's zone" {
+    export TZ=PST8PDT
+    [[ "$(date +%z)" == -0[78]00 ]]
+    run_platform
+    [ "$status" -eq 0 ]
+    # GNU stat here names the offset; busybox's on the TV does not, but the
+    # same TZ governs it.
+    grep -q -E '^Modify: .* \+0000$' <<<"$output"
+    refute_grep -E '^(Access|Modify|Change): .* [-+](0[1-9]|1[0-4])00$' <<<"$output"
 }
 
 @test "the platform survey says when the shell is not running" {

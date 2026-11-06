@@ -37,11 +37,18 @@
 # The variables below exist so tests/recon.bats can point the survey at
 # fixtures. On the TV they are unset and the defaults are the real paths.
 
+# Every time in UTC: a local time from ls or stat beside `date -u` gives the
+# TV's time zone away.
+TZ=UTC0
+export TZ
+
 # Older busybox (webOS 4) spells it `timeout -t SECS`, newer `timeout SECS`.
-if timeout 1 true >/dev/null 2>&1; then
-    T="timeout 10"
-elif timeout -t 1 true >/dev/null 2>&1; then
-    T="timeout -t 10"
+# KILL, not the default TERM, so no call that ignores TERM can hold the
+# survey up.
+if timeout -s KILL 1 true >/dev/null 2>&1; then
+    T="timeout -s KILL 10"
+elif timeout -t 1 -s KILL true >/dev/null 2>&1; then
+    T="timeout -t 10 -s KILL"
 else
     T=""
 fi
@@ -148,7 +155,8 @@ find_bin() {
 # The pids whose program, or whose comm, has that name.
 pids_of() {
     for d in /proc/[0-9]*; do
-        arg0=$(tr '\0' '\n' < "$d/cmdline" 2>/dev/null | head -n 1)
+        # 2>/dev/null first, so a process that ended mid-scan says nothing.
+        arg0=$(tr '\0' '\n' 2>/dev/null < "$d/cmdline" | head -n 1)
         if [ "${arg0##*/}" = "$1" ] || [ "$(cat "$d/comm" 2>/dev/null)" = "$1" ]; then
             echo "${d#/proc/}"
         fi
@@ -225,7 +233,7 @@ fi
 for pid in $lumen_pids; do
     describe "$pid"
     printf '  environment, four names only:\n'
-    vars=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null \
+    vars=$(tr '\0' '\n' 2>/dev/null < "/proc/$pid/environ" \
         | grep -E '^(APPID|WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DISPLAY_ID)=')
     printf '%s\n' "${vars:-(none, or unreadable)}" | sed 's/^/    /'
     printf '  libraries loaded: wayland, EGL, GLES, SDL, luna, mali, webos\n'
@@ -464,7 +472,7 @@ done | while read -r table addr port inode; do
     pid=$(printf '%s\n' "$links" | awk -v i="[$inode]" '$1 == i { print $2; exit }')
     prog='(unknown)'
     if [ -n "$pid" ]; then
-        prog=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | head -n 1)
+        prog=$(tr '\0' '\n' 2>/dev/null < "/proc/$pid/cmdline" | head -n 1)
         [ -n "$prog" ] || prog=$(cat "/proc/$pid/comm" 2>/dev/null)
     fi
     printf '%s %s:%s %s\n' "$table" "$where" "$((0x$port))" "$prog"
