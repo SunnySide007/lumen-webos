@@ -161,7 +161,8 @@ make_platform_tree() {
     printf '\177ELF\0\1\2SDL_WEBOS_ACCESS_POLICY_KEYS_BACK\0SDL_VideoInit\0\3luna://com.webos.applicationManager/registerNativeApp\0' \
         >"$TMP/tv/lib/libSDL2-2.0.so.0"
     ln -s libSDL2-2.0.so.0 "$TMP/tv/lib/libSDL2.so"
-    printf '\177ELF\0acrOnAllowed\0\2livePlus\0hello\0' >"$TMP/tv/bin/acr2"
+    printf '\177ELF\0acrOnAllowed\0\2livePlus\0hello\0{ "keys": ["doNotSellMyPersonalInformation"] }\0' \
+        >"$TMP/tv/bin/acr2"
     printf '\177ELF\0collectAllLog\0' >"$TMP/tv/bin/pmlogd"
     printf '\177ELF\0https://156.147.69.32:443/check\0' >"$TMP/tv/bin/update"
     printf '\177ELF\0' >"$TMP/tv/bin/iconnectivity"
@@ -614,6 +615,9 @@ EOF
     grep -q -x 'acrOnAllowed' <<<"$output"
     grep -q -x 'livePlus' <<<"$output"
     refute_grep -x 'hello' <<<"$output"
+    # Names only, never the binary's line around them.
+    grep -q -x 'doNotSellMyPersonalInformation' <<<"$output"
+    refute_grep -F '{ "keys": ["doNotSell' <<<"$output"
     [[ "$output" == *"collectAllLog: found in pmlogd"* ]]
     grep -q -x '156.147.69.32:443' <<<"$output"
     grep -q -x "$PFIX/apps/com.example.sync-demo" <<<"$output"

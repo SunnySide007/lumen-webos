@@ -289,8 +289,9 @@ for f in "$LIB"/libSDL2*.so*; do
     found=1
     show ls -l "$f"
     if [ -f "$f" ] && [ ! -L "$f" ]; then
+        # The names alone (hints, luna URIs), not LG's lines around them.
         bin_strings "$f" \
-            | grep -E 'ACCESS_POLICY|registerNativeApp|registerApp|nativeLifeCycle|relaunch|applicationManager|WEBOS' \
+            | grep -o -E '[A-Za-z0-9_./:]*(ACCESS_POLICY|registerNativeApp|registerApp|nativeLifeCycle|relaunch|applicationManager|WEBOS)[A-Za-z0-9_./:]*' \
             | sort -u | head -n 60 | or_none
     fi
 done
@@ -364,7 +365,8 @@ printf 'acr2: %s\n' "${acr:-(not found)}"
 if [ -n "$acr" ]; then
     show ls -l "$acr"
     printf '$ the consent names in its strings\n'
-    bin_strings "$acr" | grep -E 'Allowed|livePlus|doNotSell' | sort -u | head -n 40 | or_none
+    bin_strings "$acr" | grep -o -E '[A-Za-z0-9_]*(Allowed|livePlus|doNotSell)[A-Za-z0-9_]*' \
+        | sort -u | head -n 40 | or_none
 fi
 acr_pids=$(pids_of acr2)
 for pid in $acr_pids; do
