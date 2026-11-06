@@ -1528,3 +1528,51 @@ EOF
     [ "$status" -eq 1 ]
     [ "$output" = "frame-stats.sh: no frame statistics in the log for that period" ]
 }
+
+@test "a start line from the Wayland path is split as an SDL one is" {
+    log="$BATS_TEST_TMPDIR/wayland-start.log"
+    {
+        echo '[1793000000.000] start: wayland 120, gl 150, renderer 500, assets 800, apps 850, first frame 900 ms'
+        echo '[1793000001.000] start: wayland 40, gl 90, renderer 400, assets 700, apps 760 ms; no first frame: started hidden'
+        echo '[1793000002.000] start: x11 40, gl 90, renderer 400, assets 700, apps 760, first frame 800 ms'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"start-ups (start: lines): 2"* ]]
+    [[ "$output" == *"  wayland 120 ms, gl 30 ms, renderer 350 ms, assets 300 ms, apps 50 ms, first frame 50 ms (900 ms in all)"* ]]
+    [[ "$output" == *"  wayland 40 ms, gl 50 ms, renderer 310 ms, assets 300 ms, apps 60 ms; no first frame: started hidden (760 ms to the apps)"* ]]
+    [[ "$output" != *"x11"* ]]
+}
+
+@test "home presses in front give the count, p50 and max, and the reasons not shown" {
+    log="$BATS_TEST_TMPDIR/relaunch.log"
+    {
+        echo '[1793000000.000] relaunch (Home): last key 4.0 s ago, 0 other events since'
+        echo '[1793000000.010] Home with Lumen in front: focus to the first tile'
+        echo '[1793000000.040] relaunch: first frame after 30 ms'
+        echo '[1793000001.000] relaunch: first frame after 18 ms'
+        echo '[1793000002.000] relaunch: not shown after 5 ms: the window was hidden'
+        echo '[1793000003.000] relaunch: last key 1.0 s ago, 2 other events since'
+        echo '[1793000004.000] relaunch: first frame after soon ms'
+    } > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Home in front (relaunch: lines): 2 shown, 1 not shown"* ]]
+    [[ "$output" == *"  first frame      p50 18  max 30 ms"* ]]
+    [[ "$output" == *"  not shown        1 the window was hidden"* ]]
+}
+
+@test "the Wayland path gives the pointer verdict as the SDL path does" {
+    log="$BATS_TEST_TMPDIR/wayland-pointer.log"
+    echo '[1793000000.000] pointer: wl_webos_input_manager.set_cursor_visibility not found; the pointer stays as LG leaves it' > "$log"
+    run "$STATS" "$log"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"  pointer          shown 0, hidden 0; pointer stays as LG leaves it"$'\n'* ]]
+    echo '[1793000000.100] pointer: wl_webos_input_manager.set_cursor_visibility found; arrows hide the pointer' >> "$log"
+    run "$STATS" "$log"
+    [[ "$output" == *"  pointer          shown 0, hidden 0; arrows hide the pointer"$'\n'* ]]
+    # A line that does not read right says nothing.
+    echo '[1793000000.200] pointer: wl_webos_input_manager.set_cursor_visibility maybe; the pointer stays as LG leaves it' > "$log"
+    run "$STATS" "$log"
+    [[ "$output" != *"pointer stays"* ]]
+}

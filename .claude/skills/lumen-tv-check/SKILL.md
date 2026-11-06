@@ -245,6 +245,16 @@ What the log holds, for reading the output:
   each launch (target 6, 100 ms). `launch <id>: dropped: <why>` is a launch the
   shell asked for and never called, since it was hidden or leaving first; the
   output lists it with the others and counts it by reason, outside target 6.
+  On the platform layer's Wayland path (lane L, `{"platform":"wayland"}`) the
+  start line begins `start: wayland N` instead of `start: sdl N`: the
+  compositor connected and the window made. `start: … ms; no first frame:
+  started hidden` is a preloaded or `"hidden":true` start; its first frame
+  comes with the relaunch and is a `foreground:` line.
+* `relaunch: first frame after … ms` and `relaunch: not shown after … ms:
+  <why>` (Wayland path only): a Home press with the shell in front, to the
+  frame that shows focus back on the first tile. The output gives them in a
+  "Home in front" section after the foreground one. `relaunch (Home): last
+  key …` is the event itself, not a timing.
 * `window focus lost: …`: how long since the last key. The output counts the
   focus losses with no key pressed.
 * The key-diagnostics lines (written on `claude/shell-timing`, K1–K5, first
@@ -258,7 +268,9 @@ What the log holds, for reading the output:
     covers clicks too. `…: ignored` is any other button; `mouse button <b>
     up` is the release.
   * `pointer: SDL_webOSCursorVisibility found …` or `… not in LG's SDL …`:
-    once at start-up, whether arrows hide a shown pointer.
+    once at start-up, whether arrows hide a shown pointer. The Wayland path
+    says it as `pointer: wl_webos_input_manager.set_cursor_visibility found;
+    …` or `… not found; …`.
   * `power <state>: last input … s ago`: LG's power state (`Active`,
     `Screen Saver`).
   * `front app <id>: last input … s ago`: what came in front. A line naming
