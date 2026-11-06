@@ -18,8 +18,16 @@ BIN     := shell/target/$(TARGET)/release/lumen-shell
 GUARD   := shell/target/$(TARGET)/release/lumen-guard
 CTL     := shell/target/$(TARGET)/release/lumen-ctl
 STAGE   := dist/stage/$(APP_ID)
+# The platform layer's trial (lane L, docs/specs/depth.md item 17):
+# PLATFORM=wayland puts a `platform` file beside the executable, so every
+# launch, a Home press too, runs the Wayland path; LIFECYCLE=2 marks the app
+# for the app manager's lifecycle version 2 (an envelope for the launch
+# argument, and residence), which only the Wayland path registers for. The
+# defaults are the IPK the B9 runs today: SDL, version 1.
+PLATFORM  ?=
+LIFECYCLE ?= 1
 
-.PHONY: all build-tv ipk capture-tools kern-table guard ctl test lint check clean
+.PHONY: all build-tv check-trial ipk capture-tools kern-table guard ctl test lint check clean
 
 all: ipk
 
@@ -51,11 +59,16 @@ ctl:
 	install -m 0755 $(CTL) dist/ctl/lumen-ctl
 	@ls -l dist/ctl/lumen-ctl
 
+# The trial's switches, refused before the build when they make no sense.
+check-trial:
+	@case "$(PLATFORM)" in ""|sdl|wayland) ;; *) echo "PLATFORM must be sdl or wayland, not $(PLATFORM)" >&2; exit 1 ;; esac
+	@case "$(LIFECYCLE)" in 1) ;; 2) [ "$(PLATFORM)" = wayland ] || { echo "LIFECYCLE=2 needs PLATFORM=wayland: LG's SDL registers for version 1" >&2; exit 1; } ;; *) echo "LIFECYCLE must be 1 or 2, not $(LIFECYCLE)" >&2; exit 1 ;; esac
+
 # ares-package (LG's packager) writes the control fields the webosbrew
 # repository checks for, which a hand-made .ipk would lack. It also makes every
 # folder 0777, which fix_modes.py puts right; an IPK it cannot fix is removed,
 # so none is left to install with world-writable folders.
-ipk: build-tv
+ipk: check-trial build-tv
 	rm -rf dist/stage
 	mkdir -p $(STAGE)
 	install -m 0755 $(BIN) $(STAGE)/lumen-shell
@@ -72,6 +85,15 @@ ipk: build-tv
 	fi
 	sed -e 's/@APP_ID@/$(APP_ID)/' -e 's/@VERSION@/$(VERSION)/' \
 	    packaging/shell/appinfo.json.in > $(STAGE)/appinfo.json
+	if [ "$(LIFECYCLE)" = 2 ]; then \
+	    sed -i 's/^  "main": "lumen-shell",$$/&\n  "nativeLifeCycleInterfaceVersion": 2,/' \
+	        $(STAGE)/appinfo.json; \
+	    grep -q '"nativeLifeCycleInterfaceVersion": 2' $(STAGE)/appinfo.json; \
+	fi
+	python3 -I -m json.tool $(STAGE)/appinfo.json > /dev/null
+	if [ -n "$(PLATFORM)" ]; then \
+	    echo "$(PLATFORM)" > $(STAGE)/platform && chmod 0644 $(STAGE)/platform; \
+	fi
 	ares-package --no-minify --outdir dist $(STAGE)
 	python3 -I tools/ipk/fix_modes.py dist/$(APP_ID)_$(VERSION)_arm.ipk \
 	    || { rm -f dist/$(APP_ID)_$(VERSION)_arm.ipk; exit 1; }
