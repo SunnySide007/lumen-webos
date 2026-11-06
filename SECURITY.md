@@ -41,6 +41,5 @@ Out of scope, and reported to their own projects:
 
 * [Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel) and
   whichever exploit rooted the TV;
-* [Glasshouse](https://github.com/rorygallagher2024/glasshouse) and
-  [plx-native](https://github.com/GLinnik21/plx-native);
+* [plx-native](https://github.com/GLinnik21/plx-native);
 * LG firmware and webOS itself: [LG's product security team](https://lgsecurity.lge.com/).

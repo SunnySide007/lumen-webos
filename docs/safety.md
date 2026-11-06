@@ -16,9 +16,7 @@ request that breaks one will not be merged.
    persistent change, `tools/backup.sh` copies the TV's settings and data to
    the owner's PC, outside the repository. Whatever Lumen
    overlays is backed up first, and `tools/uninstall-all.sh` (Phase 1) returns
-   the TV to stock. Uninstalling and rebooting must leave no trace beyond what
-   [Glasshouse documents](https://github.com/rorygallagher2024/glasshouse/blob/main/docs/TV-CHANGES.md)
-   for its own changes.
+   the TV to stock. Uninstalling and rebooting must leave no trace.
 3. **Test by hand before persisting.** A mod is applied manually first ("apply
    now"), checked, and only then installed as a boot hook. The project owner
    confirms before the first persistent change to their TV.
@@ -46,8 +44,10 @@ In order of escalation:
 3. **No SSH:** Homebrew Channel's failsafe mode. If the TV crashes during boot,
    Homebrew Channel starts only an emergency Telnet shell; remove the cause,
    then delete `/var/luna/preferences/webosbrew_failsafe`.
-4. **Glasshouse's parts:** `tvwebctl restore-glasshouse-home`, `restore-keys`
-   and the uninstall in its Homebrew Channel entry undo its changes.
+4. **`lumend` and the shell's keep-alive** (decisions 14 and 15, once
+   built): the kill switch stops `lumend` at its door, and
+   `tools/uninstall-all.sh` removes its luna role and Lumen's keep-alive
+   value before it removes the app.
 
 A factory reset removes root, Homebrew Channel and every Lumen change, but also
 everything else the owner set up, so it is the last resort, not the plan.

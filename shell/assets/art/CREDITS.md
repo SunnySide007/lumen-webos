@@ -2,9 +2,9 @@
 
 Every file in this folder is original work for Lumen, made with `tools/art/`,
 CC BY-SA 4.0 (<https://creativecommons.org/licenses/by-sa/4.0/>; see
-`docs/decisions.md`, record 2).
+`docs/decisions.md`, records 2 and 17).
 
-Author: _(placeholder: the owner's name, if they want it here)_
+Author: SunnySide007
 
 Nothing here was fetched, photographed or made by an image model, and none
 of it uses a brand's marks, logos or typefaces. Each hero is drawn by code

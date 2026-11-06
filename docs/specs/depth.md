@@ -25,6 +25,83 @@ every boot hook's log out of `/tmp`, which the app jails share and where
 `fs.protected_symlinks` is 0 on the B9). S1's and Guard's hooks were
 reinstalled with those logs at 17:05 UTC and checked after a reboot.
 
+## Design of 2026-11-05
+
+On 2026-11-05 the owner and the project manager went through the design
+again, with three new research reports (research.md, "Research of
+2026-11-05"), and the owner accepted decisions 10 to 17:
+
+* **10:** one set, and a contract for what the TV does.
+* **11:** Guard blocks by default, Quad9 over TLS, risky ports closed, ACR
+  and the UEI scanner held down.
+* **12:** only the owner loosens the TV, and software arrives from the PC.
+* **13:** no Glasshouse.
+* **14:** Rust everywhere Lumen runs on the TV, with one root daemon,
+  `lumend`.
+* **15:** the shell owns its window (its own Wayland, EGL and lifecycle
+  layer in Rust) and stays resident; ES 3.0, ASTC heroes, partial redraw.
+* **16:** the screensaver lives in the shell.
+* **17:** video and art are CC BY-SA 4.0.
+
+[architecture.md](../architecture.md) describes the result. The work, in
+order, is items 14 to 21 below. What only the TV can tell comes first, as
+one read-only survey (item 15).
+
+### Facts only the TV can answer
+
+Each one is read-only unless it says otherwise, and every TV step waits for
+the owner. The research reports behind them are in
+`tools/out/research-20261105/` (git-ignored).
+
+**The shell and its platform:**
+
+1. Who holds Lumen's bus name and lifecycle registration while it runs,
+   and which app-manager method LG's SDL calls (`ls-monitor`).
+2. Whether LG's SDL 2.0.5 knows the `_WEBOS_ACCESS_POLICY_KEYS_*` hints
+   (`strings` on the library).
+3. With Lumen in front, whether a Home press reaches a root subscriber of
+   `getAppLifeStatus` and `getAppLifeEvents`, and with what reason.
+4. Lumen's role and permission files under `/var/luna-service2-dev` and
+   `/var/palm/ls2-dev`.
+5. Lumen's environment (`APPID`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`), and
+   which libraries provide `wl_egl_window_create` and LG's Wayland
+   extensions.
+6. EGL and GL strings, an ES 3 context, the compressed formats and the
+   shader binary formats (a test build).
+7. `keepAliveApps` as configd answers it, and whether adding Lumen takes
+   effect after the app manager restarts (a change).
+8. Who owns the idle timer on 4.10.2, and whether Lumen's `ack:false` holds
+   LG's screensaver off (one trial).
+9. Where the shell's jail keeps its `/var/run` on the host, whether the
+   shell can reach a root-made socket there, and whether jails have their
+   own network namespace (one trial).
+10. Whether a root launch with `"preload":"full"` starts Lumen hidden (a
+    change).
+11. The memory manager's name and thresholds, and whether it has closed
+    Lumen since route D.
+12. Who set Lumen's files to 0777 after the install of 2026-10-23.
+
+**Privacy:**
+
+13. The ACR flags (`acrOnAllowed`, `acrAdAllowed`, `additional1Allowed`),
+    and whether `acr2` runs with any socket.
+14. In G1's week: any `alphonso.tv`, `lgsmartad.com`, `lgads.tv` or
+    `elastic.lgwebostv.com` lookup, and when (Streamer hours, Netflix,
+    standby).
+15. Reverse-lookup sweeps of the home network by UEI's `iconnectivity`, and
+    whether the program is there.
+16. Whether the October 2026 chain's parts exist on 4.10.2 (a `sync-demo`
+    app, a `cmp-client` app, `collectAllLog` in `pmlogd`).
+17. Which program answers DIAL's SSDP search, and whether casting still
+    works with 3000/3001 closed.
+18. HomeKit's port after a reboot.
+19. Whether the update program names 156.147.69.32, and which LG addresses
+    the TV reaches without a lookup.
+20. The clock's source, and how long after a cold boot it is set (G3's
+    bootstrap).
+21. Whether tcp 18888 opens with a USB drive attached.
+22. `ip_local_port_range` (for the `--syn` rules).
+
 ## Where it stands
 
 | Where | What | State |
@@ -104,8 +181,8 @@ verdict says so.
 
 | Project | What it is now | For Lumen |
 |---|---|---|
-| [Glasshouse](https://github.com/rorygallagher2024/glasshouse) 0.135.0 (five releases on 28 and 29 October) | Privacy, blocker, services, remote keys, OLED care, Home Assistant, screen off; Glasshouse Home now experimental on webOS 5 and 6, still not 4 | The pin at 0.118.0 is 17 releases old. Its blocker is the hosts file, which Guard outgrows (privacy.md's table). Decide after G1's week of log (P2); if it comes in, for OLED care and remote keys, not for blocking or Home |
-| [plx-native](https://github.com/GLinnik21/plx-native) 0.10.0 nightlies (daily, latest 2026-10-30) | Native Plex: `libplayerAPIs`, DV 5 and 8, Atmos, in-app FLAC and Opus, hi-res resampling, HUD plugins; Magic Remote scrolling changed | Keep 0.8.0 until a nightly is pinned and checked (the HDR and remote changes are worth a look). Servers come from the plex.tv account: no sign-in-free local mode exists, so `plex.tv` and `plex.direct` stay allowlisted and playback itself stays on the LAN. No deep-link parameters documented: the roadmap's upstream PR still applies |
+| [Glasshouse](https://github.com/rorygallagher2024/glasshouse) 0.135.0 (five releases on 28 and 29 October) | Privacy, blocker, services, remote keys, OLED care, Home Assistant, screen off; Glasshouse Home now experimental on webOS 5 and 6, still not 4 | The pin at 0.118.0 is 17 releases old. Its blocker is the hosts file, which Guard outgrows (privacy.md's table). Decide after G1's week of log (P2); if it comes in, for OLED care and remote keys, not for blocking or Home. **2026-11-05:** at 0.139.0 (a web Home for webOS 4 since 0.137.0, experimental; UEI's scanner stubbed; more LG hosts); never installed (decision 13), its research cited |
+| [plx-native](https://github.com/GLinnik21/plx-native) 0.10.0 nightlies (daily, latest 2026-10-30) | Native Plex: `libplayerAPIs`, DV 5 and 8, Atmos, in-app FLAC and Opus, hi-res resampling, HUD plugins; Magic Remote scrolling changed | Keep 0.8.0 until a nightly is pinned and checked (the HDR and remote changes are worth a look). **2026-11-05:** 0.9.0 was tagged stable on 2026-10-23, and the owner chose to move to it (D6, item 21). Servers come from the plex.tv account: no sign-in-free local mode exists, so `plex.tv` and `plex.direct` stay allowlisted and playback itself stays on the LAN. No deep-link parameters documented: the roadmap's upstream PR still applies |
 | [YouTube AdFree](https://github.com/webosbrew/youtube-webos) (Homebrew Channel) | The stock YouTube web app with ads blocked, SponsorBlock, no Shorts, highest quality; installs through Homebrew Channel; wants the official app gone first | The one stock app whose ads Lumen can't otherwise touch. Try it: one IPK, reversible. webOS 4.5 isn't confirmed by its page; C9 owners report it working. Its app id equals the stock one, so the look checks which copy SAM picks |
 | [Hearth](https://github.com/rudra-avatar/Hearth) (MIT), [OpenHome](https://github.com/devic021/openhome-webos) (GPL-3.0), [theboringtv](https://github.com/theboringhumane/theboringtv-lgwebos), [Mi pantalla](https://github.com/frxnnk/webos-liquid-glass-launcher) | Web-app home replacements for rooted sets. Hearth: webOS 4.x reported, three takeover methods. OpenHome: "webOS 4 and up", default-home setting plus `homestub.sh`, 100 hidden LG settings in 13 tabs. Mi pantalla: "liquid glass" in CSS on webOS 5, 59.7 fps claimed on a 2020 LCD | None is native or GLES; none runs on Chromium 53 with glass. Their takeover scripts are the prior art for routes A and B, and OpenHome's settings tabs are a map of `settingsservice` keys for the Control Center. Lumen's niche, a native 60 fps home on a 2019 OLED, stands |
 | [Homebrew repo](https://repo.webosbrew.org/): Jellyfin, Kodi, Moonlight, RetroArch, WireGuard VPN, HyperHDR and PicCap, two Aerial screensavers, Immich, VNCServer, Open Service Menu, LG App Update Blocker, Bluetooth Disabler | 48 apps, no launcher | Jellyfin is the account-free local player if Plex ever grates. WireGuard on the TV is an option for Remote R6, after the bridge box. PicCap and HyperHDR mean bias lighting is one install away. Nothing else overlaps |
@@ -148,11 +225,23 @@ git-ignored), **here** means the project manager off the TV.
 | 12 | Guard G2 with the address rules (lane H, after a week of G1's log), Guard G3 (lane K, after P4), senders G4 (TV, one job per check) | lanes H and K, TV | 6 | privacy.md |
 | 13 | **`lumen-ctl`** (Remote R2): the root control binary behind an SSH forced command, two bus implementations behind one trait, `tools/remote.sh`, a PC driver | lane G, then TV | 4 (done) | remote.md R2's "done when" on the B9. **Built and merged 2026-10-31** (2df8600; remote.md R2, "Built on"): the crate, the command and library buses, `tools/remote.sh` with a staged, hash-checked install and its `authorized_keys` line, `tools/remote/ctl.py`. **On the TV 2026-10-31:** installed at 18:01 UTC after a backup; `check-door` passes all four (its -R check fixed in 5f0851d: dropbear never answers a remote forward); the bus is `luna-send`, the library route being refused to root over SSH; the reads and ten write verbs work, 16 to 110 ms a round trip, each change back as an event (remote.md, R2, "On the B9"). Left: the text verbs, `power.off`, a Magic Remote volume change as an event, refusals on the TV |
 
+| 14 | Decision records 10 to 17 and the spec changes (this design) | here | The owner's OK | Done 2026-11-05 |
+| 15 | **`tools/recon.sh --platform`**: one read-only survey for "Facts only the TV can answer" (the trials and changes in that list stay separate TV steps) | lane, then TV | 14 | The answers in b9.md |
+| 16 | The Nest's DNS set to Quad9 (decision 11) | owner | Nothing | Set in the Google Home app |
+| 17 | **Lane L, the shell's platform layer** (decision 15): Wayland, EGL and the lifecycle registration in Rust behind a switch; the ES 3.0 context and the ASTC upload measurement; the overlay trial | lane, then TV | 15 | Matches or beats the SDL path on the B9 (start-up, key to frame, memory), and a Home press with Lumen in front reaches the shell |
+| 18 | **Lane M, `lumend`** (decision 14): the jail socket, S1 and S2's logic, closing LG Home, the icon copy, the file-mode watch, starting and restarting the shell, screen off; each hook reduced to its door | lane, then TV | 15 | The security review leaves nothing CRITICAL or HIGH; each part passes by hand; `uninstall-all.sh` takes it away |
+| 19 | **Lanes H and K** (decision 11): G2 by default deny with learning windows and the imported lists, then G3 to Quad9 over TLS | lanes, then TV | G1's week (2026-11-07); 15 for the clock | privacy.md's G2 and G3 |
+| 20 | **Lane N, ambient in the shell** (decision 16): a seamless-loop spike, then the screensaver | lane, then TV | 17 | The B9 switches to HDR on the loop, LG's saver stays away while Lumen is in front, and comes back when Lumen is gone |
+| 21 | plx-native 0.9.0 (D6) | TV | Nothing | Plex sign-in, an HDR and a Dolby Vision playback; 0.8.0 kept for rollback |
+
 Lanes E, F and G are done (E and F's tile merged 2026-10-31), and so is J's
-first part (merged 2026-10-31). I can start next, then J's second part,
-glass B, one at a time on the shell; H waits for a week of Guard's log
-(2026-11-07), K for P4. Two or three lanes at a time, never two on the
-shell's files at once; the README says how each comes back.
+first part (merged 2026-10-31). From 2026-11-05 the shell's lanes run one
+at a time in this order: L (the platform layer), I (the Control Center,
+with the read-only Privacy panel and Reduce Motion), N (ambient), then J's
+second part, glass B. M (`lumend`, a crate of its own) and H (Guard) can
+run beside them, since they touch other files. Two or three lanes at a
+time, never two on the shell's files at once; the README says how each
+comes back.
 
 ### What this changes in the roadmap
 
@@ -168,10 +257,10 @@ shell's files at once; the README says how each comes back.
 |---|---|---|
 | D1 | Commit the privacy work on `main` now (your post-boot check first, or trust the 2026-10-28 log and check later) | Done 2026-10-30: commits 354d989 to 655518b, pushed |
 | D2 | Home: route D proven on 2026-10-31. Keep the setting on, or set LG's Home back until Lumen handles a long Home press | Kept on, the owner's choice the same day: Lumen is the B9's Home. Undo: one setSystemSettings back to com.webos.app.home |
-| D3 | YouTube AdFree through Homebrew Channel | Yes, after the look says which copy SAM picks; one IPK, reversible |
+| D3 | YouTube AdFree through Homebrew Channel | Yes, after the look says which copy SAM picks; one IPK, reversible. Decided 2026-11-05 as part of decision 10's contract; the IPK comes from the PC (decision 12). AmazOff, the same for Prime Video, waits until AdFree is proven |
 | D4 | Lanes: A Guard (Astra high), B frame-stats (Sol high), C remote survey (Sol high), D remote front-end (Argon high, after remote.md), E art (Gemini image generation) | Superseded 2026-10-31: A to D ran as Claude sessions and are merged; from now on every lane is a Claude Opus 5.5 session at extra-high effort (the owner's choice), and E is remade without an image model |
 | D5 | remote.md: approve as drafted on 2026-10-28, with your D1 to D13 answers | Approved 2026-10-31, merged into `main` |
-| D6 | plx-native: pin a 0.10.0 nightly for a look at the HDR and remote changes, or stay on 0.8.0 | Stay until a tagged 0.9 or 0.10; nightlies change daily |
-| D7 | Glasshouse: still install at all | Decide after G1's week, as P2 says; if yes, for OLED care and remote keys only |
+| D6 | plx-native: pin a 0.10.0 nightly for a look at the HDR and remote changes, or stay on 0.8.0 | Stay until a tagged 0.9 or 0.10; nightlies change daily. 0.9.0 was tagged on 2026-10-23: the owner chose to move to it on 2026-11-05 (item 21) |
+| D7 | Glasshouse: still install at all | Decided 2026-11-05: never (decision 13) |
 | D8 | Art: the generated images' rights follow the tool's terms; Lumen ships them CC BY-SA 4.0 | Falls away 2026-10-31: lane E makes the art by code from Lumen's own scenes, original work with no third party's terms |
 | D9 | `make check` for `remote/`: add `npm ci`, lint, tests and the build to the container's check (Node 22 is already in the image), which fetches from the npm registry at check time and adds about a minute | Yes, with a cached npm volume in `tools/dev.sh`; Playwright stays out of it |

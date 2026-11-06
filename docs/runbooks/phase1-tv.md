@@ -1,5 +1,9 @@
 # Phase 1 on the TV: runbook
 
+> **History since 2026-11-05.** Glasshouse is never installed (decision 13),
+> and Phase 1 follows [privacy.md](../specs/privacy.md)'s stages instead.
+> The Glasshouse steps below are kept as a record and are not to be run.
+
 The steps of Phase 1 that need the B9, in order, with what each should print
 and how to undo it. Every command runs on the PC, in Git Bash, from the
 repository root. `tools/tv.sh` reads the TV's address from `.env`.

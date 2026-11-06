@@ -7,11 +7,11 @@ from what it measured.
 | Phase | Delivers | Done when |
 |---|---|---|
 | **0. Recon and dev environment** | Repo, build container, simulator, `hello-gles`, read-only device survey | A recon report for the B9 is in `docs/device/`, and `hello-gles` shows its GPU and draws at 60 fps on the TV |
-| **1. System layer** | Glasshouse and plx-native installed and configured; `profiles/glasshouse` from a 24 h DNS capture; `store-safe-check.sh`; `uninstall-all.sh` | Blocked hosts resolve to 0.0.0.0; Netflix, Prime Video, plx-native, the Content Store and DRM playback still work; costs (voice, ThinQ) confirmed |
-| **2. Ambient** | HDR QML screensaver and the first original HDR10 loop | The TV switches to HDR on the loop; it starts from LG's idle timer and from the shell; it reverts cleanly |
-| **3. Shell MVP** | Native home with apps, inputs and launching; Home key takeover; plx-native pinned | Home to shell in under 150 ms; 60 fps navigation; every app launches; every escape hatch works alongside Glasshouse; the snappy targets in [look and feel](specs/look-and-feel.md) pass |
-| **4. Polish** | Top Shelf hero, glass dock, parallax icons, Control Center, app editing, more loops, Dolby Vision | The reference screens pass the owner's review on the TV, and the frame budget holds with each feature on screen ([look and feel](specs/look-and-feel.md)); toggles match LG Settings |
-| **5. Release** | CI-built IPKs, docs, screenshots, Homebrew Channel submission; upstream pull requests (B9 profile and HDR saver to Glasshouse, deep links to plx-native) | A clean install on a freshly reset set, following only the docs |
+| **1. Privacy** (was "System layer"; no Glasshouse, decision 13) | [privacy.md](specs/privacy.md)'s stages: S1 and S2, Lumen Guard G1 to G3 (default deny, Quad9 over TLS), the port rules, plx-native pinned; `store-safe-check.sh`; `uninstall-all.sh` | Only allowlisted names resolve; Netflix, Prime Video, plx-native, the Content Store and DRM playback still work; lookups leave only to Quad9; costs (voice, ThinQ) confirmed |
+| **2. Ambient** (inside the shell, decision 16) | Lumen's own screensaver on the video plane and the original HDR10 loops | The TV switches to HDR on the loop; LG's saver stays away while Lumen is in front and returns when Lumen is gone; screen off after 2 hours |
+| **3. Shell MVP** | Native home with apps, inputs and launching; Home key takeover; the shell resident, on its own platform layer (decision 15); `lumend` (decision 14) | Home to shell in under 150 ms; 60 fps navigation; every app launches; every escape hatch works; the snappy targets in [look and feel](specs/look-and-feel.md) pass |
+| **4. Polish** | Top Shelf hero, glass, parallax, Control Center (read-only Privacy panel, Reduce Motion), grid editing from Remote, ASTC art and partial redraw, more loops, Dolby Vision | The reference screens pass the owner's review on the TV, and the frame budget holds with each feature on screen ([look and feel](specs/look-and-feel.md)); toggles match LG Settings |
+| **5. Rebuild** (was "Release", decision 10) | Docs, CI-built IPKs, and the owner's backups enough to rebuild the set; fixes upstream when cheap (deep links to plx-native) | The B9, reset to factory, rebuilt with only this repository's docs and the owner's backups |
 | **P. Play** (parallel, proposed) | RetroArch measured on the B9, one controller working, a Games row, OLED care, the phone path ([spec](specs/play.md), decision 7) | A pad plays a game started from the shell at full speed on the B9; every step reverts |
 | **R. Remote** (parallel, approved 2026-10-31) | `lumen-ctl` on the TV behind an SSH forced command, Lumen Remote for Windows, the phone's web UI served by the TV, Google Home through the Streamer's CEC ([spec](specs/remote.md), decision 9) | The PC and the Pixel control power, volume, inputs, apps, the remote's keys and picture presets; LG's gateway ports closed; nothing opened to the internet; every step reverts |
 
@@ -20,6 +20,13 @@ art and the next steps with hand-off lanes: [specs/depth.md](specs/depth.md)
 (proposed; the lanes were handed to Opus 5.5 sessions on 2026-10-31). On
 2026-10-31 the shell and the HDR studio merged into `main`; the shell has
 been the B9's Home since that morning (route D), so Phase 3 is under way.
+
+On 2026-11-05 the owner accepted decisions 10 to 17: one set and a
+contract for what it does, default-deny privacy with Quad9, no Glasshouse,
+Rust everywhere on the TV with a root daemon, a resident shell on its own
+platform layer, and the screensaver inside it. The phase table above
+follows them. The Phase 1 checklist below is history for its Glasshouse
+items; [specs/depth.md](specs/depth.md) has the order of the work from here.
 
 ## Phase 0 checklist
 
@@ -59,7 +66,8 @@ On the TV ([runbook](runbooks/phase1-tv.md)):
   early: the first (from 19:01 PDT 2026-10-20) after about 4 h, the second
   (from 18:48 PDT 2026-10-21) after about 1 h 8 min. Stage C needs a new one
 - [ ] `b9-aggressive.hosts` and `allowlist.txt` refined from the capture (owner reviewed)
-- [ ] Glasshouse 0.118.0 installed (owner confirmed), dashboard on 127.0.0.1 only
+- [ ] ~~Glasshouse 0.118.0 installed (owner confirmed), dashboard on 127.0.0.1 only~~
+  Dropped on 2026-11-05 (decision 13)
 - [ ] Stage 1, ads & telemetry tier: store-safe check and app checklist pass
 - [ ] Stage 2, privacy toggles and LG services: check and checklist pass
 - [ ] Stage 3, TV software updates blocked: firmware hosts resolve to 0.0.0.0
