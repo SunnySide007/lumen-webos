@@ -16,6 +16,7 @@ mod home_loop;
 mod icons;
 mod log;
 mod luna;
+mod platform;
 mod render;
 mod screen;
 mod sdl;

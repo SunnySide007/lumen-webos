@@ -208,6 +208,9 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         clock.at(start.listing),
     );
     shell.can_hide_pointer = events.can_hide_pointer();
+    if opts.hidden {
+        shell.start_hidden("started hidden");
+    }
     shell.stamps_from = (!clock.is_fixed()).then_some(clock.start);
     // The Top Shelf hero: what to load, upload and free, and when.
     let mut heroes = HeroPlan::new(opts.look.hero, shell.idle.last_input());
@@ -215,6 +218,16 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
     let mut quads = 0;
     // Logged once, with the first frame or with why there was none.
     let mut start_line = Some(start.times);
+    // Whether the shell was in front at the last pass: going out of sight
+    // frees the heroes, coming back loads the wanted one.
+    let mut was_visible = shell.visible;
+    // A hidden start has no first frame to wait for: its start-up is said
+    // now, and the frame a relaunch brings is timed as a return to the front.
+    if !shell.visible
+        && let Some(start) = start_line.take()
+    {
+        info!("{}", start.line_without_frame(shell.hidden_why));
+    }
 
     loop {
         // A settled screenshot that is ready must not wait for an event; one
@@ -286,6 +299,10 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
                 heroes
                     .deadline(&shell.home, clock.now(), !shell.input.is_holding())
                     .filter(|_| shell.visible),
+                // Hidden, a hero still decoding, so its pixels can go.
+                heroes
+                    .hidden_deadline(clock.now())
+                    .filter(|_| !shell.visible),
             ]
             .into_iter()
             .flatten()
@@ -345,6 +362,14 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
             && let Some(start) = start_line.take()
         {
             info!("{}", start.line_without_frame(shell.hidden_why));
+        }
+        if shell.visible != was_visible {
+            was_visible = shell.visible;
+            if shell.visible {
+                heroes.shown(now);
+            } else if let Some(line) = heroes.hidden(&mut shell.home, screen) {
+                info!("{line}");
+            }
         }
         if shell.quit {
             break;
@@ -1211,6 +1236,99 @@ mod tests {
             "{:?}",
             ran.lines
         );
+    }
+
+    // Staying resident (decision 15).
+
+    #[test]
+    fn hidden_the_heroes_go_and_the_atlas_stays_and_back_the_hero_loads_again() {
+        let mut setup = with_heroes(|s| s).events(|e| {
+            e.at(2_000, Event::Window(window::MINIMIZED))
+                .at(4_000, Event::Window(window::RESTORED))
+                .at(7_000, Event::Quit)
+        });
+        setup.vsync = true;
+        let ran = setup.run();
+        let acts: Vec<_> = ran
+            .hero_acts()
+            .iter()
+            .map(|&(kind, at, name)| (kind, at >= ms(4_000), name))
+            .collect();
+        assert_eq!(
+            acts,
+            [
+                ('L', false, "hero-ambient"),
+                ('U', false, "hero-ambient"),
+                ('F', false, "hero-ambient"),
+                ('L', true, "hero-ambient"),
+                ('U', true, "hero-ambient"),
+            ]
+        );
+        let freed = ran.lines_starting("hidden: Top Shelf art freed, 1 in textures (");
+        assert_eq!(freed.len(), 1, "{:?}", ran.lines);
+        assert!(
+            freed[0].ends_with(&format!(
+                "0 decoded (0 KB); the atlas stays ({} KB)",
+                hero::ATLAS_BYTES / 1024
+            )),
+            "{freed:?}"
+        );
+        // Back in front: the gradient at once, then the hero fades in.
+        let back: Vec<_> = ran.frames.iter().filter(|f| f.shown >= ms(4_000)).collect();
+        assert_eq!(back[0].shelf, (None, None));
+        assert_eq!(back.last().map(|f| &f.shelf), Some(&shows("hero-ambient")));
+        assert_eq!(
+            ran.lines_starting("crossfade gradient to hero-ambient: ")
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn a_hero_decoded_while_hidden_is_dropped() {
+        // Hidden 100 ms in, after the start's hero began to load and before
+        // it is decoded, 200 ms after.
+        let ran = with_heroes(|s| s.decode_ms(200))
+            .events(|e| {
+                e.at(100, Event::Window(window::MINIMIZED))
+                    .at(1_000, Event::Quit)
+            })
+            .run();
+        assert!(
+            ran.has_line("hero hero-ambient: decoded in 200.0 ms while hidden; dropped"),
+            "{:?}",
+            ran.lines
+        );
+        assert_eq!(ran.textures_left, hero::ATLAS_BYTES);
+    }
+
+    #[test]
+    fn a_hidden_start_draws_nothing_until_a_relaunch_shows_it() {
+        let mut setup = Setup::new().events(|e| {
+            e.at(2_000, Event::Relaunch { home_key: true })
+                .at(4_000, Event::Quit)
+        });
+        setup.opts.hidden = true;
+        let ran = setup.run();
+        assert!(!ran.frames.is_empty());
+        assert!(ran.frames.iter().all(|f| f.shown >= ms(2_000)));
+        assert!(ran.has_line("started hidden: nothing is drawn until a relaunch"));
+        assert!(
+            ran.lines
+                .iter()
+                .any(|l| l.starts_with("start: ") && l.ends_with("no first frame: started hidden")),
+            "{:?}",
+            ran.lines
+        );
+        assert!(ran.has_line("in front again (relaunched): drawing resumes"));
+        assert!(ran.has_line("foreground: first frame after "));
+        assert_eq!(ran.frames[0].focused.map(|(index, _)| index), Some(0));
+        // Hidden, the loop waited for events rather than spinning.
+        let early = ran
+            .acts
+            .iter()
+            .filter(|a| matches!(a, Act::Wait(at, _) if *at < ms(2_000)));
+        assert!(early.count() < 10, "{:?}", ran.acts);
     }
 
     #[test]

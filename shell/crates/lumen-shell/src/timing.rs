@@ -23,7 +23,8 @@ use lumen_core::apps::{AppId, LaunchError};
 /// The start-up phases, in the order they end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
-    /// SDL loaded and initialised.
+    /// SDL loaded and initialised, or on the Wayland path the compositor
+    /// connected and the window made; named for the platform (`name_first`).
     Sdl,
     /// The window, its GL context and vsync.
     Gl,
@@ -60,6 +61,8 @@ impl Phase {
 #[derive(Debug)]
 pub struct StartTimes {
     zero: Instant,
+    /// The first phase's name: `sdl`, or `wayland` on the platform layer.
+    first: &'static str,
     marks: [Option<Instant>; Phase::ALL.len()],
 }
 
@@ -68,8 +71,14 @@ impl StartTimes {
     pub fn new(zero: Instant) -> Self {
         Self {
             zero,
+            first: Phase::Sdl.name(),
             marks: [None; Phase::ALL.len()],
         }
+    }
+
+    /// Names the first phase for the platform the shell runs on.
+    pub fn name_first(&mut self, name: &'static str) {
+        self.first = name;
     }
 
     /// `phase` ended at `at`.
@@ -102,7 +111,12 @@ impl StartTimes {
                 || "-".to_owned(),
                 |at| whole_ms(at.saturating_duration_since(self.zero)),
             );
-            out.push_str(&format!("{} {shown}", phase.name()));
+            let name = if *phase == Phase::Sdl {
+                self.first
+            } else {
+                phase.name()
+            };
+            out.push_str(&format!("{name} {shown}"));
         }
         out
     }
@@ -306,13 +320,27 @@ impl KeyTimes {
     }
 }
 
-/// The time from coming back to the front to the first frame shown.
-#[derive(Debug, Default)]
+/// The time from coming back to the front to the first frame shown, or,
+/// named `relaunch`, from a Home press with the shell in front to the frame
+/// that shows focus back on the first tile.
+#[derive(Debug)]
 pub struct Foreground {
+    what: &'static str,
     since: Option<Instant>,
 }
 
+impl Default for Foreground {
+    fn default() -> Self {
+        Self::named("foreground")
+    }
+}
+
 impl Foreground {
+    /// A clock whose lines start with `what`.
+    pub const fn named(what: &'static str) -> Self {
+        Self { what, since: None }
+    }
+
     /// The shell came back to the front at `at`. A second sign of it before
     /// a frame keeps the first time.
     pub fn came_back(&mut self, at: Instant) {
@@ -328,7 +356,8 @@ impl Foreground {
     pub fn shown(&mut self, at: Instant) -> Option<String> {
         let since = self.since.take()?;
         Some(format!(
-            "foreground: first frame after {} ms",
+            "{}: first frame after {} ms",
+            self.what,
             whole_ms(at.saturating_duration_since(since))
         ))
     }
@@ -337,7 +366,8 @@ impl Foreground {
     pub fn not_shown(&mut self, at: Instant, why: &str) -> Option<String> {
         let since = self.since.take()?;
         Some(format!(
-            "foreground: not shown after {} ms: {why}",
+            "{}: not shown after {} ms: {why}",
+            self.what,
             whole_ms(at.saturating_duration_since(since))
         ))
     }
@@ -579,6 +609,19 @@ mod tests {
         assert_eq!(
             start.line_without_frame("the window lost focus"),
             "start: sdl 10, gl 20, renderer 30, assets 40, apps 50 ms; no first frame: the window lost focus"
+        );
+    }
+
+    #[test]
+    fn the_first_phase_is_named_for_the_platform() {
+        let zero = Instant::now();
+        let mut start = StartTimes::new(zero);
+        start.name_first("wayland");
+        start.mark(Phase::Sdl, zero + ms(40));
+        start.mark(Phase::Gl, zero + ms(90));
+        assert_eq!(
+            start.line_without_frame("started hidden"),
+            "start: wayland 40, gl 90, renderer -, assets -, apps - ms; no first frame: started hidden"
         );
     }
 

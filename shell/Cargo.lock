@@ -120,6 +120,7 @@ name = "lumen-shell"
 version = "0.0.1"
 dependencies = [
  "fontdue",
+ "libc",
  "libloading",
  "lumen-core",
  "png",

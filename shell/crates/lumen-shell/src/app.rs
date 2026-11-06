@@ -1,8 +1,10 @@
-//! The shell's start-up: its options, SDL and its hints, the window and its
-//! GL context, the renderer and the assets, the apps and the luna watch. The
-//! home loop (`home_loop`) runs the rest, on the TV's screen (`screen.rs`)
-//! and SDL's events.
+//! The shell's start-up: its options, the platform (LG's SDL, or the
+//! platform layer's own window on the compositor, `platform`), the window
+//! and its GL context, the renderer and the assets, the apps and the luna
+//! watch. The home loop (`home_loop`) runs the rest, on the TV's screen
+//! (`screen.rs`) and the platform's events.
 
+use std::ffi::{CStr, c_void};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -14,14 +16,20 @@ use lumen_core::script::Script;
 use crate::draw;
 use crate::gl::{self, Gl};
 use crate::heroes::{Folders, Heroes};
-use crate::home_loop::{self, Start, SystemClock, WallClock};
+use crate::home_loop::{self, Events, Start, SystemClock, WallClock};
 use crate::info;
 use crate::luna::{self, Ls2, LunaLauncher};
+use crate::platform::launch::{Launch, Params, window_type};
+use crate::platform::lifecycle::Method;
+use crate::platform::{Platform, probe};
 use crate::render::Renderer;
-use crate::screen::{self, TvScreen};
+use crate::screen::{self, TvScreen, Window};
 use crate::sdl::{self, Sdl};
 use crate::timing::{Phase, StartTimes};
 use crate::watch;
+
+/// The file beside the executable that may name the platform.
+const PLATFORM_FILE: &str = "platform";
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Options {
@@ -48,18 +56,37 @@ pub struct Options {
     /// What the launch parameters' `"look"` said that names no feature:
     /// left out, and logged.
     pub look_unknown: Vec<String>,
+    /// The window and event layer, if the launch parameters or `--platform`
+    /// name one; else `LUMEN_PLATFORM`, the `platform` file beside the
+    /// executable, or SDL (`choose_platform`).
+    pub platform: Option<Platform>,
+    /// An ES 3.0 context on the Wayland path (`"gles": 3`, `--gles3`).
+    pub gles3: bool,
+    /// Measure the GPU plan's gate and leave (`"probe": "gpu"`, `--probe`).
+    pub probe: bool,
+    /// The overlay trial's window type (`"window": "overlay"`, `--window`).
+    pub window_type: Option<String>,
+    /// Start hidden until a relaunch shows the shell: SAM's preload,
+    /// `"hidden": true` or `--hidden`. The Wayland path only.
+    pub hidden: bool,
+    /// The registration SAM asked for in a version 2 launch envelope;
+    /// `None` is version 1's `registerNativeApp`.
+    pub lifecycle: Option<Method>,
+    /// Lines about the launch argument for the log: what was left out, and
+    /// SAM's reason for a version 2 launch.
+    pub launch_lines: Vec<String>,
 }
 
 impl Options {
     /// Reads `--exit-after <seconds>`, `--windowed`, `--gles`,
     /// `--screenshot <path>`, `--screenshot-at <seconds>`, `--keys <list>`,
-    /// `--fixed-dt <seconds>` and `--screenshot-when-settled <path>`, and
-    /// the launch parameters, which webOS passes as a JSON argument: their
-    /// `"look"`, such as `{"look":"plain"}` or `{"look":"-dither,-tilt"}`
-    /// (`Look::parse`). Anything else is ignored. A bad `--keys`,
-    /// `--fixed-dt` or `--screenshot-at` is an error, since only automation
-    /// uses them; a bad look is not, since it must never keep the TV's Home
-    /// from starting.
+    /// `--fixed-dt <seconds>`, `--screenshot-when-settled <path>`,
+    /// `--platform <sdl|wayland>`, `--gles3`, `--probe`, `--hidden` and
+    /// `--window <type>`, and the launch argument webOS passes as JSON
+    /// (`read_launch`). Anything else is ignored. A bad flag is an error,
+    /// since only automation and the owner's trials use them; a bad launch
+    /// parameter is not, since it must never keep the TV's Home from
+    /// starting.
     pub fn from_args(args: &[String]) -> Result<Self, String> {
         let mut opts = Self {
             windowed: !on_tv(),
@@ -70,6 +97,24 @@ impl Options {
             match arg.as_str() {
                 "--windowed" => opts.windowed = true,
                 "--gles" => opts.gles = true,
+                "--gles3" => opts.gles3 = true,
+                "--probe" => opts.probe = true,
+                "--hidden" => opts.hidden = true,
+                "--platform" => {
+                    let name = it.next().ok_or("--platform needs sdl or wayland")?;
+                    let platform = Platform::from_name(name)
+                        .ok_or_else(|| format!("--platform {name:?}: sdl or wayland"))?;
+                    opts.platform = Some(platform);
+                }
+                "--window" => {
+                    let name = it
+                        .next()
+                        .ok_or("--window needs a window type, such as overlay")?;
+                    let kind = window_type(name).ok_or_else(|| {
+                        format!("--window {name:?}: letters and underscores only")
+                    })?;
+                    opts.window_type = Some(kind);
+                }
                 "--exit-after" => {
                     opts.exit_after = it
                         .next()
@@ -102,25 +147,46 @@ impl Options {
                     let path = it.next().ok_or("--screenshot-when-settled needs a path")?;
                     opts.screenshot_when_settled = Some(PathBuf::from(path));
                 }
-                json if json.starts_with('{') => {
-                    let said = serde_json::from_str::<serde_json::Value>(json)
-                        .ok()
-                        .and_then(|params| params.get("look").cloned());
-                    match said {
-                        Some(serde_json::Value::String(text)) => {
-                            (opts.look, opts.look_unknown) = Look::parse(&text);
-                        }
-                        Some(other) => {
-                            opts.look = Look::FULL;
-                            opts.look_unknown = vec![other.to_string()];
-                        }
-                        None => {}
-                    }
-                }
+                json if json.starts_with('{') => opts.read_launch(json),
                 _ => {}
             }
         }
         Ok(opts)
+    }
+
+    /// The launch argument (`platform::launch`), in either lifecycle
+    /// version's shape: its `"look"`, such as `{"look":"plain"}` or
+    /// `{"look":"-dither,-tilt"}` (`Look::parse`), the platform layer's
+    /// parameters (`Params`), and SAM's preload and registration method.
+    /// An argument that is not a JSON object changes nothing.
+    fn read_launch(&mut self, json: &str) {
+        let Ok(serde_json::Value::Object(top)) = serde_json::from_str(json) else {
+            return;
+        };
+        let launch = Launch::read(&top);
+        match launch.params.get("look") {
+            Some(serde_json::Value::String(text)) => {
+                (self.look, self.look_unknown) = Look::parse(text);
+            }
+            Some(other) => {
+                self.look = Look::FULL;
+                self.look_unknown = vec![other.to_string()];
+            }
+            None => {}
+        }
+        let params = Params::read(&launch.params);
+        self.platform = params.platform.or(self.platform);
+        self.gles3 |= params.gles3;
+        self.probe |= params.probe;
+        self.window_type = params.window_type.or(self.window_type.take());
+        self.exit_after = params.exit_after.or(self.exit_after);
+        self.hidden |= params.hidden || launch.preloaded();
+        self.lifecycle = launch.method;
+        self.launch_lines.extend(params.refused);
+        if let Some(reason) = launch.reason {
+            self.launch_lines
+                .push(format!("launch: lifecycle version 2, reason {reason:?}"));
+        }
     }
 }
 
@@ -129,15 +195,75 @@ pub(crate) const fn on_tv() -> bool {
     cfg!(all(target_os = "linux", target_arch = "arm"))
 }
 
+/// The platform, and what chose it: the options (the launch parameters or
+/// `--platform`), else `LUMEN_PLATFORM`, else the `platform` file beside the
+/// executable (one word; reinstalling the IPK removes it), else SDL.
+fn choose_platform(opts: &Options) -> (Platform, String) {
+    if let Some(platform) = opts.platform {
+        return (platform, "the options".to_owned());
+    }
+    if let Ok(name) = std::env::var("LUMEN_PLATFORM") {
+        match Platform::from_name(&name) {
+            Some(platform) => return (platform, "LUMEN_PLATFORM".to_owned()),
+            None => info!("LUMEN_PLATFORM={name:?} is not sdl or wayland; left out"),
+        }
+    }
+    let file = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(PLATFORM_FILE)));
+    if let Some(file) = file.filter(|f| f.is_file()) {
+        match read_platform_file(&file) {
+            Some(platform) => return (platform, file.display().to_string()),
+            None => info!("{}: not one word, sdl or wayland; left out", file.display()),
+        }
+    }
+    (Platform::Sdl, "the default".to_owned())
+}
+
+/// The platform a short file names, or `None`.
+fn read_platform_file(path: &std::path::Path) -> Option<Platform> {
+    use std::io::Read;
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(32)
+        .read_to_string(&mut text)
+        .ok()?;
+    Platform::from_name(&text)
+}
+
 /// Runs the shell. `started` is `main()`'s first moment, where the start-up
 /// line counts from.
-pub fn run(opts: Options, started: Instant) -> Result<(), String> {
+pub fn run(mut opts: Options, started: Instant) -> Result<(), String> {
     info!("options {opts:?}");
     info!("look: {}", opts.look);
     for word in &opts.look_unknown {
         info!("look: {word:?} is not a feature; left out");
     }
+    for line in &opts.launch_lines {
+        info!("{line}");
+    }
+    let (platform, from) = choose_platform(&opts);
+    info!("platform: {} (from {from})", platform.name());
+    if platform == Platform::Wayland {
+        match run_wayland(&opts, started) {
+            Some(result) => return result,
+            None => info!("platform: the Wayland path did not start; sdl instead"),
+        }
+    }
+    if std::mem::take(&mut opts.hidden) {
+        info!("a hidden start needs the Wayland path; starting shown");
+    }
+    if opts.gles3 {
+        info!("an ES 3 context is the Wayland path's; SDL's stays as it was");
+    }
+    run_sdl(&opts, started)
+}
+
+/// The SDL path: LG's SDL 2.0.5 on the TV, the official SDL2 on a PC.
+fn run_sdl(opts: &Options, started: Instant) -> Result<(), String> {
     let mut start = StartTimes::new(started);
+    start.name_first(Platform::Sdl.name());
     let sdl = Sdl::load()?;
     info!("SDL {}", sdl.version());
     if on_tv() {
@@ -152,18 +278,124 @@ pub fn run(opts: Options, started: Instant) -> Result<(), String> {
     sdl.init(sdl::INIT_VIDEO | sdl::INIT_EVENTS)?;
     start.mark(Phase::Sdl, Instant::now());
 
-    let result = run_surface(&sdl, &opts, start);
+    let result = sdl_surface(&sdl, opts, start);
     sdl.quit();
     result
 }
 
-/// Start-up from the window on, then the home loop, which gets the window,
-/// GL and what fills the frames as its screen, and SDL's queue as its events.
-fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), String> {
+/// The SDL path's window, its GL context and vsync, then the shared
+/// start-up and the loop, on SDL's queue.
+fn sdl_surface(sdl: &Sdl, opts: &Options, start: StartTimes) -> Result<(), String> {
     let surface = screen::open_surface(sdl, opts)?;
-    let gl = Gl::load(|name| sdl.gl_proc_address(name))?;
     let vsync = sdl.gl_set_swap_interval(1);
-    let drawable = surface.drawable_size();
+    // The TV and `--gles` have ES 2; a PC's desktop GL is "0" to the probe.
+    let es = if on_tv() || opts.gles { 2 } else { 0 };
+    let mut events = sdl;
+    run_home(
+        surface,
+        &|name| sdl.gl_proc_address(name),
+        vsync,
+        es,
+        opts,
+        start,
+        &mut events,
+    )
+}
+
+/// The Wayland path (decision 15): the compositor, EGL and the shell's own
+/// lifecycle registration. `None` when it could not start, before anything
+/// was shown, so the SDL path can run instead; the reason is logged.
+#[cfg(target_os = "linux")]
+fn run_wayland(opts: &Options, started: Instant) -> Option<Result<(), String>> {
+    use crate::platform::egl::Egl;
+    use crate::platform::lifecycle;
+    use crate::platform::wayland::{Setup, Wayland};
+
+    /// The compositor's window type for an app: a card, which it makes full
+    /// screen.
+    const CARD: &str = "_WEBOS_WINDOW_TYPE_CARD";
+
+    let mut start = StartTimes::new(started);
+    start.name_first(Platform::Wayland.name());
+    let app_id = std::env::var("APPID").unwrap_or_else(|_| luna::SELF_ID.to_owned());
+    let display_id = std::env::var("DISPLAY_ID").unwrap_or_else(|_| "0".to_owned());
+    let window_type = opts.window_type.as_deref().unwrap_or(CARD);
+    if window_type != CARD {
+        info!(
+            "trial: window type {window_type} instead of a card; the compositor's answer \
+             follows (a protocol error, no window, or the window)"
+        );
+    }
+    let wl = match Wayland::connect(&Setup {
+        app_id: &app_id,
+        window_type,
+        display_id: &display_id,
+    }) {
+        Ok(wl) => wl,
+        Err(e) => {
+            info!("wayland: {e}");
+            return None;
+        }
+    };
+    start.mark(Phase::Sdl, Instant::now());
+    let egl = match Egl::load() {
+        Ok(egl) => egl,
+        Err(e) => {
+            info!("egl: {e}");
+            return None;
+        }
+    };
+    let (window, made) = match wl.open_egl(egl, opts.gles3 || opts.probe) {
+        Ok(opened) => opened,
+        Err(e) => {
+            info!("egl: {e}");
+            return None;
+        }
+    };
+    info!("egl: {}", egl.files);
+    info!("{}", made.egl_line);
+    info!("{}", made.config_line);
+    info!("{}", wl.pointer_line());
+    // SAM's relaunch, pause and close for this process, from here until the
+    // loop ends; luna is the TV's only.
+    let _lifecycle = on_tv().then(|| {
+        let method = opts.lifecycle.unwrap_or(Method::RegisterNativeApp);
+        lifecycle::start(method, &app_id, wl.lifecycle_sink())
+    });
+    let mut events = &wl;
+    let loader = move |name: &CStr| egl.proc_address(name);
+    Some(run_home(
+        window,
+        &loader,
+        made.vsync,
+        made.es,
+        opts,
+        start,
+        &mut events,
+    ))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_wayland(_: &Options, _: Instant) -> Option<Result<(), String>> {
+    info!("platform: the Wayland path is the TV's, on Linux only");
+    None
+}
+
+/// Start-up from GL on, the same on both platforms, then the home loop,
+/// which gets `window` and what fills the frames as its screen, and
+/// `events`. `loader` finds GL's functions; `es` is the context's ES
+/// version (0: desktop GL), for the probe.
+fn run_home<W: Window, E: Events>(
+    window: W,
+    loader: &dyn Fn(&CStr) -> *const c_void,
+    vsync: bool,
+    es: u8,
+    opts: &Options,
+    mut start: StartTimes,
+    events: &mut E,
+) -> Result<(), String> {
+    let gl = Gl::load(loader)?;
+    let drawable = window.drawable_size();
     start.mark(Phase::Gl, Instant::now());
 
     info!(
@@ -183,6 +415,15 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
     let mut renderer = Renderer::new(gl)?;
     renderer.set_dither(opts.look.dither);
     start.mark(Phase::Renderer, Instant::now());
+    // The GPU plan's gate: measured, logged, and nothing else.
+    if opts.probe {
+        let art = art_folders().art;
+        for line in probe::run(&mut renderer, loader, &art, es, drawable) {
+            info!("{line}");
+        }
+        info!("probe: done; leaving");
+        return Ok(());
+    }
     // A fixed clock wants the same frames every run, so its icons load at once.
     let assets = if opts.fixed_dt.is_some() {
         draw::Assets::new()?
@@ -227,10 +468,9 @@ fn run_surface(sdl: &Sdl, opts: &Options, mut start: StartTimes) -> Result<(), S
         Heroes::threaded(folders, opts.look)
     };
     // After the watch, so the window and its context go before it stops.
-    let mut screen = TvScreen::new(surface, renderer, assets, heroes);
-    let mut events = sdl;
+    let mut screen = TvScreen::new(window, renderer, assets, heroes);
     home_loop::run(
-        &mut events,
+        events,
         &mut screen,
         &SystemClock,
         opts,
@@ -447,8 +687,82 @@ mod tests {
     }
 
     #[test]
+    fn the_platform_layers_flags_and_parameters() {
+        let opts = parse(&[
+            "--platform",
+            "wayland",
+            "--gles3",
+            "--probe",
+            "--hidden",
+            "--window",
+            "overlay",
+        ]);
+        assert_eq!(opts.platform, Some(Platform::Wayland));
+        assert!(opts.gles3 && opts.probe && opts.hidden);
+        assert_eq!(
+            opts.window_type.as_deref(),
+            Some("_WEBOS_WINDOW_TYPE_OVERLAY")
+        );
+        // The same from the launch parameters, a trial's launch.
+        let launched = parse(&[
+            r#"{"platform":"wayland","gles":3,"probe":"gpu","exitAfter":20,"look":"plain"}"#,
+        ]);
+        assert_eq!(launched.platform, Some(Platform::Wayland));
+        assert!(launched.gles3 && launched.probe && !launched.hidden);
+        assert_eq!(launched.exit_after, Some(Duration::from_secs(20)));
+        assert_eq!(launched.look, Look::PLAIN);
+        assert_eq!(launched.lifecycle, None, "version 1: registerNativeApp");
+        // A Home press's own parameters choose nothing.
+        let home = parse(&[r#"{"@system_native_app": true, "launchType": "homeKey"}"#]);
+        assert_eq!((home.platform, home.hidden), (None, false));
+    }
+
+    #[test]
+    fn a_version_2_launch_is_read_from_its_envelope() {
+        let opts = parse(&[
+            r#"{"event":"launch","reason":"preload","interfaceVersion":2,
+                "interfaceMethod":"registerApp","preload":"full",
+                "parameters":{"look":"-dither","platform":"wayland","gles":9}}"#,
+        ]);
+        assert_eq!(opts.lifecycle, Some(Method::RegisterApp));
+        assert!(opts.hidden, "a preload starts hidden");
+        assert!(!opts.look.dither);
+        assert_eq!(opts.platform, Some(Platform::Wayland));
+        assert_eq!(opts.launch_lines.len(), 2, "{:?}", opts.launch_lines);
+        assert!(opts.launch_lines[0].starts_with("launch parameter \"gles\": 9"));
+        assert_eq!(
+            opts.launch_lines[1],
+            "launch: lifecycle version 2, reason \"preload\""
+        );
+    }
+
+    #[test]
+    fn a_platform_file_names_one_platform() {
+        let dir = std::env::temp_dir().join(format!("lumen-platform-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(PLATFORM_FILE);
+        for (text, want) in [
+            ("wayland\n", Some(Platform::Wayland)),
+            (" sdl ", Some(Platform::Sdl)),
+            ("wayland please", None),
+            ("", None),
+        ] {
+            std::fs::write(&file, text).unwrap();
+            assert_eq!(read_platform_file(&file), want, "{text:?}");
+        }
+        std::fs::write(&file, "x".repeat(64) + "wayland").unwrap();
+        assert_eq!(read_platform_file(&file), None, "only the first bytes");
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(read_platform_file(&file), None, "no file");
+    }
+
+    #[test]
     fn bad_automation_flags_are_errors() {
         for bad in [
+            &["--platform", "x11"][..],
+            &["--platform"],
+            &["--window", "over lay"],
+            &["--window"],
             &["--keys", "R,HOME"][..],
             &["--keys"],
             &["--fixed-dt", "0"],

@@ -155,6 +155,15 @@ pub enum Event {
     /// The Magic Remote's wheel turned (the B9 sends 0x403 while the pointer
     /// is up). Input, nothing more.
     MouseWheel,
+    /// The app manager launched the shell again while it ran, through the
+    /// shell's own lifecycle registration (`platform::lifecycle`; never
+    /// from SDL, whose registration is LG's): a Home press with Lumen as
+    /// the TV's Home if `home_key`, else LG's app list or another app. The
+    /// platform has already asked the compositor to raise the window.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Relaunch {
+        home_key: bool,
+    },
     Other(u32),
 }
 
