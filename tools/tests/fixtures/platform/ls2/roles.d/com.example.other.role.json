@@ -1,0 +1,4 @@
+{
+    "exeName": "/usr/bin/not-shown-other",
+    "allowedNames": ["com.example.other"]
+}

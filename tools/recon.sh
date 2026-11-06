@@ -5,11 +5,13 @@
 #   tools/recon.sh --privacy    the privacy and exposure survey (tools/recon/privacy.sh)
 #   tools/recon.sh --remote     the Remote spec's R0 survey (tools/recon/remote.sh):
 #                               SSH and dropbear, luna methods, keys, firmware date, Home
+#   tools/recon.sh --platform   the facts only the TV can answer, for the design of
+#                               2026-11-05 (tools/recon/platform.sh; docs/specs/depth.md)
 #
 # The scripts that run on the TV only read; review them before the first run.
 # The raw output stays in tools/out/ (git ignores it), and the redacted copy
-# goes to docs/device/ (recon-, privacy- or remote-<UTC timestamp>.txt) for
-# review before anything is committed.
+# goes to docs/device/ (recon-, privacy-, remote- or platform-<UTC
+# timestamp>.txt) for review before anything is committed.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,7 +20,8 @@ case "${1:-}" in
     '') survey=device; name=recon ;;
     --privacy) survey=privacy; name=privacy ;;
     --remote) survey=remote; name=remote ;;
-    *) echo "usage: tools/recon.sh [--privacy|--remote]" >&2; exit 2 ;;
+    --platform) survey=platform; name=platform ;;
+    *) echo "usage: tools/recon.sh [--privacy|--remote|--platform]" >&2; exit 2 ;;
 esac
 
 python=""

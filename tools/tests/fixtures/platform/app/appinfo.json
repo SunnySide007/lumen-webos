@@ -1,0 +1,9 @@
+{
+  "id": "io.github.sunnyside007.lumen.shell",
+  "version": "0.1.0",
+  "vendor": "Lumen",
+  "type": "native",
+  "main": "lumen-shell",
+  "title": "Lumen",
+  "resolution": "1920x1080"
+}

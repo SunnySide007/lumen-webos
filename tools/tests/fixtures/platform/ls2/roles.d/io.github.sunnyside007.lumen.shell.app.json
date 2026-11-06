@@ -1,0 +1,6 @@
+{
+    "exeName": "/media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-shell",
+    "type": "regular",
+    "trustLevel": "dev",
+    "allowedNames": ["io.github.sunnyside007.lumen.shell*"]
+}
