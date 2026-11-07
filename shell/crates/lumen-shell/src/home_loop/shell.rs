@@ -43,6 +43,9 @@ pub(super) struct Shell<L: Launcher> {
     keys: KeyTimes,
     /// Coming back to the front, on its way to a frame.
     foreground: Foreground,
+    /// A Home press with the shell in front, on its way to the frame that
+    /// shows focus on the first tile.
+    relaunched: Foreground,
     /// What arrived since the remote's last key, for focus and lifecycle lines.
     since_key: SinceKey,
     /// Whether the window has keyboard focus, from SDL's focus events, for
@@ -94,6 +97,7 @@ impl<L: Launcher> Shell<L> {
             stamps_from: None,
             keys: KeyTimes::default(),
             foreground: Foreground::default(),
+            relaunched: Foreground::named("relaunch"),
             since_key: SinceKey::default(),
             focused: false,
             pointer: Pointer::default(),
@@ -102,6 +106,16 @@ impl<L: Launcher> Shell<L> {
             idle: Idle::new(now),
             shared,
         }
+    }
+
+    /// Starts hidden (a preload, or `"hidden": true` on the Wayland path):
+    /// nothing is drawn until a relaunch shows the shell.
+    pub(super) fn start_hidden(&mut self, why: &'static str) {
+        info!("{why}: nothing is drawn until a relaunch");
+        self.visible = false;
+        self.hidden_why = why;
+        // Nothing moves while hidden, or the loop would wake for it.
+        self.home.settle_now();
     }
 
     /// Any input at `now`: a key (the pointer codes included) or a mouse
@@ -283,7 +297,35 @@ impl<L: Launcher> Shell<L> {
                 self.since_key.other();
                 self.show("did enter foreground", at);
             }
+            Event::Relaunch { home_key } => self.relaunch(home_key, now, at),
             Event::Other(_) => self.since_key.other(),
+        }
+    }
+
+    /// The app manager relaunched the shell, and the platform layer has put
+    /// its window in front. Hidden, it shows again; in front, a Home press
+    /// brings focus back to the first tile, as Home does on tvOS.
+    fn relaunch(&mut self, home_key: bool, now: Duration, at: Instant) {
+        let what = if home_key {
+            "relaunch (Home)"
+        } else {
+            "relaunch"
+        };
+        info!("{}", self.since_key.line(what, at));
+        self.since_key.other();
+        if !self.visible {
+            self.show("relaunched", at);
+            return;
+        }
+        if !home_key {
+            return;
+        }
+        self.input.release_all();
+        if self.home.focus_first(now) {
+            info!("Home with Lumen in front: focus to the first tile");
+            self.relaunched.came_back(at);
+        } else {
+            info!("Home with Lumen in front: focus is on the first tile already");
         }
     }
 
@@ -376,6 +418,9 @@ impl<L: Launcher> Shell<L> {
         if let Some(line) = self.foreground.not_shown(at, why) {
             info!("{line}");
         }
+        if let Some(line) = self.relaunched.not_shown(at, why) {
+            info!("{line}");
+        }
         // Launched now, the app would open over whatever hid the shell.
         self.drop_launch(why);
     }
@@ -398,11 +443,17 @@ impl<L: Launcher> Shell<L> {
         if let Some(line) = self.foreground.shown(at) {
             info!("{line}");
         }
+        if let Some(line) = self.relaunched.shown(at) {
+            info!("{line}");
+        }
     }
 
     /// The screen settled with presses that changed nothing on it.
     pub(super) fn nothing_to_draw(&mut self, at: Instant) {
         for line in self.keys.not_shown(at, "nothing to draw") {
+            info!("{line}");
+        }
+        if let Some(line) = self.relaunched.not_shown(at, "nothing to draw") {
             info!("{line}");
         }
     }
@@ -999,6 +1050,73 @@ mod tests {
         key(&mut shell, scancode::RIGHT, 10);
         assert!(shell.visible);
         assert_eq!(shell.home.focused(), Some(1));
+    }
+
+    #[test]
+    fn a_home_press_in_front_brings_focus_to_the_first_tile_and_times_it() {
+        let mut shell = shell();
+        key(&mut shell, scancode::RIGHT, 0);
+        key(&mut shell, scancode::DOWN, 10);
+        shell.frame_shown(at(30));
+        shell.home.settle_now();
+        shell.home.frame_drawn();
+        assert!(shell.home.focused().is_some_and(|f| f != 0));
+        let lines = said(|| send(&mut shell, Event::Relaunch { home_key: true }, 500));
+        assert_eq!(shell.home.focused(), Some(0));
+        assert!(shell.wants_frame());
+        assert_eq!(
+            lines.last().map(String::as_str),
+            Some("Home with Lumen in front: focus to the first tile"),
+            "{lines:?}"
+        );
+        assert!(
+            lines[0].starts_with("relaunch (Home): last key "),
+            "{lines:?}"
+        );
+        assert_eq!(
+            said(|| shell.frame_shown(at(520))),
+            ["relaunch: first frame after 20 ms"]
+        );
+        // Again, with focus there already: nothing to draw, nothing timed.
+        shell.home.settle_now();
+        shell.home.frame_drawn();
+        let lines = said(|| send(&mut shell, Event::Relaunch { home_key: true }, 900));
+        assert!(
+            lines.contains(
+                &"Home with Lumen in front: focus is on the first tile already".to_owned()
+            )
+        );
+        assert!(!shell.wants_frame());
+        assert!(said(|| shell.nothing_to_draw(at(910))).is_empty());
+        // A relaunch that is not a Home press leaves focus where it is.
+        key(&mut shell, scancode::RIGHT, 1_000);
+        send(&mut shell, Event::Relaunch { home_key: false }, 1_100);
+        assert_eq!(shell.home.focused(), Some(1));
+    }
+
+    #[test]
+    fn a_relaunch_while_hidden_shows_the_shell_where_it_was() {
+        let mut shell = shell();
+        key(&mut shell, scancode::RIGHT, 0);
+        send(&mut shell, Event::Window(sdl::window::MINIMIZED), 100);
+        assert!(!shell.visible);
+        send(&mut shell, Event::Relaunch { home_key: true }, 200);
+        assert!(shell.visible && shell.wants_frame());
+        assert_eq!(shell.home.focused(), Some(1), "focus stays where it was");
+        assert_eq!(
+            said(|| shell.frame_shown(at(230))),
+            ["foreground: first frame after 30 ms"]
+        );
+    }
+
+    #[test]
+    fn a_hidden_start_draws_nothing_until_a_relaunch() {
+        let mut shell = shell();
+        shell.start_hidden("started hidden");
+        assert_eq!(shell.hidden_why, "started hidden");
+        assert!(!shell.wants_frame());
+        send(&mut shell, Event::Relaunch { home_key: false }, 50);
+        assert!(shell.visible && shell.wants_frame());
     }
 
     #[test]

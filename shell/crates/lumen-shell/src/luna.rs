@@ -250,6 +250,17 @@ pub(crate) struct Client<'a> {
 
 impl<'a> Client<'a> {
     pub(crate) fn register(api: &'a Api) -> Result<Self, String> {
+        Self::register_as(api, None)
+    }
+
+    /// A client under `name`, or anonymous with `None`. Only the shell's
+    /// own lifecycle registration takes a name, its app id, which its role
+    /// allows (b9.md, "Platform"): the app manager finds the caller by it.
+    pub(crate) fn register_as(api: &'a Api, name: Option<&str>) -> Result<Self, String> {
+        let name = name
+            .map(CString::new)
+            .transpose()
+            .map_err(|_| "a bus name with a NUL byte".to_owned())?;
         // SAFETY: no arguments; the new context is owned here.
         let context = unsafe { (api.context_new)() };
         if context.is_null() {
@@ -257,9 +268,11 @@ impl<'a> Client<'a> {
         }
         let mut handle = std::ptr::null_mut();
         let registered = api.checked("registering on the bus", |error| {
-            // SAFETY: a null name asks for an anonymous client; `handle` and
-            // `error` are valid for the library to write.
-            unsafe { (api.register)(std::ptr::null(), &mut handle, error) }
+            let name = name.as_ref().map_or(std::ptr::null(), |n| n.as_ptr());
+            // SAFETY: `name` is null (an anonymous client) or a C string that
+            // outlives the call, which copies it; `handle` and `error` are
+            // valid for the library to write.
+            unsafe { (api.register)(name, &mut handle, error) }
         });
         if let Err(e) = registered {
             // SAFETY: the context is ours, and nothing is attached to it.

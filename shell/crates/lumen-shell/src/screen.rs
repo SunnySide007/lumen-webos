@@ -1,7 +1,8 @@
-//! The TV's screen for the home loop (`home_loop::Screen`): SDL's window and
-//! its GL context, the renderer, the assets and the batch they fill. It
-//! paints, swaps and reads back what the loop asks for, and times each
-//! frame's parts for the slow-frame lines.
+//! The TV's screen for the home loop (`home_loop::Screen`): a window and its
+//! GL context (SDL's, or the platform layer's on Wayland, behind `Window`),
+//! the renderer, the assets and the batch they fill. It paints, swaps and
+//! reads back what the loop asks for, and times each frame's parts for the
+//! slow-frame lines.
 
 use std::path::Path;
 use std::time::Instant;
@@ -18,13 +19,24 @@ use crate::heroes::{Heroes, Layer};
 use crate::home_loop::{Frame, HeroNews, Screen, Uploaded};
 use crate::info;
 use crate::render::{Batch, Renderer, SCREEN_H, SCREEN_W, Texture, fit_viewport};
-use crate::sdl::{self, GlContext, Refresh, Sdl, Window};
+use crate::sdl::{self, GlContext, Refresh, Sdl};
 use crate::timing::FrameSplit;
 
-/// A window and its GL context, released in the right order on drop.
+/// What the screen draws on: a window with a current GL context.
+pub trait Window {
+    /// The GL drawable's size in pixels.
+    fn drawable_size(&self) -> (i32, i32);
+    /// Shows the frame drawn, waiting for the display as the swap interval
+    /// says.
+    fn swap(&mut self);
+    /// The display's refresh rate, for the `motion paced` line.
+    fn refresh(&mut self) -> Refresh;
+}
+
+/// SDL's window and its GL context, released in the right order on drop.
 pub struct Surface<'a> {
     sdl: &'a Sdl,
-    window: Window,
+    window: sdl::Window,
     ctx: GlContext,
 }
 
@@ -39,11 +51,20 @@ impl Drop for Surface<'_> {
     }
 }
 
-impl Surface<'_> {
-    /// The GL drawable's size in pixels.
-    pub fn drawable_size(&self) -> (i32, i32) {
+impl Window for Surface<'_> {
+    fn drawable_size(&self) -> (i32, i32) {
         // SAFETY: the window lives as long as the surface.
         unsafe { self.sdl.drawable_size(self.window) }
+    }
+
+    fn swap(&mut self) {
+        // SAFETY: the window is live and its context is current.
+        unsafe { self.sdl.gl_swap_window(self.window) };
+    }
+
+    fn refresh(&mut self) -> Refresh {
+        // SAFETY: the window lives as long as the surface.
+        unsafe { self.sdl.refresh(self.window) }
     }
 }
 
@@ -106,9 +127,9 @@ pub fn open_surface<'a>(sdl: &'a Sdl, opts: &Options) -> Result<Surface<'a>, Str
 }
 
 /// The TV's screen: the window and GL, and what fills the frames.
-pub struct TvScreen<'a> {
+pub struct TvScreen<W: Window> {
     /// First, so the window and its context go before the rest.
-    surface: Surface<'a>,
+    surface: W,
     renderer: Renderer,
     assets: draw::Assets,
     /// The Top Shelf heroes' files, loading and decoded.
@@ -131,13 +152,8 @@ struct Painted {
     upload_bytes: usize,
 }
 
-impl<'a> TvScreen<'a> {
-    pub fn new(
-        surface: Surface<'a>,
-        renderer: Renderer,
-        assets: draw::Assets,
-        heroes: Heroes,
-    ) -> Self {
+impl<W: Window> TvScreen<W> {
+    pub fn new(surface: W, renderer: Renderer, assets: draw::Assets, heroes: Heroes) -> Self {
         let at = Instant::now();
         Self {
             drawable: surface.drawable_size(),
@@ -158,7 +174,7 @@ impl<'a> TvScreen<'a> {
     }
 }
 
-impl Screen for TvScreen<'_> {
+impl<W: Window> Screen for TvScreen<W> {
     fn paint(&mut self, home: &Home) {
         self.drawable = self.surface.drawable_size();
         let batch_from = Instant::now();
@@ -194,8 +210,7 @@ impl Screen for TvScreen<'_> {
 
     fn swap(&mut self) -> Frame {
         let swap_from = Instant::now();
-        // SAFETY: the window is live and its context is current.
-        unsafe { self.surface.sdl.gl_swap_window(self.surface.window) };
+        self.surface.swap();
         let shown = Instant::now();
         // The main thread's page faults so far: `FrameStats::frame` sets the
         // split's to the change since the last frame.
@@ -238,8 +253,7 @@ impl Screen for TvScreen<'_> {
     }
 
     fn refresh(&mut self) -> Refresh {
-        // SAFETY: the window lives as long as the surface.
-        unsafe { self.surface.sdl.refresh(self.surface.window) }
+        self.surface.refresh()
     }
 
     fn gl_error(&mut self) -> u32 {

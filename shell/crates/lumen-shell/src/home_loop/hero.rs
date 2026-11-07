@@ -13,6 +13,10 @@
 //! * The textures, the atlas and every hero, stay within `TEXTURE_BUDGET`: a
 //!   hero that would take them over it is not uploaded. Only a crossfade
 //!   holds two heroes, and the one it leaves goes at the next idle wait.
+//! * While the shell is hidden it stays resident (decision 15): every
+//!   hero's textures and pixels go, and one decoded meanwhile is dropped as
+//!   it comes; the atlas stays. Back in front, the wanted hero loads again
+//!   at once and fades in over the gradient.
 
 use std::time::Duration;
 
@@ -32,6 +36,8 @@ pub(super) const TEXTURE_BUDGET: usize = 24_000_000;
 pub(super) const ATLAS_BYTES: usize = ATLAS_W as usize * ATLAS_H as usize * 4;
 /// How often a settled screen looks for what the art loader is doing.
 pub(super) const HERO_POLL: Duration = Duration::from_millis(16);
+/// How often a hidden shell looks for a hero still decoding, to drop it.
+pub(super) const HIDDEN_POLL: Duration = Duration::from_millis(100);
 
 /// A hero decoded and not uploaded.
 #[derive(Debug)]
@@ -73,6 +79,8 @@ pub(super) struct HeroPlan {
     peak: usize,
     /// The texture total has been logged.
     total_said: bool,
+    /// The shell is hidden: nothing is kept.
+    hidden: bool,
 }
 
 /// A hero's name, or the placeholder's.
@@ -101,6 +109,7 @@ impl HeroPlan {
             fading: None,
             peak: ATLAS_BYTES,
             total_said: false,
+            hidden: false,
         }
     }
 
@@ -144,7 +153,16 @@ impl HeroPlan {
                     hero, bytes, took, ..
                 } => {
                     self.loading.take_if(|h| *h == hero);
-                    self.decoded.push(Decoded { hero, bytes, took });
+                    if self.hidden {
+                        screen.free_hero(&hero);
+                        lines.push(format!(
+                            "hero {}: decoded in {:.1} ms while hidden; dropped",
+                            hero.name(),
+                            ms(took)
+                        ));
+                    } else {
+                        self.decoded.push(Decoded { hero, bytes, took });
+                    }
                 }
                 HeroNews::Failed { hero, why } => {
                     self.loading.take_if(|h| *h == hero);
@@ -157,6 +175,49 @@ impl HeroPlan {
             }
         }
         lines
+    }
+
+    /// The shell went out of sight: every hero's textures and decoded
+    /// pixels go, and the shelf will show its gradient when it is back. The
+    /// atlas stays. Returns the line to log, if anything was freed.
+    pub(super) fn hidden(&mut self, home: &mut Home, screen: &mut impl Screen) -> Option<String> {
+        if !self.on || std::mem::replace(&mut self.hidden, true) {
+            return None;
+        }
+        let textures: usize = self.uploaded.iter().map(|(_, b)| b).sum();
+        let pixels: usize = self.decoded.iter().map(|d| d.bytes).sum();
+        let (uploaded, decoded) = (self.uploaded.len(), self.decoded.len());
+        for (hero, _) in self.uploaded.drain(..) {
+            screen.free_hero(&hero);
+        }
+        for d in self.decoded.drain(..) {
+            screen.free_hero(&d.hero);
+        }
+        self.fading = None;
+        home.show_hero(None);
+        home.settle_now();
+        while home.take_faded().is_some() {}
+        (uploaded + decoded > 0).then(|| {
+            format!(
+                "hidden: Top Shelf art freed, {uploaded} in textures ({} KB) and {decoded} decoded ({} KB); the atlas stays ({} KB)",
+                textures / 1024,
+                pixels / 1024,
+                ATLAS_BYTES / 1024
+            )
+        })
+    }
+
+    /// While hidden, when to look for a hero still decoding, so its pixels
+    /// go soon after they come rather than at the next event.
+    pub(super) fn hidden_deadline(&self, now: Duration) -> Option<Duration> {
+        (self.hidden && self.loading.is_some()).then(|| now + HIDDEN_POLL)
+    }
+
+    /// The shell is in front again at `now`: the wanted hero loads at once.
+    pub(super) fn shown(&mut self, now: Duration) {
+        if std::mem::take(&mut self.hidden) {
+            self.due = self.due.min(now);
+        }
     }
 
     /// A burst is over. If input came in it, the wanted hero waits for focus

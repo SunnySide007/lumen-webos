@@ -41,6 +41,9 @@
 #   start: sdl N, gl N, renderer N, assets N, apps N ms; no first frame: <why>
 #   foreground: first frame after 140 ms
 #   foreground: not shown after 5700 ms: <why>
+#   relaunch: first frame after 30 ms          a Home press with the shell in
+#   relaunch: not shown after 30 ms: <why>     front, to the frame showing focus
+#                                              on the first tile (Wayland path)
 #   launch <id>: answered in 45 ms
 #   launch <id>: failed after 12 ms: <error text>
 #   launch <id>: dropped: the window was hidden
@@ -52,10 +55,13 @@
 # p50, p95 and max of "shown after" and how many were within 33 ms (target 2 of
 # docs/specs/look-and-feel.md) and the presses not shown by reason; each start
 # line split into the time each phase took (the line has running totals from
-# main()); the foreground wake-ups; each launch with how many answered within
-# 100 ms (target 6; a failed launch never counts); and the focus losses with no
-# key pressed (no key yet, or the last key over 5 s before). Their percentiles
-# are over single events, nearest rank. Other window and app lines are not read.
+# main()); the foreground wake-ups; the Home presses with the shell in front;
+# each launch with how many answered within 100 ms (target 6; a failed launch
+# never counts); and the focus losses with no key pressed (no key yet, or the
+# last key over 5 s before). Their percentiles are over single events, nearest
+# rank. Other window and app lines are not read. On the platform layer's
+# Wayland path the start line begins "start: wayland N" (the compositor
+# connected and the window made) where SDL's begins "start: sdl N".
 #
 # Slow-frame lines, only from the shell (each is one line in the log):
 #   slow frame 2: 28.41 ms = loop 0.31 + batch 0.40 + upload 2.20 + submit 0.50
@@ -106,6 +112,8 @@
 #   pointer hidden
 #   pointer: SDL_webOSCursorVisibility found in LG's SDL; arrows hide the pointer
 #   pointer: SDL_webOSCursorVisibility not in LG's SDL; the pointer stays as LG leaves it
+#   pointer: wl_webos_input_manager.set_cursor_visibility found; arrows hide the pointer
+#   pointer: wl_webos_input_manager.set_cursor_visibility not found; the pointer stays as LG leaves it
 #   mouse button 1 down at 960,540: taken as OK
 #   mouse button 3 down at 1210,302: ignored
 #   mouse button 1 up at 960,540
@@ -343,6 +351,15 @@ function report_foreground(   fs) {
         printf "  %-16s p50 %d  max %d ms\n", "first frame", pct(fs, nfs, 50), fs[nfs]
     }
     if (nfn > 0) by_reason(fnot)
+}
+function report_relaunch(   rs) {
+    if (nrs + nrn == 0) return
+    printf "Home in front (relaunch: lines): %d shown, %d not shown\n", nrs, nrn
+    if (nrs > 0) {
+        isort(rshown, nrs, rs)
+        printf "  %-16s p50 %d  max %d ms\n", "first frame", pct(rs, nrs, 50), rs[nrs]
+    }
+    if (nrn > 0) by_reason(rnot)
 }
 function report_launches(   i) {
     if (nl + nld == 0) return
@@ -709,11 +726,12 @@ $2 == "keys:" && whole($3) && $4 == "more" && $5 == "presses" && $6 == "not" && 
 
 # start: sdl 352, gl 380, renderer 1023, assets 1403, apps 1453, first frame 1504 ms
 # start: sdl 340, gl 366, renderer 700, assets 1000, apps 1040 ms; no first frame: <why>
+# start: wayland 120, gl 150, renderer 500, assets 800, apps 850, first frame 900 ms
 # The numbers are running totals from main(); the summary shows the time between.
-$2 == "start:" && $3 == "sdl" && $5 == "gl" && $7 == "renderer" && $9 == "assets" && $11 == "apps" &&
+$2 == "start:" && ($3 == "sdl" || $3 == "wayland") && $5 == "gl" && $7 == "renderer" && $9 == "assets" && $11 == "apps" &&
     stage($4) && stage($6) && stage($8) && stage($10) && stage($12) {
     p_sdl = $4 + 0; p_gl = $6 + 0; p_ren = $8 + 0; p_ast = $10 + 0; p_app = $12 + 0
-    s = sprintf("sdl %d ms, gl %d ms, renderer %d ms, assets %d ms, apps %d ms", p_sdl, p_gl - p_sdl, p_ren - p_gl, p_ast - p_ren, p_app - p_ast)
+    s = sprintf("%s %d ms, gl %d ms, renderer %d ms, assets %d ms, apps %d ms", $3, p_sdl, p_gl - p_sdl, p_ren - p_gl, p_ast - p_ren, p_app - p_ast)
     if ($12 ~ /,$/ && $13 == "first" && $14 == "frame" && whole($15) && $16 == "ms") {
         p_ff = $15 + 0
         s = s sprintf(", first frame %d ms (%d ms in all)", p_ff - p_app, p_ff)
@@ -740,6 +758,24 @@ $2 == "foreground:" && $3 == "not" && $4 == "shown" && $5 == "after" && whole($6
     if (why == "") why = "no reason given"
     nfn++
     fnot[why]++
+    next
+}
+
+# relaunch: first frame after 30 ms
+# A Home press with the shell in front, to the frame with focus on the first
+# tile. "relaunch: last key ..." and "relaunch (Home): ..." are not timings.
+$2 == "relaunch:" && $3 == "first" && $4 == "frame" && $5 == "after" && whole($6) && $7 == "ms" {
+    nrs++
+    rshown[nrs] = $6 + 0
+    next
+}
+
+# relaunch: not shown after 30 ms: the window was hidden
+$2 == "relaunch:" && $3 == "not" && $4 == "shown" && $5 == "after" && whole($6) && $7 == "ms:" {
+    why = rest(8)
+    if (why == "") why = "no reason given"
+    nrn++
+    rnot[why]++
     next
 }
 
@@ -808,6 +844,16 @@ $2 == "pointer:" && $3 == "SDL_webOSCursorVisibility" && ($4 == "found" || $4 ==
     $5 == "in" && $6 == "LG\047s" && $7 == "SDL;" {
     nin++
     pverdict = ($4 == "found") ? "arrows hide the pointer" : "pointer stays as LG leaves it"
+    next
+}
+
+# pointer: wl_webos_input_manager.set_cursor_visibility found; arrows hide the pointer
+# pointer: wl_webos_input_manager.set_cursor_visibility not found; the pointer stays as LG leaves it
+# The verdict of the Wayland path, as the line above gives the SDL path one.
+$2 == "pointer:" && $3 == "wl_webos_input_manager.set_cursor_visibility" &&
+    ($4 == "found;" || ($4 == "not" && $5 == "found;")) {
+    nin++
+    pverdict = ($4 == "found;") ? "arrows hide the pointer" : "pointer stays as LG leaves it"
     next
 }
 
@@ -947,6 +993,7 @@ END {
     report_keys()
     report_starts()
     report_foreground()
+    report_relaunch()
     report_launches()
     report_focus()
     report_input()

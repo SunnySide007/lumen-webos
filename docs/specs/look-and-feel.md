@@ -83,6 +83,28 @@ motion paced: <P> ms a frame, from <source>; SDL_webOSGetRefreshRate <rate>, dis
 warm: <G> glyphs, <U> uploads, <KB> KB in <ms> ms
 ```
 
+The platform layer's Wayland path (lane L, decision 15; chosen per run, SDL
+stays the default) writes the same lines, with three changes and two more:
+
+```text
+start: wayland <N>, gl <N>, renderer <N>, assets <N>, apps <N>, first frame <N> ms
+start: wayland <N>, … ms; no first frame: started hidden
+relaunch: first frame after <N> ms
+relaunch: not shown after <N> ms: <why>
+hidden: Top Shelf art freed, <U> in textures (<KB> KB) and <D> decoded (<KB> KB); the atlas stays (<KB> KB)
+```
+
+* `start: wayland`: the first phase is the compositor connected and the
+  window made, where SDL's is SDL loaded and initialised. `started hidden`
+  is a preload or `"hidden": true`; the relaunch that shows it gives a
+  `foreground` line.
+* `relaunch` (Home with Lumen in front): from the app manager's relaunch to
+  the first frame with focus back on the first tile. `relaunch (Home): last
+  key …` before it is the event, like the `window` lines.
+* `hidden` (both paths): staying resident, the Top Shelf art goes while the
+  shell is out of sight and the icon atlas stays; back in front the hero
+  loads again and fades in. Said only when something was freed.
+
 The owner approved four more on 2026-10-23: the `dropped` launch (written by
 `5726aa3`), and the skip count, `motion paced` and `warm` for stage 3 of the
 frame-time plan (being written).
@@ -192,6 +214,8 @@ mouse button <b> down at <x>,<y>: ignored
 mouse button <b> up at <x>,<y>
 pointer: SDL_webOSCursorVisibility found in LG's SDL; arrows hide the pointer
 pointer: SDL_webOSCursorVisibility not in LG's SDL; the pointer stays as LG leaves it
+pointer: wl_webos_input_manager.set_cursor_visibility found; arrows hide the pointer
+pointer: wl_webos_input_manager.set_cursor_visibility not found; the pointer stays as LG leaves it
 power <state>: last input <S.s> s ago
 front app <id>: last input <S.s> s ago
 screensaver request: allowed; last input <S.s> s ago

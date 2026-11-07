@@ -346,6 +346,25 @@ impl Home {
         spring.set_velocity(sign * room * kick_for_peak(peak, style::TILT.omega));
     }
 
+    /// Moves focus to the first tile, as a Home press with the shell in
+    /// front does: up if focus is below row 0, else left, with the lift,
+    /// lean and light of any move, and the shelf following. False, and
+    /// nothing changed, if focus is there already or there are no tiles.
+    pub fn focus_first(&mut self, now: Duration) -> bool {
+        self.advance_to(now);
+        let Some(from) = self.focus.index().filter(|&i| i != 0) else {
+            return false;
+        };
+        let dir = if self.focus.row() > 0 {
+            Dir::Up
+        } else {
+            Dir::Left
+        };
+        self.focus.set(0);
+        self.focus_changed(from, dir);
+        true
+    }
+
     fn select(&mut self) -> Option<Effect> {
         let i = self.focus.index()?;
         self.lifts[i].set_velocity(-kick_for_peak(PRESS_DIP, LIFT.omega));
@@ -633,6 +652,38 @@ mod tests {
         assert_eq!(view.shelf_title, Some("Netflix"));
         assert_eq!(view.shelf, layout::TOP_SHELF);
         assert_eq!(view.tiles.len(), 10, "rows 0 and 1 are on screen");
+    }
+
+    #[test]
+    fn focus_first_brings_focus_home_from_anywhere_and_the_shelf_follows() {
+        let mut sim = Sim::mock();
+        assert!(!sim.home.focus_first(sim.now), "already on the first tile");
+        assert!(sim.home.is_settled(), "and nothing changed");
+        sim.press(RIGHT);
+        sim.press(RIGHT);
+        sim.press(DOWN);
+        sim.settle();
+        assert_eq!(sim.home.view().shelf_title, Some("YouTube"));
+        assert!(sim.home.focus_first(sim.now));
+        assert_eq!(sim.home.focused(), Some(0));
+        assert!(!sim.home.is_settled(), "the move is drawn");
+        sim.settle();
+        assert_eq!(sim.focused_view().app.title, "Netflix");
+        assert_eq!(sim.focused_view().lift, 1.0);
+        assert_eq!(sim.home.view().shelf_title, Some("Netflix"));
+        assert_eq!(sim.home.view().shelf, layout::TOP_SHELF, "scrolled back up");
+        // Along row 0 too.
+        sim.press(RIGHT);
+        sim.settle();
+        assert!(sim.home.focus_first(sim.now));
+        sim.settle();
+        assert_eq!(sim.home.focused(), Some(0));
+    }
+
+    #[test]
+    fn focus_first_with_no_tiles_does_nothing() {
+        let mut home = Home::new(Vec::new(), BackAtTop::Exit);
+        assert!(!home.focus_first(Duration::ZERO));
     }
 
     #[test]

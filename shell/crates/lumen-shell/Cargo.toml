@@ -14,5 +14,10 @@ lumen-core.workspace = true
 png.workspace = true
 serde_json.workspace = true
 
+# The platform layer's Wayland path (decision 15): the compositor's socket,
+# a wake pipe and the clocks.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
 [lints]
 workspace = true
