@@ -1,0 +1,22 @@
+[package]
+name = "lumend-proto"
+description = "The shell and lumend's own protocol: a small fixed set of text lines over a Unix socket inside the shell's jail"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+# The codec builds everywhere, the simulator on Windows included; only the
+# socket helpers in src/unix.rs are Linux's.
+[target.'cfg(target_os = "linux")'.dependencies]
+# Only in src/unix.rs: getsockopt(SO_PEERCRED).
+libc.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+disallowed_types = "deny"
+disallowed_methods = "deny"

@@ -368,6 +368,15 @@ usr/palm/applications/com.webos.app.home/assets/icon.png" ]
     [ "$output" = "lumen-icons: busy" ]
     [ ! -e "$OUT" ]
     [ "$(readlink "$APP/lg-icons.lock")" = "$holder" ]
+    # So does lumend, which makes the same copy (icons.rs).
+    (exec -a /var/lib/lumen/lumend/lumend sleep 30) &
+    holder=$!
+    rm -f "$APP/lg-icons.lock"
+    ln -s "$holder" "$APP/lg-icons.lock"
+    run sh "$SCRIPT"
+    kill "$holder"
+    [ "$output" = "lumen-icons: busy" ]
+    [ ! -e "$OUT" ]
     # A folder where the lock goes is not a lock.
     rm -f "$APP/lg-icons.lock"
     mkdir "$APP/lg-icons.lock"

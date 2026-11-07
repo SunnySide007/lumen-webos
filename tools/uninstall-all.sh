@@ -7,8 +7,10 @@
 #   tools/uninstall-all.sh --glasshouse --yes      also undo Glasshouse
 #   tools/uninstall-all.sh --plx-native --yes      also remove plx-native
 #
-# Lumen's parts: route D's key filter (takeover/filter-undo.sh) and its
-# default-home setting (takeover/undo.sh), both undone first, while Lumen's
+# Lumen's parts: lumend first (profiles/lumend/remove.sh: its door, the
+# daemon, its stand-ins and socket, its luna role and files), so nothing acts
+# on the TV while the rest is undone; route D's key filter
+# (takeover/filter-undo.sh) and its default-home setting (takeover/undo.sh), both undone first, while Lumen's
 # app and saved values are still there; the shell app, kept if the default
 # home could not be set back, so the TV never has a Home that isn't
 # installed; Lumen's boot hooks (/var/lib/webosbrew/init.d/lumen-*), Lumen
@@ -74,6 +76,9 @@ step() {
     printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$steps"
 }
 
+# lumend first: stopped, so it neither closes LG's Home nor starts the shell
+# again while the rest is undone, and its stand-ins unmounted.
+step script - "$ROOT/profiles/lumend/remove.sh"
 # Route D first: the key filter's saved list lives in /var/lib/lumen, and the
 # default home must be LG's again before Lumen's app goes.
 step script - "$ROOT/takeover/filter-undo.sh"

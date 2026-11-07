@@ -110,7 +110,8 @@ fi
 self_sum=$(sha256sum <"$SELF") || fail "cannot read $SELF"
 
 # The lock is a link to the PID that holds it, which ln makes atomically. It
-# is stale unless that PID is a run of this script: a power cut leaves a PID
+# is stale unless that PID is a run of this script, or of lumend, which makes
+# the same copy (shell/crates/lumend/src/icons.rs): a power cut leaves a PID
 # that another process may hold after the reboot. ln -n, and no folder in its
 # place, or ln would make the link inside it and seem to succeed.
 if [ -d "$LOCK" ] && [ ! -L "$LOCK" ]; then
@@ -121,7 +122,7 @@ if ! ln -sn "$$" "$LOCK" 2>/dev/null; then
     case $pid in
         '' | *[!0-9]*) ;;
         # cmdline is NUL-separated, and busybox grep stops at a NUL.
-        *) if { tr '\0' ' ' <"/proc/$pid/cmdline"; } 2>/dev/null | grep -qF lumen-icons.sh; then
+        *) if { tr '\0' ' ' <"/proc/$pid/cmdline"; } 2>/dev/null | grep -qE 'lumen-icons\.sh|lumend/lumend'; then
             echo "lumen-icons: busy"
             exit 0
         fi ;;

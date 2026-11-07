@@ -1,0 +1,38 @@
+[package]
+name = "lumend"
+description = "lumend: Lumen's one root daemon on the TV (decision 14), and the stand-in it mounts over LG's on-demand senders"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "lumend"
+path = "src/main.rs"
+
+[[bin]]
+name = "lumen-standin"
+path = "src/bin/lumen-standin.rs"
+
+[dependencies]
+# Only in src/sys/: signals, mount, kill, inotify, the uid calls the link
+# trial needs, and getauxval for the TV's glibc.
+libc.workspace = true
+# Only in src/sys/luna.rs: libluna-service2, loaded at run time as the shell
+# and lumen-ctl do.
+libloading.workspace = true
+lumend-proto = { path = "../lumend-proto" }
+serde_json.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+# Decision 14: no network socket in lumend (clippy.toml names the types).
+disallowed_types = "deny"
+disallowed_methods = "deny"
