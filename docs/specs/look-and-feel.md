@@ -328,6 +328,23 @@ look: "<word>" is not a feature; left out
 * `tools/frame-stats.sh` repeats the first in its "top shelf" section, so
   a report says which look it measured.
 
+#### The Control Center's lines
+
+```text
+reduce motion: <none|<effect>, <effect> off>
+reduce motion: <effect> off; <saved|not saved: <error>|not kept>
+privacy: Lumen Guard <value>; Today <value>; LG's reporting <value>; Port 11111 <value>
+```
+
+* The first, once at start-up after the look lines: what the
+  `reduce-motion` file turns off (look-and-feel.md, "The Control Center").
+  The look line is the launch parameters' look; the effects listed here
+  are off on top of it.
+* The second, each time a switch in the Control Center is turned: what is
+  off now, and whether the file took it.
+* The third, each time the Privacy panel's read comes back: what the panel
+  says, line by line (or `Lumen Guard Can't read: <why>`).
+
 ### What blocks measuring now
 
 * **Keys are explained** (6e28bb9, 2026-10-22; shell-mvp.md, "Measured on
@@ -573,9 +590,89 @@ full-screen quad). The look line says them all (below).
 **Cost.** The simulator's frames hold 80 to 95 quads; a test holds every
 frame of the mock home under 600. The art is one to three full-screen quads
 (three for the ambient hero's layers), which is the frame's fill; the
-bench measures the rest on the B9. Still to come in Stage 3: the Control
-Center with the read-only Privacy panel, and Reduce Motion per effect
-(owner's decision 7).
+bench measures the rest on the B9. The Control Center, below, completes
+Stage 3.
+
+### The Control Center
+
+Built 2026-11-08 (Stage 3 of the plan the owner approved that day, slide 8),
+on the home's branch; the bench has not measured it yet.
+
+**The gear.** A round button at the top right, left of the clock
+(`layout::GEAR`), drawn like a chip with a cog of ten circles (eight teeth,
+a disc and its hole), so nothing in it has to turn. Up from the row reaches
+it, and Up from the chips when there is no row; Down, or Back, goes to the
+row's tile nearest below it. On the gear the title reads "Control Center"
+over "Privacy and motion", and the art stays the last app's. OK opens the
+Control Center.
+
+**The panel.** It comes in from the right over the home, 640 px wide and as
+tall as the safe area (`layout::PANEL`): near-black at 94%, the flat
+fallback for glass. With the look's `slide` it slides in 96 px as it fades
+(`PAGE`'s spring); with `dim` the home behind it dims (one full-screen
+quad). Back closes it and leaves focus on the gear; the Home key closes it
+and goes to the first tile, as it does from anywhere.
+
+**Privacy, which only reads** (decision 12; privacy.md, G5's first part).
+Four lines, each a label and a value, the value amber when it wants a look:
+
+| Line | Values |
+|------|--------|
+| Lumen Guard | Blocking, Logging only, Not running (its status file is over 60 s old), Not installed |
+| Today | "512 of 6,789 lookups blocked", or "… would be blocked" while Guard only logs |
+| LG's reporting | All stopped, "1 of 4 jobs running", Unknown |
+| Port 11111 | Closed, Open, Unknown |
+
+Under them: "Read only: change these from your phone or PC". Nothing on the
+TV loosens anything. The lines are judged as `lumen-ctl`'s `privacy.state`
+judges them: a `REJECT` or `DROP` of tcp `dpt:11111` in `INPUT`, and a job
+running only if `initctl status` says ` start/`.
+
+**Where the panel's data comes from.** Each time the panel opens, the shell
+asks Homebrew Channel's `exec`, on a thread of its own, to run
+`lumen-privacy-read.sh`, which the IPK ships beside `lumen-icons.sh` and
+which the shell names by its fixed path, with no arguments. As root, it
+prints Guard's status file (`/var/lib/lumen/guard/status`), a `--- rules`
+line, `iptables -L INPUT -n`, a `--- jobs` line, and `initctl status` for
+crashreportd, rdxd, uploadd and remotelogger. It writes nothing, starts and
+stops nothing, and leaves any part it cannot read empty; `lumen-core`'s
+`privacy.rs` parses the output. The panel says "Reading…" meanwhile, and
+"Can't read: no answer" if `exec` fails or takes over 10 s. This is the
+simplest source that needs no new root daemon part: the jailed shell can't
+read `/var/lib/lumen` itself, `lumend` isn't installed on the B9, and its
+`status` request carries no Guard counts (adding them would be a
+lumend-side change). `lumen-ctl privacy.state` reads the same things for
+the phone and the PC.
+
+**Motion** (Reduce Motion, decision 7). A switch for each moving effect, in
+this order: Tilt, Light sweep, Parallax, Slides, Crossfades, green while
+the effect runs. Up and Down move along them; OK turns the focused one off
+or on again. Each drives the look's own switch (`tilt`, `light`,
+`parallax`, `slide`, `fade`), so the home and the bench see one set of
+switches. Reduce Motion can only take an effect away: one the launch
+parameters' `"look"` turns off stays off, and its row is drawn faint and
+ignores OK. An effect turned off stops where it is: tiles stand upright,
+the art stops drifting, a light sweep under way ends.
+
+**Where Reduce Motion is kept.** In `reduce-motion`, a file beside the
+executable in Lumen's folder, as `platform` is: the words of the effects
+turned off, on one line (`tilt slide`). It is read at start-up and written
+on each change; a missing, empty or unreadable file turns nothing off, and
+a word that names no effect is passed over. Reinstalling the IPK removes
+it, so a bench run, which installs, always starts with nothing turned off.
+Under a fixed clock (`--fixed-dt`) it is neither read nor written, so
+screenshots never depend on an earlier run. Whether the jailed shell may
+write Lumen's folder on the B9 has not been tried: the `reduce motion: …;
+saved` or `…; not saved: <error>` line says so the first time a switch is
+turned. If it may not, the change lasts until the shell closes, and a
+lasting store (lumend's, or the phone's through Remote) would be a
+lumend-side change.
+
+**Cost.** Open, the frame holds about 305 quads in the simulator (the home
+under it, the panel's text a quad a glyph); a test holds it under 600. The
+fill adds the dim and the panel, about 1.3 screens more over the art. The
+panel's glyphs are made with the rest at warm-up (`warm.rs`), so opening it
+uploads nothing in its burst. The bench measures it on the B9.
 
 ### Glass: two options (owner picks)
 

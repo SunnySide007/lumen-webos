@@ -12,8 +12,10 @@ use std::time::Duration;
 
 use lumen_core::apps::App;
 use lumen_core::art::Look;
-use lumen_core::home::{ChipView, TileView, View};
+use lumen_core::control::{ControlView, Motion, MotionRow};
+use lumen_core::home::{CONTROL_SUBTITLE, CONTROL_TITLE, ChipView, TileView, View};
 use lumen_core::layout;
+use lumen_core::privacy::Line;
 use lumen_core::shelf::ShelfView;
 
 use crate::atlas::Upload;
@@ -34,10 +36,24 @@ const SUBTITLES: [&str; 8] = [
     "1 more app, 2 more apps",
 ];
 
+/// What the Privacy panel's values can say (`privacy::lines`), the digits
+/// and the thousands' comma included.
+const PRIVACY_VALUES: [&str; 8] = [
+    "Reading…",
+    "Blocking, Logging only, Not running, Not installed",
+    "Can't read: no answer, no output, the read stopped",
+    "0123456789 of 0123456789 lookups blocked, would be blocked",
+    "No lookups counted",
+    "All stopped, 1 of 4 jobs running",
+    "Closed, Open, Unknown",
+    "Lumen Guard, Today, LG's reporting, Port 11111",
+];
+
 /// Makes every glyph the apps' names will need, as the screen draws them:
 /// above the row, across a tile, on a chip, under a tile on the "Other
 /// apps" page, by the clock, and in the status lines `Home::launched`
-/// writes; and the clock's digits, the subtitles and the page's heading.
+/// writes; and the clock's digits, the subtitles and the page's heading;
+/// and the Control Center's.
 /// Each app is painted once per status line, focused and without its icon,
 /// into a batch that is thrown away. The glyphs' pixels wait in
 /// `assets.atlas` for the caller to upload. If the atlas fills and is
@@ -104,9 +120,58 @@ fn paint_all(apps: &[App], assets: &mut Assets) {
                 status: (n < statuses.len()).then_some(status.as_str()),
                 empty: false,
                 look: Look::PLAIN,
+                gear: None,
+                control: None,
             };
             paint(&mut scratch, &view, assets);
         }
+    }
+    paint(&mut scratch, &control_view(), assets);
+}
+
+/// The home with focus on the gear and the Control Center open, its lines
+/// saying everything they can.
+fn control_view() -> View<'static> {
+    let privacy = PRIVACY_VALUES
+        .iter()
+        .map(|value| Line {
+            label: "Lumen Guard",
+            value: (*value).to_owned(),
+            warn: false,
+        })
+        .collect();
+    let motion = Motion::ALL
+        .iter()
+        .map(|m| MotionRow {
+            label: m.label(),
+            on: true,
+            editable: true,
+            focused: false,
+            lift: 0.0,
+        })
+        .collect();
+    View {
+        art: ShelfView::PLACEHOLDER,
+        drift: [0.0; 2],
+        page: 0.0,
+        page_slide: lumen_core::style::PAGE_SLIDE,
+        title: Some(CONTROL_TITLE),
+        subtitle: Some(CONTROL_SUBTITLE.to_owned()),
+        heading_y: layout::HEADING_BASELINE,
+        clock: None,
+        playing: None,
+        tiles: Vec::new(),
+        chips: Vec::new(),
+        status: None,
+        empty: false,
+        look: Look::PLAIN,
+        gear: None,
+        control: Some(ControlView {
+            shown: 1.0,
+            offset: 0.0,
+            privacy,
+            motion,
+        }),
     }
 }
 

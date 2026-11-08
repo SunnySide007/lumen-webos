@@ -221,6 +221,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         clock.at(start.listing),
     );
     shell.can_hide_pointer = events.can_hide_pointer();
+    shell.set_motion(opts.reduced, opts.motion_file.clone());
     if let Some(id) = &opts.playing {
         shell.home.set_playing(Some(id.clone()));
     }
@@ -333,6 +334,8 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
                     .filter(|_| !shell.visible),
                 // The minute turning, for the clock.
                 time_due.filter(|_| shell.visible),
+                // The Privacy read's answer, on its way.
+                shell.privacy_poll_at(clock.now()),
             ]
             .into_iter()
             .flatten()
@@ -388,6 +391,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         if let Some(line) = shell.heartbeat(now) {
             info!("{line}");
         }
+        shell.poll_privacy();
         if !shell.visible
             && let Some(start) = start_line.take()
         {
@@ -1137,6 +1141,28 @@ mod tests {
         let again = first("9:43").expect("9:43");
         assert!(again >= ms(90_000) && again < ms(90_100), "{again:?}");
         assert_eq!(ran.frames.len(), 3, "{:?}", ran.frames);
+    }
+
+    #[test]
+    fn the_gear_opens_the_control_center_and_its_privacy_read_comes_back() {
+        let ran = Setup::new()
+            .events(|e| {
+                e.tap(1_000, scancode::UP)
+                    .tap(1_200, scancode::RETURN)
+                    .at(3_000, Event::Quit)
+            })
+            .run();
+        let said = ran.lines_starting("privacy: ");
+        assert_eq!(said.len(), 1, "{:?}", ran.lines);
+        assert!(
+            said[0].starts_with("privacy: Lumen Guard Blocking; "),
+            "{}",
+            said[0]
+        );
+        // The panel came in and the loop went back to waiting: no frame in
+        // the last second.
+        let last = ran.frames.last().expect("frames").shown;
+        assert!(last < ms(2_000), "{last:?}");
     }
 
     #[test]

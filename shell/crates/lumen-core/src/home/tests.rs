@@ -1,5 +1,6 @@
 use super::*;
 use crate::apps::{AppKind, Launcher, MockLauncher};
+use crate::control::Motion;
 
 const FRAME: Duration = Duration::from_micros(16_667);
 
@@ -171,7 +172,7 @@ fn down_and_up_go_to_the_nearest_item_across() {
 fn edges_bump_and_spring_back_and_chips_never_lean() {
     let mut sim = Sim::full();
     let rest = sim.tile("Netflix").rect;
-    for (action, dx, dy) in [(LEFT, -1.0, 0.0), (UP, 0.0, -1.0)] {
+    for (action, dx, dy) in [(LEFT, -1.0, 0.0)] {
         assert_eq!(sim.press(action), None);
         for _ in 0..3 {
             sim.frame();
@@ -442,8 +443,156 @@ fn inputs_alone_start_on_the_first_chip() {
     assert_eq!(sim.focused_title(), "HDMI 1");
     assert!(sim.home.view().tiles.is_empty());
     sim.presses(&[RIGHT, UP]);
-    assert_eq!(sim.focused_title(), "HDMI 2");
+    assert_eq!(sim.home.view().title, Some(CONTROL_TITLE), "up to the gear");
+    sim.presses(&[DOWN]);
+    assert_eq!(sim.focused_title(), "HDMI 2", "the chip nearest the gear");
     assert_eq!(sim.press(BACK), Some(Effect::Exit));
+}
+
+#[test]
+fn up_from_the_row_reaches_the_gear_and_down_or_back_leaves_it() {
+    let mut sim = Sim::full();
+    sim.presses(&[RIGHT]);
+    let art = sim.home.wanted_hero().cloned();
+    sim.presses(&[UP]);
+    assert_eq!(sim.home.focused(), None);
+    let view = sim.home.view();
+    assert_eq!(view.title, Some(CONTROL_TITLE));
+    assert_eq!(view.subtitle.as_deref(), Some(CONTROL_SUBTITLE));
+    assert!(view.gear.expect("gear").focused);
+    assert_eq!(
+        sim.home.wanted_hero().cloned(),
+        art,
+        "the art stays while on the gear"
+    );
+    sim.settle();
+    let gear = sim.home.view().gear.expect("gear");
+    assert_eq!(gear.lift, 1.0);
+    assert!(gear.rect.w > layout::GEAR.w, "the focused gear grows");
+    assert!(sim.home.view().tiles.iter().all(|t| t.lift == 0.0));
+    sim.presses(&[UP, LEFT, RIGHT]);
+    assert_eq!(sim.home.focused(), None, "nothing past the gear");
+
+    let below = layout::nearest(
+        sim.home.lines.row.len(),
+        layout::GEAR.centre_x(),
+        layout::row_tile,
+    )
+    .expect("a row");
+    sim.presses(&[DOWN]);
+    assert_eq!(sim.home.focused(), Some(sim.home.lines.row[below]));
+    sim.presses(&[UP, BACK]);
+    assert_eq!(
+        sim.home.focused(),
+        Some(sim.home.lines.row[below]),
+        "Back too"
+    );
+    sim.settle();
+    assert_eq!(sim.home.view().gear.expect("gear").lift, 0.0);
+}
+
+#[test]
+fn ok_on_the_gear_opens_the_control_center_and_back_closes_it() {
+    let mut sim = Sim::full();
+    sim.presses(&[UP]);
+    assert_eq!(sim.press(OK), Some(Effect::ReadPrivacy));
+    assert!(sim.home.control_open());
+    let view = sim.home.view().control.expect("opening");
+    assert_eq!(view.privacy[0].value, "Reading…");
+    sim.settle();
+    let view = sim.home.view().control.expect("open");
+    assert_eq!((view.shown, view.offset), (1.0, 0.0));
+    assert!(view.motion[0].focused);
+
+    // Left and right do nothing; Down moves along Reduce Motion's rows.
+    sim.presses(&[LEFT, RIGHT, DOWN]);
+    assert!(sim.home.view().control.expect("open").motion[1].focused);
+
+    sim.home.set_privacy(Reading::Failed("no exec".into()));
+    assert_eq!(
+        sim.home.view().control.expect("open").privacy[0].value,
+        "Can't read: no exec"
+    );
+
+    assert_eq!(sim.press(BACK), None);
+    assert!(!sim.home.control_open());
+    sim.settle();
+    assert!(sim.home.view().control.is_none());
+    assert_eq!(
+        sim.home.view().title,
+        Some(CONTROL_TITLE),
+        "back on the gear"
+    );
+}
+
+#[test]
+fn reduce_motion_turns_an_effect_off_and_on_and_says_to_save_it() {
+    let mut sim = Sim::full();
+    sim.presses(&[UP]);
+    sim.press(OK);
+    sim.settle();
+    // Tilt, the first row.
+    let Some(Effect::SaveMotion(reduced)) = sim.press(OK) else {
+        panic!("OK saves");
+    };
+    assert!(reduced.is_off(Motion::Tilt));
+    assert!(!sim.home.look.tilt && sim.home.look.light);
+    assert!(!sim.home.view().control.expect("open").motion[0].on);
+    assert_eq!(sim.home.reduced(), reduced);
+    // Down to Light sweep and off; back up to Tilt and on again.
+    sim.presses(&[DOWN]);
+    sim.press(OK);
+    assert!(!sim.home.look.light);
+    sim.presses(&[UP]);
+    let Some(Effect::SaveMotion(reduced)) = sim.press(OK) else {
+        panic!("OK saves");
+    };
+    assert!(!reduced.is_off(Motion::Tilt) && reduced.is_off(Motion::Light));
+    assert!(sim.home.look.tilt && !sim.home.look.light);
+    assert!(sim.home.look.hero && sim.home.look.dim, "others untouched");
+}
+
+#[test]
+fn what_the_launch_look_keeps_off_reduce_motion_cannot_turn_on() {
+    let launch = Look {
+        light: false,
+        ..Look::FULL
+    };
+    let mut sim = Sim::with(Home::new(mock_apps(), BackAtTop::Exit).with_look(launch));
+    sim.presses(&[UP]);
+    sim.press(OK);
+    sim.presses(&[DOWN]);
+    assert_eq!(
+        sim.press(OK),
+        None,
+        "Light sweep is not the TV's to turn on"
+    );
+    assert!(!sim.home.look.light);
+    let row = &sim.home.view().control.expect("open").motion[1];
+    assert!(!row.on && !row.editable);
+}
+
+#[test]
+fn saved_reduce_motion_applies_at_start_and_home_closes_the_panel() {
+    let reduced = Reduced::from_words("parallax slide");
+    let home = Home::new(mock_apps(), BackAtTop::Exit)
+        .with_look(Look::FULL)
+        .with_reduced(reduced);
+    assert!(!home.look.parallax && !home.look.slide && home.look.tilt);
+    assert_eq!(home.view().page_slide, 0.0);
+    let mut sim = Sim::with(home);
+    sim.presses(&[UP]);
+    sim.press(OK);
+    assert_eq!(
+        sim.home.view().control.expect("open").offset,
+        0.0,
+        "no slide"
+    );
+    assert!(sim.home.focus_first(sim.now));
+    assert!(!sim.home.control_open());
+    assert_eq!(sim.focused_title(), "Netflix");
+    sim.settle();
+    assert!(sim.home.view().control.is_none());
 }
 
 #[test]

@@ -14,8 +14,9 @@ use std::collections::HashMap;
 
 use lumen_core::apps::App;
 use lumen_core::art::Hero;
+use lumen_core::control::{ControlView, MotionRow};
 use lumen_core::focus::Dir;
-use lumen_core::home::{ChipView, SweepView, TileView, View, page_fades};
+use lumen_core::home::{ChipView, GearView, SweepView, TileView, View, page_fades};
 use lumen_core::layout::{self, Rect, SAFE, SCREEN_H, SCREEN_W};
 use lumen_core::style::{self, Color};
 
@@ -42,6 +43,18 @@ const CHIP_TEXT_FOCUS: Rgba = Rgba::of(style::CHIP_TEXT_FOCUS);
 const LIVE: Rgba = Rgba::of(style::LIVE);
 const OTHERS_DIM: Rgba = Rgba::of(style::OTHERS_DIM);
 const OWNER_SCRIM: Rgba = Rgba::of(style::OWNER_SCRIM);
+const PANEL: Rgba = Rgba::of(style::PANEL);
+const PANEL_DIM: Rgba = Rgba::of(style::PANEL_DIM);
+const WARN: Rgba = Rgba::of(style::WARN);
+const SWITCH_OFF: Rgba = Rgba::of(style::SWITCH_OFF);
+const SWITCH_KNOB: Rgba = Rgba::of(style::SWITCH_KNOB);
+/// The gear's hole at rest, where the button's own fill is too faint to
+/// read as one.
+const GEAR_HOLE: Rgba = Rgba::of(style::BLACK.with_alpha(0.55));
+/// A switch's track when off, on the focused row's light fill.
+const SWITCH_OFF_ON_LIGHT: Rgba = Rgba::of(style::CHIP_TEXT_FOCUS.with_alpha(0.22));
+/// A row the launch look keeps off: its label and switch this faint.
+const LOCKED_ALPHA: f32 = 0.4;
 const REST_SHADE: f32 = style::TILE_REST_SHADE;
 const TILE_SHEEN: f32 = style::TILE_SHEEN;
 const PALETTE: [Color; 8] = style::TILE_PALETTE;
@@ -156,6 +169,9 @@ fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
         );
     }
     corner(batch, view, assets);
+    if let Some(gear) = &view.gear {
+        draw_gear(batch, gear);
+    }
     headings(batch, view, assets);
     // Every shadow goes under every tile, so a lifted tile's shadow never
     // darkens the edge of its neighbour; names go over everything.
@@ -185,6 +201,135 @@ fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     if let Some(text) = view.status {
         status(batch, text, assets);
     }
+    if let Some(control) = &view.control {
+        draw_control(batch, control, view.look.dim, assets);
+    }
+}
+
+/// The gear that opens the Control Center: a round button like a chip,
+/// with a cog drawn in circles (eight teeth round a disc with a hole), all
+/// level so nothing in it needs turning.
+fn draw_gear(batch: &mut Batch, gear: &GearView) {
+    let r = gear.rect;
+    let lift = gear.lift.clamp(0.0, 1.0);
+    let a = gear.alpha;
+    let fill = CHIP.lerp(CHIP_FOCUS, lift);
+    batch.rounded_rect(
+        r.x,
+        r.y,
+        r.w,
+        r.h,
+        r.w / 2.0,
+        fill.alpha(fill.3 * a),
+        fill.alpha(fill.3 * a),
+    );
+    let zoom = r.w / layout::GEAR_SIZE;
+    let icon = layout::GEAR_ICON * zoom;
+    let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+    let ink = TEXT.lerp(CHIP_TEXT_FOCUS, lift).alpha(a);
+    let disc = |batch: &mut Batch, x: f32, y: f32, d: f32, c: Rgba| {
+        batch.rounded_rect(x - d / 2.0, y - d / 2.0, d, d, d / 2.0, c, c);
+    };
+    let tooth = icon * 0.24;
+    let ring = icon * 0.37;
+    for k in 0..8 {
+        let angle = k as f32 * std::f32::consts::FRAC_PI_4;
+        disc(
+            batch,
+            cx + ring * angle.cos(),
+            cy + ring * angle.sin(),
+            tooth,
+            ink,
+        );
+    }
+    disc(batch, cx, cy, icon * 0.66, ink);
+    let hole = GEAR_HOLE.lerp(CHIP_FOCUS, lift);
+    disc(batch, cx, cy, icon * 0.26, hole.alpha(hole.3 * a));
+}
+
+/// The Control Center: a dim over the home (the look's `dim`), and the
+/// panel at the right with the Privacy lines, which only read, and a
+/// switch for each moving effect.
+fn draw_control(batch: &mut Batch, c: &ControlView, dim: bool, assets: &mut Assets) {
+    let a = c.shown;
+    if dim {
+        let d = PANEL_DIM.alpha(PANEL_DIM.3 * a);
+        batch.gradient_rect(0.0, 0.0, SCREEN_W, SCREEN_H, d, d);
+    }
+    let p = layout::panel(c.offset);
+    let fill = PANEL.alpha(PANEL.3 * a);
+    batch.rounded_rect(p.x, p.y, p.w, p.h, layout::PANEL_RADIUS, fill, fill);
+    let left = p.x + layout::PANEL_PAD;
+    let right = p.right() - layout::PANEL_PAD;
+    let text = &mut assets.text;
+    let atlas = &mut assets.atlas;
+    let (ink, dim_ink, warn) = (TEXT.alpha(a), TEXT_DIM.alpha(a), WARN.alpha(a));
+    let heading = style::PANEL_HEADING_PX;
+    let y = p.y + layout::PANEL_HEADING_BASELINE;
+    text.draw(batch, atlas, left, y, heading, 1.0, "Control Center", ink);
+    let section = style::SECTION_PX;
+    let y = p.y + layout::PRIVACY_SECTION_BASELINE;
+    text.draw(batch, atlas, left, y, section, 1.0, "Privacy", dim_ink);
+    let px = style::ROW_PX;
+    let mut y = p.y + layout::PRIVACY_LINE_BASELINE;
+    for line in &c.privacy {
+        let label_w = text.width(line.label, px);
+        text.draw(batch, atlas, left, y, px, 1.0, line.label, dim_ink);
+        let room = right - left - label_w - layout::PANEL_PAD / 2.0;
+        let value = text.fit(&line.value, px, room);
+        let w = text.width(&value, px);
+        let color = if line.warn { warn } else { ink };
+        text.draw(batch, atlas, right - w, y, px, 1.0, &value, color);
+        y += layout::PRIVACY_LINE_PITCH;
+    }
+    let note = style::NOTE_PX;
+    let y = y - layout::PRIVACY_LINE_PITCH + layout::PRIVACY_NOTE_GAP + note * 1.4;
+    text.draw(batch, atlas, left, y, note, 1.0, PRIVACY_NOTE, dim_ink);
+    let y = p.y + layout::MOTION_SECTION_BASELINE;
+    text.draw(batch, atlas, left, y, section, 1.0, "Motion", dim_ink);
+    for (i, row) in c.motion.iter().enumerate() {
+        motion_row(batch, layout::motion_row(p, i), row, a, assets);
+    }
+}
+
+/// What the Privacy panel says under its lines.
+pub const PRIVACY_NOTE: &str = "Read only: change these from your phone or PC";
+
+/// One of the Control Center's switch rows: its focus fill, its name, and
+/// the switch at its right, green while the effect runs.
+fn motion_row(batch: &mut Batch, r: Rect, row: &MotionRow, a: f32, assets: &mut Assets) {
+    let lift = row.lift;
+    if lift > 0.0 {
+        let fill = CHIP_FOCUS.alpha(CHIP_FOCUS.3 * lift * a);
+        batch.rounded_rect(r.x, r.y, r.w, r.h, layout::MOTION_ROW_RADIUS, fill, fill);
+    }
+    let shown = if row.editable { a } else { a * LOCKED_ALPHA };
+    let inset_x = layout::MOTION_ROW_INSET;
+    let text = &mut assets.text;
+    let px = style::ROW_PX;
+    let baseline = r.y + (r.h + text.cap_height(px)) / 2.0;
+    let ink = TEXT.lerp(CHIP_TEXT_FOCUS, lift).alpha(shown);
+    text.draw(
+        batch,
+        &mut assets.atlas,
+        r.x + inset_x,
+        baseline,
+        px,
+        1.0,
+        row.label,
+        ink,
+    );
+    let (w, h, inset) = (layout::SWITCH_W, layout::SWITCH_H, layout::SWITCH_INSET);
+    let x = r.right() - inset_x - w;
+    let y = r.y + (r.h - h) / 2.0;
+    let off = SWITCH_OFF.lerp(SWITCH_OFF_ON_LIGHT, lift);
+    let track = if row.on { LIVE } else { off };
+    let track = track.alpha(track.3 * shown);
+    batch.rounded_rect(x, y, w, h, h / 2.0, track, track);
+    let d = h - 2.0 * inset;
+    let kx = if row.on { x + w - inset - d } else { x + inset };
+    let knob = SWITCH_KNOB.alpha(shown);
+    batch.rounded_rect(kx, y + inset, d, d, d / 2.0, knob, knob);
 }
 
 /// The art behind everything: a hero, the gradient, or a crossfade between

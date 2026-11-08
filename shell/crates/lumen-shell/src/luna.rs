@@ -25,6 +25,7 @@ use std::ffi::{CStr, CString, c_char, c_int, c_ulong, c_void};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread::{JoinHandle, ScopedJoinHandle};
 use std::time::{Duration, Instant};
 
@@ -49,6 +50,13 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 /// 4 s, and a first copy reads every icon. Nothing waits for it, and the
 /// script runs on if the call gives up. Not yet measured on the TV.
 const EXEC_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long the Privacy panel's read may take: `iptables` and four
+/// `initctl status`. Not yet measured on the TV; the panel says it failed
+/// past this.
+const PRIVACY_TIMEOUT: Duration = Duration::from_secs(10);
+/// The most of the Privacy read's output kept: Guard's file is under 1 KB,
+/// and the `INPUT` chain a few lines.
+const MAX_PRIVACY_BYTES: usize = 64 << 10;
 /// The largest reply kept. `listApps` is 170 KB on the B9.
 const MAX_REPLY: usize = 4 << 20;
 /// The longest app ID kept: an app's folder is named after its ID, so it is
@@ -76,6 +84,11 @@ const ICON_COPY: &str =
 /// The one command the shell gives `exec`. It is fixed, and names the script
 /// the IPK ships: nothing in it comes from another app.
 const COPY_COMMAND: &str = "/bin/sh /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-icons.sh";
+/// The command for the Control Center's Privacy panel, fixed the same way:
+/// the script the IPK ships, which only reads (Guard's status file, the
+/// `INPUT` chain and four jobs' status) and prints them for
+/// `lumen_core::privacy::parse`.
+const PRIVACY_COMMAND: &str = "/bin/sh /media/developer/apps/usr/palm/applications/io.github.sunnyside007.lumen.shell/lumen-privacy-read.sh";
 
 /// One call on the bus: a request and its single reply.
 pub trait Bus: Sync {
@@ -742,6 +755,8 @@ pub struct LunaLauncher<B: Bus = Ls2> {
     icon_copy: PathBuf,
     /// The refresh of the icon copy, once started.
     refresh: Option<JoinHandle<()>>,
+    /// The Privacy read under way: its answer comes on this.
+    privacy: Option<Receiver<Result<String, String>>>,
 }
 
 impl<B: Bus> LunaLauncher<B> {
@@ -751,6 +766,7 @@ impl<B: Bus> LunaLauncher<B> {
             params: HashMap::new(),
             icon_copy: PathBuf::from(ICON_COPY),
             refresh: None,
+            privacy: None,
         }
     }
 
@@ -781,6 +797,22 @@ impl<B: Bus + Send + 'static> LunaLauncher<B> {
             Err(e) => info!("no thread for the icon copy: {e}"),
         }
     }
+}
+
+/// The Privacy read's answer from `exec`'s reply: its standard output, cut
+/// to `MAX_PRIVACY_BYTES` at a character, or why there is none, short
+/// enough for the panel (the log has the whole of it).
+fn privacy_output(reply: Result<Value, String>) -> Result<String, String> {
+    let reply = reply.map_err(|_| "no answer".to_owned())?;
+    let out = reply
+        .get("stdoutString")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "no output".to_owned())?;
+    let mut end = out.len().min(MAX_PRIVACY_BYTES);
+    while !out.is_char_boundary(end) {
+        end -= 1;
+    }
+    Ok(out[..end].to_owned())
 }
 
 impl<B: Bus + Send + 'static> Launcher for LunaLauncher<B> {
@@ -825,6 +857,38 @@ impl<B: Bus + Send + 'static> Launcher for LunaLauncher<B> {
             .map(|e| (e.app.id.clone(), e.params.clone()))
             .collect();
         Ok(entries.into_iter().map(|e| e.app).collect())
+    }
+
+    /// Asks Homebrew Channel to run `lumen-privacy-read.sh`, on a thread of
+    /// its own; one read at a time.
+    fn read_privacy(&mut self) {
+        if self.privacy.is_some() {
+            return;
+        }
+        let (send, answer) = mpsc::channel();
+        let bus = Arc::clone(&self.bus);
+        let spawned = std::thread::Builder::new()
+            .name("privacy-read".to_owned())
+            .spawn(move || {
+                let payload = json!({ "command": PRIVACY_COMMAND });
+                let reply = timed(EXEC, || bus.call_within(EXEC, &payload, PRIVACY_TIMEOUT));
+                // The loop may have gone; then nobody wants it.
+                let _ = send.send(privacy_output(reply));
+            });
+        match spawned {
+            Ok(_) => self.privacy = Some(answer),
+            Err(e) => info!("no thread for the privacy read: {e}"),
+        }
+    }
+
+    fn take_privacy(&mut self) -> Option<Result<String, String>> {
+        let answer = match self.privacy.as_ref()?.try_recv() {
+            Ok(answer) => answer,
+            Err(TryRecvError::Empty) => return None,
+            Err(TryRecvError::Disconnected) => Err("the read stopped".to_owned()),
+        };
+        self.privacy = None;
+        Some(answer)
     }
 
     fn launch(&mut self, id: &AppId) -> Result<(), LaunchError> {
@@ -1289,6 +1353,10 @@ mod tests {
         assert!(APP_DIR.ends_with(&format!("/{SELF_ID}")));
         assert_eq!(ICON_COPY, format!("{APP_DIR}/lg-icons"));
         assert_eq!(COPY_COMMAND, format!("/bin/sh {APP_DIR}/lumen-icons.sh"));
+        assert_eq!(
+            PRIVACY_COMMAND,
+            format!("/bin/sh {APP_DIR}/lumen-privacy-read.sh")
+        );
         // Nothing a shell would read as more than one plain word.
         assert!(
             APP_DIR
@@ -1468,6 +1536,60 @@ mod tests {
             "with its own timeout"
         );
         let _ = std::fs::remove_dir_all(&copy);
+    }
+
+    /// Waits for the Privacy read's answer.
+    fn privacy_answer(launcher: &mut LunaLauncher<FakeBus>) -> Result<String, String> {
+        let started = Instant::now();
+        loop {
+            if let Some(answer) = launcher.take_privacy() {
+                return answer;
+            }
+            assert!(started.elapsed() < Duration::from_secs(10), "no answer");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn the_privacy_read_runs_its_fixed_script_and_hands_back_its_output() {
+        let out = "mode block\n--- rules\n--- jobs\n";
+        let reply = json!({ "returnValue": true, "stdoutString": out });
+        let mut launcher = LunaLauncher::new(FakeBus::b9().answering(EXEC, Ok(reply)));
+        assert_eq!(launcher.take_privacy(), None, "none asked for");
+        launcher.read_privacy();
+        assert_eq!(privacy_answer(&mut launcher), Ok(out.to_owned()));
+        assert_eq!(launcher.take_privacy(), None, "once");
+        assert_eq!(execs(&launcher), [json!({ "command": PRIVACY_COMMAND })]);
+        assert_eq!(
+            *launcher.bus.waited.lock().unwrap(),
+            [(EXEC.to_owned(), PRIVACY_TIMEOUT)]
+        );
+        // A second read is a new call.
+        launcher.read_privacy();
+        privacy_answer(&mut launcher).unwrap();
+        assert_eq!(execs(&launcher).len(), 2);
+    }
+
+    #[test]
+    fn a_failed_privacy_read_says_why_in_a_few_words() {
+        for (reply, why) in [
+            (
+                Err("Service does not exist: org.webosbrew.hbchannel.service.".to_owned()),
+                "no answer",
+            ),
+            (
+                Ok(json!({ "returnValue": false, "errorText": "Command failed" })),
+                "no answer",
+            ),
+            (Ok(json!({ "returnValue": true })), "no output"),
+        ] {
+            let mut launcher = LunaLauncher::new(FakeBus::b9().answering(EXEC, reply));
+            launcher.read_privacy();
+            assert_eq!(privacy_answer(&mut launcher), Err(why.to_owned()));
+        }
+        let long = "é".repeat(MAX_PRIVACY_BYTES);
+        let cut = privacy_output(Ok(json!({ "stdoutString": long }))).unwrap();
+        assert_eq!(cut.len(), MAX_PRIVACY_BYTES, "cut at a character");
     }
 
     #[test]

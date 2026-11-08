@@ -115,6 +115,65 @@ pub const SUBTITLE_PX: f32 = style::SUBTITLE_PX;
 pub const STATUS_PX: f32 = style::STATUS_PX;
 pub const EMPTY_PX: f32 = style::EMPTY_PX;
 
+// The gear and the Control Center.
+
+/// The gear that opens the Control Center: a round button at the top
+/// right, left of the clock with room for its widest time (`12:59`), its
+/// middle level with the clock's figures. Up from the row reaches it.
+pub const GEAR: Rect = Rect::new(
+    SAFE.x + SAFE.w - 150.0 - GEAR_SIZE,
+    SAFE.y - 6.0,
+    GEAR_SIZE,
+    GEAR_SIZE,
+);
+pub const GEAR_SIZE: f32 = 64.0;
+/// The gear's pictogram, its side.
+pub const GEAR_ICON: f32 = 40.0;
+pub const GEAR_FOCUS_SCALE: f32 = 1.12;
+
+/// The Control Center's panel, open: the right of the safe area, top to
+/// bottom.
+pub const PANEL: Rect = Rect::new(SAFE.x + SAFE.w - PANEL_W, SAFE.y, PANEL_W, SAFE.h);
+pub const PANEL_W: f32 = 640.0;
+pub const PANEL_RADIUS: f32 = 28.0;
+/// Inside it, from its left and top edges.
+pub const PANEL_PAD: f32 = 44.0;
+pub const PANEL_HEADING_BASELINE: f32 = 84.0;
+/// A section's name, and its first line's baseline below it.
+pub const PRIVACY_SECTION_BASELINE: f32 = 156.0;
+pub const PRIVACY_LINE_BASELINE: f32 = 208.0;
+pub const PRIVACY_LINE_PITCH: f32 = 50.0;
+/// The note under the Privacy lines: that they only read.
+pub const PRIVACY_NOTE_GAP: f32 = 24.0;
+pub const MOTION_SECTION_BASELINE: f32 = 500.0;
+/// Reduce Motion's rows: the first's top, each one's height and pitch.
+pub const MOTION_ROW_Y: f32 = 528.0;
+pub const MOTION_ROW_H: f32 = 72.0;
+pub const MOTION_ROW_PITCH: f32 = 78.0;
+pub const MOTION_ROW_RADIUS: f32 = 16.0;
+/// How far a row reaches past the panel's padding on each side, so its
+/// label and switch line up with the text above.
+pub const MOTION_ROW_INSET: f32 = 16.0;
+/// A row's switch: its track, right-aligned in the row.
+pub const SWITCH_W: f32 = 60.0;
+pub const SWITCH_H: f32 = 34.0;
+pub const SWITCH_INSET: f32 = 4.0;
+
+/// The panel's rect `offset` pixels right of its place.
+pub fn panel(offset: f32) -> Rect {
+    PANEL.offset(offset, 0.0)
+}
+
+/// Reduce Motion's row `i`, inside the panel at `panel`.
+pub fn motion_row(panel: Rect, i: usize) -> Rect {
+    Rect::new(
+        panel.x + PANEL_PAD - MOTION_ROW_INSET,
+        panel.y + MOTION_ROW_Y + i as f32 * MOTION_ROW_PITCH,
+        panel.w - 2.0 * (PANEL_PAD - MOTION_ROW_INSET),
+        MOTION_ROW_H,
+    )
+}
+
 /// The resting rect of the row's tile `i`.
 pub fn row_tile(i: usize) -> Rect {
     Rect::new(SAFE.x + i as f32 * COLUMN_PITCH, ROW_Y, TILE_W, TILE_H)

@@ -82,6 +82,17 @@ pub trait Launcher {
     /// The apps and inputs to show, in launch order.
     fn list(&mut self) -> Result<Vec<App>, LaunchError>;
     fn launch(&mut self, id: &AppId) -> Result<(), LaunchError>;
+
+    /// Starts reading the Control Center's Privacy panel (`privacy`), if
+    /// this launcher can; `take_privacy` gives the answer when it comes.
+    fn read_privacy(&mut self) {}
+
+    /// The read `read_privacy` started, once it is done: the reader's
+    /// output for `privacy::parse`, or why there is none. `None` while it
+    /// is still coming, or if no read was started.
+    fn take_privacy(&mut self) -> Option<Result<String, String>> {
+        None
+    }
 }
 
 /// So the shell can pick its launcher at run time: luna on the TV, the mock
@@ -93,6 +104,14 @@ impl<L: Launcher + ?Sized> Launcher for Box<L> {
 
     fn launch(&mut self, id: &AppId) -> Result<(), LaunchError> {
         (**self).launch(id)
+    }
+
+    fn read_privacy(&mut self) {
+        (**self).read_privacy();
+    }
+
+    fn take_privacy(&mut self) -> Option<Result<String, String>> {
+        (**self).take_privacy()
     }
 }
 
@@ -127,6 +146,11 @@ pub struct MockLauncher {
     apps: Vec<App>,
     launched: Vec<AppId>,
     failing: Option<AppId>,
+    /// What a Privacy read answers: `None`, the B9's answer as it would be
+    /// now (G2 blocking, S1 in place).
+    privacy: Option<Result<String, String>>,
+    /// The answer of the read started, until taken.
+    privacy_due: Option<Result<String, String>>,
 }
 
 impl Default for MockLauncher {
@@ -162,7 +186,15 @@ impl MockLauncher {
             apps,
             launched: Vec::new(),
             failing: None,
+            privacy: None,
+            privacy_due: None,
         }
+    }
+
+    /// What a Privacy read answers from now on, in place of the B9's.
+    pub fn with_privacy(mut self, answer: Result<String, String>) -> Self {
+        self.privacy = Some(answer);
+        self
     }
 
     /// Gives the apps the simulator's placeholder pictograms from `dir`
@@ -226,11 +258,64 @@ impl Launcher for MockLauncher {
         self.launched.push(id.clone());
         Ok(())
     }
+
+    /// Answers at once (the loop takes it at its next turn).
+    fn read_privacy(&mut self) {
+        let answer = self
+            .privacy
+            .clone()
+            .unwrap_or_else(|| Ok(b9_privacy(unix_now())));
+        self.privacy_due = Some(answer);
+    }
+
+    fn take_privacy(&mut self) -> Option<Result<String, String>> {
+        self.privacy_due.take()
+    }
+}
+
+/// Seconds since the epoch by the system clock; 0 before it.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// What `lumen-privacy-read.sh` prints on a B9 with G2 blocking and S1 in
+/// place, Guard's file written at `updated`.
+fn b9_privacy(updated: u64) -> String {
+    format!(
+        "version 0.2.0\nmode block\nupdated {updated}\nday 2026-11-08\nlookups_today 6789\n\
+         would_block_today 0\nblocked_today 512\n{}\n\
+         REJECT     tcp  --  0.0.0.0/0            0.0.0.0/0            tcp dpt:11111\n{}\n\
+         crashreportd stop/waiting\nrdxd stop/waiting\nuploadd stop/waiting\n\
+         remotelogger stop/waiting\n",
+        crate::privacy::RULES_MARK,
+        crate::privacy::JOBS_MARK,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mocks_privacy_read_answers_once_as_a_b9_in_good_order() {
+        let mut mock = MockLauncher::default();
+        assert_eq!(mock.take_privacy(), None, "none asked for");
+        mock.read_privacy();
+        let out = mock.take_privacy().expect("at once").expect("an answer");
+        let state = crate::privacy::parse(&out, unix_now());
+        let guard = state.guard.expect("Guard");
+        assert!(guard.running && guard.mode == "block");
+        assert_eq!(
+            (state.port_closed, state.jobs_running),
+            (Some(true), Some(0))
+        );
+        assert_eq!(mock.take_privacy(), None, "once");
+        let mut failing = MockLauncher::default().with_privacy(Err("no answer".to_owned()));
+        failing.read_privacy();
+        assert_eq!(failing.take_privacy(), Some(Err("no answer".to_owned())));
+    }
 
     #[test]
     fn the_mock_lists_fourteen_apps_and_four_inputs() {

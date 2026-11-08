@@ -571,4 +571,12 @@ impl Launcher for SharedLauncher {
         self.clock.advance(self.takes);
         self.mock.borrow_mut().launch(id)
     }
+
+    fn read_privacy(&mut self) {
+        self.mock.borrow_mut().read_privacy();
+    }
+
+    fn take_privacy(&mut self) -> Option<Result<String, String>> {
+        self.mock.borrow_mut().take_privacy()
+    }
 }

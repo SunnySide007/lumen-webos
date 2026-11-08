@@ -100,6 +100,16 @@ pub const OTHERS_DIM: Color = BLACK.with_alpha(0.55);
 /// Lumen's own art has the fade drawn in (tools/art), so it costs nothing.
 pub const OWNER_SCRIM: Color = BLACK.with_alpha(0.72);
 pub const OWNER_SCRIM_FROM: f32 = 0.3;
+/// The Control Center's panel: near black, nearly opaque, so its small type
+/// reads over any art (the flat fallback for glass).
+pub const PANEL: Color = Color::rgb8(18, 20, 28).with_alpha(0.94);
+/// Over the home behind the open Control Center.
+pub const PANEL_DIM: Color = BLACK.with_alpha(0.45);
+/// A value in the Privacy panel that wants a look: a soft amber.
+pub const WARN: Color = Color::rgb8(240, 186, 92);
+/// A Reduce Motion switch: its track when off, and the knob.
+pub const SWITCH_OFF: Color = WHITE.with_alpha(0.22);
+pub const SWITCH_KNOB: Color = Color::rgb8(250, 251, 253);
 
 // Type: Inter SemiBold, in pixels to the em.
 
@@ -119,6 +129,11 @@ pub const GRID_TITLE_PX: f32 = 30.0;
 pub const STATUS_PX: f32 = 28.0;
 /// "No apps".
 pub const EMPTY_PX: f32 = 48.0;
+/// The Control Center: its heading, a section's name, a row, the note.
+pub const PANEL_HEADING_PX: f32 = 40.0;
+pub const SECTION_PX: f32 = 24.0;
+pub const ROW_PX: f32 = 28.0;
+pub const NOTE_PX: f32 = 22.0;
 
 // Radii. Chips and the status pill are fully round: their radius is half
 // their height.
@@ -202,6 +217,9 @@ pub const PAGE: Tuning = Tuning {
 };
 /// How far a page slides as it turns, in px.
 pub const PAGE_SLIDE: f32 = 48.0;
+/// How far right of its place the Control Center starts, in px; it opens
+/// and closes on `PAGE`.
+pub const PANEL_SLIDE: f32 = 96.0;
 
 // The art behind everything (docs/specs/look-and-feel.md, "The home").
 

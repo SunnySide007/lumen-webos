@@ -2,13 +2,16 @@
 //! the keys, the launch a press asked for and whether the shell is in front.
 //! It turns events into presses and effects, and logs the timing lines.
 
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use lumen_core::apps::{App, AppId, LaunchError, Launcher};
 use lumen_core::art::Look;
+use lumen_core::control::Reduced;
 use lumen_core::home::{BackAtTop, Effect, Home, LIFT};
 use lumen_core::input::{Action, Input, Press, action_for, scancode};
+use lumen_core::privacy::{self, Reading};
 
 use crate::app::on_tv;
 use crate::info;
@@ -21,6 +24,9 @@ use super::WallClock;
 /// How long after Select its launch waits: the press pulse's dip is at its
 /// deepest 1/ω of the lift spring after the kick, 33 ms.
 const LAUNCH_AFTER: Duration = Duration::from_nanos((1e9 / LIFT.omega as f64) as u64);
+/// How often the loop looks for the Privacy read's answer while it is on
+/// its way. The panel's other lines draw meanwhile.
+const PRIVACY_POLL: Duration = Duration::from_millis(50);
 
 /// Everything the loop decides, apart from SDL and GL, so it can be tested.
 pub(super) struct Shell<L: Launcher> {
@@ -62,6 +68,11 @@ pub(super) struct Shell<L: Launcher> {
     pub(super) idle: Idle,
     /// What the luna watch thread reads and writes.
     shared: Arc<watch::Shared>,
+    /// Where Reduce Motion is kept (`app.rs`, `MOTION_FILE`); `None`: it is
+    /// not kept.
+    motion_file: Option<PathBuf>,
+    /// A Privacy read is on its way (`Launcher::take_privacy`).
+    reading_privacy: bool,
 }
 
 impl<L: Launcher> Shell<L> {
@@ -108,7 +119,54 @@ impl<L: Launcher> Shell<L> {
             hide_pointer_due: false,
             idle: Idle::new(now),
             shared,
+            motion_file: None,
+            reading_privacy: false,
         }
+    }
+
+    /// Reduce Motion as kept, and where to keep its changes.
+    pub(super) fn set_motion(&mut self, reduced: Reduced, file: Option<PathBuf>) {
+        self.home.set_reduced(reduced);
+        self.motion_file = file;
+    }
+
+    /// When to look for the Privacy read's answer, if one is on its way.
+    pub(super) fn privacy_poll_at(&self, now: Duration) -> Option<Duration> {
+        self.reading_privacy.then_some(now + PRIVACY_POLL)
+    }
+
+    /// Hands the Privacy read's answer to the home, if it has come, and logs
+    /// what the panel says.
+    pub(super) fn poll_privacy(&mut self) {
+        if !self.reading_privacy {
+            return;
+        }
+        let Some(answer) = self.launcher.take_privacy() else {
+            return;
+        };
+        self.reading_privacy = false;
+        let reading = match answer {
+            Ok(out) => Reading::Read(privacy::parse(&out, unix_now())),
+            Err(why) => Reading::Failed(why),
+        };
+        let said: Vec<String> = privacy::lines(&reading)
+            .iter()
+            .map(|l| format!("{} {}", l.label, l.value))
+            .collect();
+        info!("privacy: {}", said.join("; "));
+        self.home.set_privacy(reading);
+    }
+
+    /// Keeps Reduce Motion for the next start, beside the executable.
+    fn save_motion(&mut self, reduced: Reduced) {
+        let kept = match &self.motion_file {
+            Some(file) => match std::fs::write(file, reduced.to_words() + "\n") {
+                Ok(()) => "saved".to_owned(),
+                Err(e) => format!("not saved: {e}"),
+            },
+            None => "not kept".to_owned(),
+        };
+        info!("{reduced}; {kept}");
     }
 
     /// Starts hidden (a preload, or `"hidden": true` on the Wayland path):
@@ -172,6 +230,13 @@ impl<L: Launcher> Shell<L> {
                 info!("back on the top row: leaving");
                 self.quit = true;
             }
+            Some(Effect::ReadPrivacy) => {
+                if !self.reading_privacy {
+                    self.launcher.read_privacy();
+                    self.reading_privacy = true;
+                }
+            }
+            Some(Effect::SaveMotion(reduced)) => self.save_motion(reduced),
             None => {}
         }
     }
@@ -505,6 +570,14 @@ fn window_name(id: u8) -> Option<&'static str> {
     }
 }
 
+/// Seconds since the epoch by the TV's clock, to judge how fresh Guard's
+/// status file is; 0 before the epoch.
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -519,6 +592,53 @@ mod tests {
 
     /// The shell at `now` with `launcher`'s apps, listed as start-up lists
     /// them.
+    #[test]
+    fn the_gear_reads_privacy_once_and_the_answer_reaches_the_panel() {
+        let mut shell = shell();
+        shell.press(tap(Action::Move(lumen_core::focus::Dir::Up)), ms(0));
+        assert_eq!(shell.privacy_poll_at(ms(0)), None);
+        shell.press(tap(Action::Select), ms(10));
+        assert_eq!(shell.privacy_poll_at(ms(10)), Some(ms(10) + PRIVACY_POLL));
+        shell.poll_privacy();
+        assert_eq!(
+            shell.privacy_poll_at(ms(20)),
+            None,
+            "the mock answers at once"
+        );
+        let view = shell.home.view();
+        let lines = &view.control.as_ref().expect("open").privacy;
+        assert_eq!(lines[0].value, "Blocking");
+        assert_eq!(lines[1].value, "512 of 6,789 lookups blocked");
+        assert_eq!(lines[2].value, "All stopped");
+        assert_eq!(lines[3].value, "Closed");
+    }
+
+    #[test]
+    fn reduce_motion_is_kept_in_its_file_and_read_back() {
+        let dir = std::env::temp_dir().join(format!("lumen-motion-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("reduce-motion");
+        let mut launcher = MockLauncher::default();
+        let apps = launcher.list();
+        let mut shell = Shell::new(launcher, apps, Look::FULL, watch::Shared::new(), ms(0));
+        shell.set_motion(Reduced::from_words("slide"), Some(file.clone()));
+        shell.press(tap(Action::Move(lumen_core::focus::Dir::Up)), ms(0));
+        shell.press(tap(Action::Select), ms(10));
+        // Tilt, the first row, off.
+        shell.press(tap(Action::Select), ms(20));
+        let kept = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(kept, "tilt slide\n");
+        assert_eq!(Reduced::from_words(&kept), shell.home.reduced());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn tap(action: Action) -> Press {
+        Press {
+            action,
+            repeat: false,
+        }
+    }
+
     fn listed<L: Launcher>(mut launcher: L, now: Duration) -> Shell<L> {
         let apps = launcher.list();
         Shell::new(launcher, apps, Look::PLAIN, watch::Shared::new(), now)

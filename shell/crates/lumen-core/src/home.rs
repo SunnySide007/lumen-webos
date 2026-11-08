@@ -9,7 +9,9 @@
 //! apps, then "Other apps") and a slim line of input chips under it. Up and
 //! Down move between the two, to the item nearest across. "Other apps" turns
 //! to a page of its own, a grid of the rest, and Back turns back. Back on
-//! the row returns to what was playing, if anything was.
+//! the row returns to what was playing, if anything was. Up from the row
+//! reaches the gear at the top right, which opens the Control Center
+//! (`control`): the Privacy panel, which only reads, and Reduce Motion.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -18,9 +20,11 @@ use crate::anim::{Spring, Tuning, kick_for_peak};
 use crate::apps::{App, AppId, LaunchError};
 use crate::arrange::{Arrangement, OTHERS_ID, OTHERS_TITLE, arrange};
 use crate::art::{Hero, Look, hero_for};
+use crate::control::{Control, ControlView, Reduced};
 use crate::focus::{Dir, GridFocus, Move};
 use crate::input::{Action, Press};
 use crate::layout::{self, Rect};
+use crate::privacy::Reading;
 use crate::shelf::{Faded, Shelf, ShelfView};
 use crate::style;
 
@@ -46,6 +50,20 @@ pub enum BackAtTop {
 pub enum Effect {
     Launch(AppId),
     Exit,
+    /// The Control Center opened: read the Privacy panel's state
+    /// (`Home::set_privacy`).
+    ReadPrivacy,
+    /// Reduce Motion changed: keep it for the next start.
+    SaveMotion(Reduced),
+}
+
+/// The gear on screen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GearView {
+    pub rect: Rect,
+    pub lift: f32,
+    pub focused: bool,
+    pub alpha: f32,
 }
 
 /// A tile on screen: in the row, or on the "Other apps" page.
@@ -133,6 +151,10 @@ pub struct View<'a> {
     /// The effects that are on, for those drawing alone decides: the
     /// resting tiles' shadows and the focused tile's sheen.
     pub look: Look,
+    /// The gear that opens the Control Center, on the home page.
+    pub gear: Option<GearView>,
+    /// The Control Center, while it shows.
+    pub control: Option<ControlView>,
 }
 
 /// Where focus is: the row's tile, a chip, or a tile on the "Other apps"
@@ -142,6 +164,8 @@ enum Spot {
     Row(usize),
     Chip(usize),
     Grid(usize),
+    /// The gear: no app's.
+    Gear,
 }
 
 #[derive(Debug)]
@@ -170,8 +194,17 @@ pub struct Home {
     /// The app the bump springs move: the one that was blocked, which keeps
     /// its nudge (and lets it settle) after focus moves on.
     bump_owner: usize,
-    /// Which of the look's effects are on.
+    /// Which of the look's effects are on: the launch look with Reduce
+    /// Motion's taken away.
     look: Look,
+    /// The launch parameters' look, and what Reduce Motion turned off.
+    launch_look: Look,
+    reduced: Reduced,
+    control: Control,
+    gear_lift: Spring,
+    /// The last app focus was on, whose art stays while focus is on the
+    /// gear.
+    last_app: Option<usize>,
     /// The apps the owner made art for.
     owner_art: HashSet<AppId>,
     /// The hero for where focus is, if the look has heroes.
@@ -225,6 +258,11 @@ impl Home {
             bump_y: Spring::new(0.0, BUMP),
             bump_owner: 0,
             look: Look::PLAIN,
+            launch_look: Look::PLAIN,
+            reduced: Reduced::default(),
+            control: Control::default(),
+            gear_lift: Spring::new(0.0, LIFT),
+            last_app: None,
             owner_art: HashSet::new(),
             wanted: None,
             shelf: Shelf::default(),
@@ -241,6 +279,7 @@ impl Home {
         };
         if let Some(app) = home.focused() {
             home.lifts[app] = Spring::new(1.0, LIFT);
+            home.last_app = Some(app);
         }
         home
     }
@@ -248,9 +287,41 @@ impl Home {
     /// The same home screen with the effects `look` turns on; `new` has
     /// none of them.
     pub fn with_look(mut self, look: Look) -> Self {
-        self.look = look;
+        self.launch_look = look;
+        self.look = self.reduced.apply(look);
         self.update_wanted();
         self
+    }
+
+    /// The same home screen with the effects Reduce Motion turned off, as
+    /// saved.
+    pub fn with_reduced(mut self, reduced: Reduced) -> Self {
+        self.set_reduced(reduced);
+        self
+    }
+
+    /// Reduce Motion as saved, in place: the effects it turns off stop.
+    pub fn set_reduced(&mut self, reduced: Reduced) {
+        self.reduced = reduced;
+        self.apply_reduced();
+        self.update_wanted();
+        self.dirty = true;
+    }
+
+    /// What Reduce Motion has turned off.
+    pub fn reduced(&self) -> Reduced {
+        self.reduced
+    }
+
+    /// Whether the Control Center is open, or opening.
+    pub fn control_open(&self) -> bool {
+        self.control.is_open()
+    }
+
+    /// The Privacy panel's state, as the shell read it (`Effect::ReadPrivacy`).
+    pub fn set_privacy(&mut self, reading: Reading) {
+        self.control.set_reading(reading);
+        self.dirty = true;
     }
 
     pub fn look(&self) -> &Look {
@@ -274,6 +345,7 @@ impl Home {
             Spot::Row(i) => self.lines.row.get(i).copied(),
             Spot::Chip(i) => self.lines.chips.get(i).copied(),
             Spot::Grid(i) => self.lines.others.get(i).copied(),
+            Spot::Gear => None,
         }
     }
 
@@ -288,7 +360,7 @@ impl Home {
         let app = if self.on_others() {
             self.lines.row.last().copied()
         } else {
-            self.focused()
+            self.focused().or(self.last_app)
         };
         self.wanted = match app.and_then(|i| self.apps.get(i)) {
             Some(app) if self.look.hero => Some(hero_for(app, &self.owner_art)),
@@ -360,6 +432,9 @@ impl Home {
     #[must_use]
     pub fn handle(&mut self, press: Press, now: Duration) -> Option<Effect> {
         self.advance_to(now);
+        if self.control.is_open() {
+            return self.control_press(press);
+        }
         match press.action {
             Action::Move(dir) => {
                 self.move_focus(dir, press.repeat);
@@ -381,13 +456,17 @@ impl Home {
                 let x = layout::row_tile(i).centre_x();
                 layout::nearest(chips, x, layout::chip_rect).map(Spot::Chip)
             }
-            (Spot::Row(_), Dir::Up) | (Spot::Chip(_), Dir::Down) => None,
+            (Spot::Row(_), Dir::Up) => Some(Spot::Gear),
+            (Spot::Chip(_), Dir::Down) => None,
             (Spot::Chip(i), Dir::Left) => Some(Spot::Chip(i - 1)),
             (Spot::Chip(i), Dir::Right) => (i + 1 < chips).then_some(Spot::Chip(i + 1)),
             (Spot::Chip(i), Dir::Up) => {
                 let x = layout::chip_rect(i).centre_x();
-                layout::nearest(row, x, layout::row_tile).map(Spot::Row)
+                // With no row, the gear is next up.
+                Some(layout::nearest(row, x, layout::row_tile).map_or(Spot::Gear, Spot::Row))
             }
+            (Spot::Gear, Dir::Down) => self.below_gear(),
+            (Spot::Gear, _) => None,
             (Spot::Grid(_), _) => match self.grid.move_focus(dir) {
                 Move::Moved => self.grid.index().map(Spot::Grid),
                 Move::Blocked => None,
@@ -395,10 +474,22 @@ impl Home {
         }
     }
 
+    /// Where Down from the gear lands: the row's tile nearest below it,
+    /// else the nearest chip.
+    fn below_gear(&self) -> Option<Spot> {
+        let x = layout::GEAR.centre_x();
+        layout::nearest(self.lines.row.len(), x, layout::row_tile)
+            .map(Spot::Row)
+            .or_else(|| {
+                layout::nearest(self.lines.chips.len(), x, layout::chip_rect).map(Spot::Chip)
+            })
+    }
+
     fn move_focus(&mut self, dir: Dir, repeat: bool) {
-        let (Some(spot), Some(from)) = (self.spot, self.focused()) else {
+        let Some(spot) = self.spot else {
             return;
         };
+        let from = self.focused();
         match self.step(spot, dir) {
             Some(to) => {
                 self.spot = Some(to);
@@ -410,13 +501,21 @@ impl Home {
         }
     }
 
-    /// Focus went from app `from` the way `dir` points: the new tile lifts,
-    /// leans toward the move and the light crosses it (chips only lift).
-    fn focus_changed(&mut self, from: usize, dir: Dir) {
+    /// Focus went from app `from` (`None`: the gear) the way `dir` points:
+    /// the new tile lifts, leans toward the move and the light crosses it
+    /// (chips and the gear only lift).
+    fn focus_changed(&mut self, from: Option<usize>, dir: Dir) {
+        if let Some(from) = from {
+            self.lifts[from].set_target(0.0);
+        }
+        let on_gear = self.spot == Some(Spot::Gear);
+        self.gear_lift.set_target(if on_gear { 1.0 } else { 0.0 });
         let Some(to) = self.focused() else {
+            self.sweep = None;
+            self.dirty = true;
             return;
         };
-        self.lifts[from].set_target(0.0);
+        self.last_app = Some(to);
         self.lifts[to].set_target(1.0);
         let tile = !matches!(self.spot, Some(Spot::Chip(_)));
         if tile {
@@ -517,16 +616,23 @@ impl Home {
     /// changed, if focus is there already or there are no tiles.
     pub fn focus_first(&mut self, now: Duration) -> bool {
         self.advance_to(now);
+        let closed = self.control.is_open();
+        if closed {
+            self.control.close();
+            self.dirty = true;
+        }
         let first = if self.lines.row.is_empty() {
             Spot::Chip(0)
         } else {
             Spot::Row(0)
         };
-        let Some(from) = self.focused().filter(|_| self.spot != Some(first)) else {
-            return false;
-        };
+        if self.spot.is_none() || self.spot == Some(first) {
+            return closed;
+        }
+        let from = self.focused();
         let dir = match self.spot {
             Some(Spot::Row(_)) => Dir::Left,
+            Some(Spot::Gear) => Dir::Down,
             _ => Dir::Up,
         };
         self.turn_home();
@@ -543,6 +649,11 @@ impl Home {
     }
 
     fn select(&mut self) -> Option<Effect> {
+        if self.spot == Some(Spot::Gear) {
+            self.control.open();
+            self.dirty = true;
+            return Some(Effect::ReadPrivacy);
+        }
         let i = self.focused()?;
         if self.apps[i].id.as_str() == OTHERS_ID && !self.on_others() {
             // The page turns; focus starts on its first tile, its grid at
@@ -566,7 +677,63 @@ impl Home {
         Some(Effect::Launch(self.apps[i].id.clone()))
     }
 
+    /// A press while the Control Center is open: Up and Down move along
+    /// Reduce Motion's rows, OK turns the focused effect off or on again
+    /// (not one the launch look keeps off), Back closes it.
+    fn control_press(&mut self, press: Press) -> Option<Effect> {
+        match press.action {
+            Action::Move(Dir::Up) => {
+                self.control.step(-1);
+            }
+            Action::Move(Dir::Down) => {
+                self.control.step(1);
+            }
+            Action::Move(_) => return None,
+            Action::Select => {
+                let motion = self.control.focused();
+                let on_in_launch = {
+                    let mut only = Reduced::default();
+                    only.set(motion, true);
+                    only.apply(self.launch_look) != self.launch_look
+                };
+                if !on_in_launch {
+                    return None;
+                }
+                let off = !self.reduced.is_off(motion);
+                self.reduced.set(motion, off);
+                self.apply_reduced();
+                self.dirty = true;
+                return Some(Effect::SaveMotion(self.reduced));
+            }
+            Action::Back => self.control.close(),
+        }
+        self.dirty = true;
+        None
+    }
+
+    /// The look after Reduce Motion changed: an effect turned off stops
+    /// where it is, upright and still.
+    fn apply_reduced(&mut self) {
+        self.look = self.reduced.apply(self.launch_look);
+        if !self.look.tilt {
+            for tilt in self.tilts.iter_mut().flatten() {
+                *tilt = Spring::new(0.0, style::TILT);
+            }
+        }
+        if !self.look.tilt || !self.look.parallax {
+            self.drift = [Spring::new(0.0, style::PARALLAX); 2];
+        }
+        if !self.look.light {
+            self.sweep = None;
+        }
+    }
+
     fn back(&mut self) -> Option<Effect> {
+        if self.spot == Some(Spot::Gear) {
+            self.spot = self.below_gear();
+            self.focus_changed(None, Dir::Down);
+            return None;
+        }
         let from = self.focused()?;
         match self.spot? {
             Spot::Grid(_) => {
@@ -586,7 +753,7 @@ impl Home {
                 let x = layout::chip_rect(i).centre_x();
                 self.spot =
                     layout::nearest(self.lines.row.len(), x, layout::row_tile).map(Spot::Row);
-                self.focus_changed(from, Dir::Up);
+                self.focus_changed(Some(from), Dir::Up);
                 None
             }
             // On the row (or chips with no row): back to what was playing.
@@ -662,7 +829,9 @@ impl Home {
                 &mut self.scroll,
                 &mut self.bump_x,
                 &mut self.bump_y,
+                &mut self.gear_lift,
             ])
+            .chain(self.control.springs_mut())
     }
 
     pub fn is_animating(&self) -> bool {
@@ -673,7 +842,14 @@ impl Home {
                 .iter()
                 .chain(self.tilts.iter().flatten())
                 .chain(&self.drift)
-                .chain([&self.page, &self.scroll, &self.bump_x, &self.bump_y])
+                .chain([
+                    &self.page,
+                    &self.scroll,
+                    &self.bump_x,
+                    &self.bump_y,
+                    &self.gear_lift,
+                ])
+                .chain(self.control.springs())
                 .all(Spring::is_settled)
     }
 
@@ -809,13 +985,31 @@ impl Home {
         }
         let focused = self.focused().map(|i| &self.apps[i]);
         let on_home = !self.on_others();
+        let on_gear = self.spot == Some(Spot::Gear);
+        let gear_lift = self.gear_lift.value();
+        let gear = (home_alpha > 0.001).then(|| GearView {
+            rect: layout::GEAR
+                .scaled(1.0 + (layout::GEAR_FOCUS_SCALE - 1.0) * gear_lift)
+                .offset(0.0, -slide * page),
+            lift: gear_lift,
+            focused: on_gear,
+            alpha: home_alpha,
+        });
+        let (title, subtitle) = if on_gear {
+            (Some(CONTROL_TITLE), Some(CONTROL_SUBTITLE.to_owned()))
+        } else {
+            (
+                focused.filter(|_| on_home).map(|a| a.title.as_str()),
+                focused.filter(|_| on_home).and_then(|a| self.subtitle(a)),
+            )
+        };
         View {
             art: self.shelf.view(&self.look),
             drift: self.drift.map(|s| s.value()),
             page,
             page_slide: slide,
-            title: focused.filter(|_| on_home).map(|a| a.title.as_str()),
-            subtitle: focused.filter(|_| on_home).and_then(|a| self.subtitle(a)),
+            title,
+            subtitle,
             heading_y: layout::HEADING_BASELINE + grid_dy,
             clock: self.clock.map(|(h, m)| clock_text(h, m)),
             playing: self.playing.as_ref().map(|id| {
@@ -829,9 +1023,15 @@ impl Home {
             status: self.status.as_ref().map(|(text, _)| text.as_str()),
             empty: self.apps.is_empty(),
             look: self.look,
+            gear,
+            control: self.control.view(self.launch_look, self.reduced, self.look),
         }
     }
 }
+
+/// The name above the row while focus is on the gear, and the line under it.
+pub const CONTROL_TITLE: &str = "Control Center";
+pub const CONTROL_SUBTITLE: &str = "Privacy and motion";
 
 /// How much of the home and of the "Other apps" page shows at `page` (0 the
 /// home, 1 the other page): the home goes over the first 60% of the turn

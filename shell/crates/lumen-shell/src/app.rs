@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use lumen_core::apps::{AppId, Launcher, MockLauncher};
 use lumen_core::art::Look;
+use lumen_core::control::Reduced;
 use lumen_core::script::Script;
 
 use crate::draw;
@@ -31,6 +32,10 @@ use crate::watch;
 
 /// The file beside the executable that may name the platform.
 const PLATFORM_FILE: &str = "platform";
+/// The file beside the executable that keeps Reduce Motion: the words of
+/// the effects the owner turned off in the Control Center, on one line.
+/// Reinstalling the IPK removes it, as it does `platform`.
+const MOTION_FILE: &str = "reduce-motion";
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Options {
@@ -90,6 +95,10 @@ pub struct Options {
     /// What the home says was playing at the start (`--playing <app id>`),
     /// for the simulator, which has no luna watch to say it.
     pub playing: Option<AppId>,
+    /// Reduce Motion, as kept in `MOTION_FILE` (read by `run`).
+    pub reduced: Reduced,
+    /// Where Reduce Motion is kept; `None`: its changes last this run only.
+    pub motion_file: Option<PathBuf>,
 }
 
 impl Options {
@@ -250,6 +259,18 @@ fn choose_platform(opts: &Options) -> (Platform, String) {
     (Platform::Sdl, "the default".to_owned())
 }
 
+/// What a short file of Reduce Motion's words turns off; a missing or
+/// unreadable file turns off nothing.
+fn read_motion_file(path: &std::path::Path) -> Reduced {
+    use std::io::Read;
+    let mut text = String::new();
+    if let Ok(file) = std::fs::File::open(path) {
+        // Not text: nothing.
+        let _ = file.take(256).read_to_string(&mut text);
+    }
+    Reduced::from_words(&text)
+}
+
 /// The platform a short file names, or `None`.
 fn read_platform_file(path: &std::path::Path) -> Option<Platform> {
     use std::io::Read;
@@ -270,6 +291,17 @@ pub fn run(mut opts: Options, started: Instant) -> Result<(), String> {
     for word in &opts.look_unknown {
         info!("look: {word:?} is not a feature; left out");
     }
+    // A fixed clock's runs (tests, screenshots) neither read nor keep it, so
+    // one run's switch never changes the next run's frames.
+    if opts.motion_file.is_none() && opts.fixed_dt.is_none() {
+        opts.motion_file = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join(MOTION_FILE)));
+    }
+    if let Some(file) = &opts.motion_file {
+        opts.reduced = read_motion_file(file);
+    }
+    info!("{}", opts.reduced);
     for line in &opts.launch_lines {
         info!("{line}");
     }

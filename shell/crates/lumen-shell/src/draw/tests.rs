@@ -331,3 +331,61 @@ fn no_tile_shares_a_colour_with_its_neighbours() {
         assert_ne!(tile_color(i), tile_color(i + cols), "tile {i} and below");
     }
 }
+
+/// The home with focus on the gear and the Control Center open on `look`,
+/// its Privacy panel read, settled.
+fn control_open(look: Look) -> Home {
+    let mut home = mock_home().with_look(look);
+    let _ = home.handle(press(Dir::Up), Duration::ZERO);
+    let _ = home.handle(act(Action::Select), Duration::ZERO);
+    let read =
+        "mode block\nupdated 9\nlookups_today 6789\nblocked_today 512\n--- rules\n--- jobs\n";
+    home.set_privacy(lumen_core::privacy::Reading::Read(
+        lumen_core::privacy::parse(read, 9),
+    ));
+    home.settle_now();
+    home
+}
+
+#[test]
+fn the_gear_is_a_button_and_a_cog_of_ten_circles() {
+    let mut assets = assets();
+    let mut home = mock_home();
+    home.settle_now();
+    let batch = painted(&home, &mut assets);
+    let gear = home.view().gear.expect("on the home").rect;
+    let inside = (0..batch.quad_count())
+        .filter(|&i| {
+            let (x0, y0, x1, y1) = batch.quad_bounds(i);
+            let pad = 1.5;
+            x0 >= gear.x - pad
+                && y0 >= gear.y - pad
+                && x1 <= gear.right() + pad
+                && y1 <= gear.y + gear.h + pad
+        })
+        .count();
+    assert_eq!(inside, 1 + 8 + 2);
+}
+
+#[test]
+fn the_control_center_fits_the_budget_and_dims_only_with_the_looks_dim() {
+    let mut assets = assets();
+    let dimmed = quads(&control_open(Look::FULL), &mut assets);
+    assert!(dimmed <= QUAD_BUDGET, "{dimmed} quads");
+    let undimmed = quads(
+        &control_open(Look {
+            dim: false,
+            ..Look::FULL
+        }),
+        &mut assets,
+    );
+    assert_eq!(undimmed + 1, dimmed);
+    // On its way in, it slides from the right.
+    let mut home = mock_home().with_look(Look::FULL);
+    let _ = home.handle(press(Dir::Up), Duration::ZERO);
+    let _ = home.handle(act(Action::Select), Duration::ZERO);
+    home.advance_to(Duration::from_millis(50));
+    let control = home.view().control.expect("opening");
+    assert!(control.offset > 0.0 && control.shown < 1.0);
+    assert!(quads(&home, &mut assets) <= QUAD_BUDGET);
+}
