@@ -90,6 +90,24 @@ SAVER=com.webos.app.screensaver
     [ "$output" = "closed: the TV does not answer" ]
 }
 
+@test "the night window is for dark work only, with nothing else in front" {
+    answer 10000 03 "$APP" "Screen Off" 8800 "$APP"
+    run sh "$BENCH" window --night
+    [ "$status" -eq 0 ]
+    answer 10000 03 "" "Active Standby" "" ""
+    run sh "$BENCH" window --night
+    [ "$status" -eq 0 ]
+    answer 10000 03 com.webos.app.hdmi3 Active 1 com.webos.app.hdmi3
+    run sh "$BENCH" window --night
+    [ "$output" = "closed: com.webos.app.hdmi3 is in front" ]
+    answer 10000 03 "$APP" Active 9500 "$APP"
+    run sh "$BENCH" window --night
+    [ "$output" = "closed: idle 500 s of 1200" ]
+    answer 10000 14 "$APP" Active 1 "$APP"
+    run sh "$BENCH" window --night
+    [[ "$output" == "closed: not night (14 h TV time)"* ]]
+}
+
 @test "run refuses bad options before touching the TV" {
     run sh "$BENCH" run --runs 0
     [ "$status" -eq 1 ]

@@ -5,9 +5,12 @@
 # plays the robot remote, reads logs and screenshots, and always puts back
 # the last good build. Nothing else on the TV changes.
 #
-#   tools/bench.sh window              is a lab window open now? (exit 0 yes,
-#                                      1 no, with the reason)
-#   tools/bench.sh wait-window [MIN]   look every 2 min until one opens, for
+#   tools/bench.sh window [--night]    is a lab window open now? (exit 0 yes,
+#                                      1 no, with the reason); --night: the
+#                                      window for work that lights nothing
+#                                      (00:00 to 06:00, nothing else in front)
+#   tools/bench.sh wait-window [MIN] [--night]
+#                                      look every 2 min until one opens, for
 #                                      up to MIN minutes (default 720)
 #   tools/bench.sh last-good [COMMIT]  make tools/out/bench/last-good/ from
 #                                      the build installed on the TV now
@@ -101,8 +104,12 @@ value() {
     printf '%s\n' "$2" | sed -n "s/^$1=//p" | head -n 1
 }
 
-# Prints why no lab window is open, or nothing when one is.
+# Prints why no lab window is open, or nothing when one is. With "night",
+# the window for work that lights nothing on the panel (Guard, hooks,
+# surveys): 00:00 to 06:00 only, any power state, with Lumen, LG's
+# screensaver or nothing in front, and 20 minutes since a person's last sign.
 window_closed() {
+    night=${1:-}
     info=$(tv_step window 2>/dev/null) || {
         echo "the TV does not answer"
         return
@@ -117,6 +124,26 @@ window_closed() {
         echo "the TV does not answer"
         return
     }
+    if [ "$night" = night ]; then
+        case $hour in
+            00 | 01 | 02 | 03 | 04 | 05) ;;
+            *)
+                echo "not night ($hour h TV time): dark work runs 00:00 to 06:00"
+                return
+                ;;
+        esac
+        case $fg in
+            "$APP" | "$SAVER" | "") ;;
+            *)
+                echo "$fg is in front"
+                return
+                ;;
+        esac
+        if [ -n "$last" ] && [ $((now - last)) -lt "$IDLE_S" ]; then
+            echo "idle $((now - last)) s of ${IDLE_S}"
+        fi
+        return
+    fi
     case $hour in
         00 | 01 | 02 | 03 | 04 | 05)
             echo "night ($hour h TV time): the screen stays dark until 06:00"
@@ -152,7 +179,7 @@ window_closed() {
 }
 
 cmd_window() {
-    why=$(window_closed)
+    why=$(window_closed "$(night_arg "$@")")
     if [ -z "$why" ]; then
         echo "open"
         return 0
@@ -161,11 +188,25 @@ cmd_window() {
     return 1
 }
 
+# "night" if the arguments hold --night.
+night_arg() {
+    for a in "$@"; do
+        [ "$a" != --night ] || {
+            echo night
+            return
+        }
+    done
+}
+
 cmd_wait_window() {
-    limit=${1:-720}
+    mode=$(night_arg "$@")
+    limit=720
+    for a in "$@"; do
+        case $a in --night) ;; *[!0-9]* | '') die "wait-window [MIN] [--night]" ;; *) limit=$a ;; esac
+    done
     end=$(($(date +%s) + limit * 60))
     while :; do
-        why=$(window_closed)
+        why=$(window_closed "$mode")
         if [ -z "$why" ]; then
             echo "open at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             return 0
@@ -506,7 +547,7 @@ cmd_gate() {
 cmd=${1:-}
 [ $# -eq 0 ] || shift
 case $cmd in
-    window) cmd_window ;;
+    window) cmd_window "$@" ;;
     wait-window) cmd_wait_window "$@" ;;
     last-good) cmd_last_good "$@" ;;
     run) cmd_run "$@" ;;
