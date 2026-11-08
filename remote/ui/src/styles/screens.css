@@ -76,6 +76,11 @@
   gap: 10px;
 }
 
+/* Turn on (the PC app's Wake-on-LAN) takes the row's width when it shows. */
+.power-row > .pill-button:first-child:not([hidden]) {
+  grid-column: 1 / -1;
+}
+
 .play-row {
   display: flex;
   align-items: center;
@@ -127,6 +132,17 @@
   .pad {
     --size: 340px;
   }
+}
+
+/* No key route: no pad, so one column of power, sound and typing. */
+.remote.no-keys {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 560px;
+  margin-inline: auto;
+}
+
+.remote.no-keys .remote-main:not(:has(:not([hidden]))) {
+  display: none;
 }
 
 /* ------------------------------------------------------------ Sound */
@@ -970,4 +986,40 @@
   width: 22px;
   height: 22px;
   color: var(--accent);
+}
+
+/* The PC app's settings: address, port and MAC, then where the key is. */
+.pc-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 12px;
+}
+
+.pc-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* In a grid cell the field fills it; the base rule's zero width is for rows. */
+.pc-field .text-field {
+  width: 100%;
+}
+
+/* Paths are long and have no spaces: break them anywhere. */
+.pc-form .hint {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.pc-field:last-child {
+  grid-column: 1 / -1;
+}
+
+.pc-form .hint.bad {
+  color: var(--warn);
+}
+
+.pc-form > .pill-button {
+  justify-self: start;
 }

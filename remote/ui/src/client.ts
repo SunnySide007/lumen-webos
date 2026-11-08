@@ -18,11 +18,13 @@ import {
 } from "./protocol.ts";
 import type { ArgsOf, ErrorCode, Event, Request, ResultOf, Verb } from "./protocol.ts";
 
-/** What the client needs of a WebSocket; Tauri (R3) can hand it another. */
+/** What the client needs of a WebSocket; the PC app (R3, host.ts) hands it
+ * an SSH session instead. A close may say why, as a CloseEvent's `reason`
+ * does; the PC app's carries ssh's complaint in plain words. */
 export interface SocketLike {
   onopen: (() => void) | null;
   onmessage: ((ev: { data: unknown }) => void) | null;
-  onclose: (() => void) | null;
+  onclose: ((ev?: { reason?: string }) => void) | null;
   onerror: (() => void) | null;
   send(data: string): void;
   close(code?: number, reason?: string): void;
@@ -105,6 +107,7 @@ export class RemoteClient {
   private staleTimer: ReturnType<typeof setTimeout> | null = null;
   private deadTimer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
+  private known: ReadonlySet<Verb> | null = null;
 
   constructor(opts: ClientOptions) {
     this.url = opts.url;
@@ -125,6 +128,13 @@ export class RemoteClient {
 
   get address(): string {
     return this.url;
+  }
+
+  /** The verbs of the last hello, kept while the link is down: whether the
+   * TV has a key route doesn't change because the Wi-Fi dropped. Null
+   * before the first hello. */
+  get lastVerbs(): ReadonlySet<Verb> | null {
+    return this.known;
   }
 
   /** Whether the link is open and the server accepts `verb`. */
@@ -230,11 +240,11 @@ export class RemoteClient {
     ws.onerror = () => {
       // onclose follows and does the work.
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (this.ws !== ws) return;
       this.ws = null;
       this.failPending("disconnected", "the link to the TV closed");
-      this.scheduleRetry("the link closed");
+      this.scheduleRetry(ev?.reason || "the link closed");
     };
   }
 
@@ -251,6 +261,7 @@ export class RemoteClient {
           return;
         }
         this.attempt = 0;
+        this.known = new Set(msg.data.verbs);
         this.setState({
           kind: "open",
           server: msg.data.server,

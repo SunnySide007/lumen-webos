@@ -1,0 +1,17 @@
+{
+  "identifier": "default",
+  "description": "The popup and the window: the link to lumen-ctl, Wake-on-LAN, the settings, and the visibility event. Nothing else of Tauri's.",
+  "windows": ["popup", "main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-link-open",
+    "allow-link-send",
+    "allow-link-close",
+    "allow-wake",
+    "allow-settings-get",
+    "allow-settings-set",
+    "allow-popup-painted",
+    "allow-window-visible"
+  ]
+}

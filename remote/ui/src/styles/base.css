@@ -50,6 +50,20 @@ html {
   background: #000;
 }
 
+/* The PC app (R3): the window is transparent over Windows' Acrylic, so the
+ * backdrop lets the desktop's blur through, and the popup has no scrollbar
+ * gutter or overscroll glow. */
+html.host-pc {
+  background: transparent;
+  --bg-top: rgb(14 18 34 / 0.62);
+  --bg-bottom: rgb(0 0 0 / 0.78);
+}
+
+html.window-popup {
+  scrollbar-width: thin;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   min-height: 100dvh;

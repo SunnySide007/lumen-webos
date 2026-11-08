@@ -2,16 +2,19 @@
 
 [docs/specs/remote.md](../docs/specs/remote.md) plans control of the TV from
 the owner's PC (R3, a Tauri 2 tray app) and Pixel (R4, a page the TV serves),
-both through `lumen-ctl`, a root verb server on the TV. Neither exists yet.
-This directory holds what both will show, and a stand-in for the TV:
+both through `lumen-ctl`, a root verb server on the TV (R2). R3 is built;
+R4 isn't yet. This directory holds what both show, the PC app, and a
+stand-in for the TV:
 
 | Path | What |
 |---|---|
 | `ui/` | The one web front-end: TypeScript and CSS, no framework, bundled by Vite. Remote, Sound, Apps and inputs, Picture and sound, Lumen, and Pairing |
 | `ui/src/protocol.ts` | The protocol, typed: every verb, its arguments, its result, every event, and the checks. The source of truth that `lumen-ctl` (R2) is written against |
+| `ui/src/host.ts` | What the page runs in: a browser, or the PC app, whose SSH session it hands `RemoteClient` as a socket |
+| `app/` | Lumen Remote for Windows (R3): Tauri 2, a tray icon, the popup and a window around `ui/`. Its link to the TV is `shell/crates/lumen-remote-link` |
 | `mock-ctl/` | A Node WebSocket server that speaks the protocol with a fake TV: it checks arguments as `lumen-ctl` will, changes its state and pushes events. No TV, no root, no luna |
 
-Nothing here runs on the TV yet, and nothing touches one.
+Nothing here runs on the TV; the PC app talks to it over SSH.
 
 ## Run it
 
@@ -45,9 +48,10 @@ The mock's options (`npm run mock -- --help`):
   `input 2 on PlayStation`, `silence 40` (sends nothing, to show the stale
   badge), `drop`.
 
-The page connects to `/ctl` on the host that served it. To reach another
-address (the PC app's case), add `?ctl=ws://host:port/ctl`, or type it on the
-Pairing screen under "This device".
+In a browser, the page connects to `/ctl` on the host that served it. To
+reach another address, add `?ctl=ws://host:port/ctl`, or type it on the
+Pairing screen under "This device". In the PC app it reaches the TV over SSH
+instead (below).
 
 ## Checks
 
@@ -179,19 +183,13 @@ loads only its own files and allows only WebSocket connections. It stores
 nothing: no cookies, no local storage, and the pairing stub's token lives in
 memory only.
 
-## What waits
+## lumen-ctl from a terminal
 
-**R2, `lumen-ctl`, is built** ([remote.md, R2](../docs/specs/remote.md)),
-not yet run on the TV.
-* `shell/crates/lumen-ctl` speaks `protocol.ts` on stdin and stdout, with
-  the mock's checks ported.
-* `tools/remote.sh install` puts it on the TV behind an SSH key whose forced
-  command runs it.
-* Its `hello` leaves out `key` until the TV has a key route, and
-  `ambient.start` for now; the UI greys out both.
-
-A page can't open SSH, so the UI can't reach it yet. Today,
-`tools/remote/ctl.py` drives it from a terminal:
+**R2, `lumen-ctl`, is built and on the B9** ([remote.md, R2](../docs/specs/remote.md)).
+`shell/crates/lumen-ctl` speaks `protocol.ts` on stdin and stdout, behind an
+SSH key whose forced command runs it (`tools/remote.sh install`). Its
+`hello` leaves out `key` until the TV has a key route, and `ambient.start`
+for now. `tools/remote/ctl.py` drives it from a terminal:
 
 ```sh
 python tools/remote/ctl.py hello                 # the hello and the TV's state
@@ -199,15 +197,75 @@ python tools/remote/ctl.py volume.set level=20   # a verb, with its round trip
 python tools/remote/ctl.py watch                 # every event, until Ctrl-C
 ```
 
-Once R3 exists, the UI runs against the real `lumen-ctl` from the Tauri app.
-R3's `SocketFactory` returns a `SocketLike` that is an SSH session: the key
-and options `ctl.py` uses, one request line in and one line out per reply or
-event. Nothing in `ui/` changes, because `lumen-ctl` sends the mock's lines.
+## The PC app (R3)
 
-**R3, Tauri:** wrap `ui/` and give `RemoteClient` a transport over the SSH
-forced command instead of a WebSocket (`SocketLike` in `client.ts` is the
-seam); power on by Wake-on-LAN; the tray popup's size and Acrylic behind the
-glass.
+`app/` wraps `ui/` in Tauri 2. A left click on the tray icon opens the popup
+above it, and clicking away hides it; the right-click menu has Open window,
+Pair a phone and Quit; closing the window leaves the app in the tray. The
+page reaches `lumen-ctl` through the app: Windows' own OpenSSH
+(`C:\Windows\System32\OpenSSH\ssh.exe`) with ctl.py's options and the app's
+key, one JSON line each way, handed to `RemoteClient` as its socket
+(`ui/src/host.ts`). Nothing else in the page changes, since `lumen-ctl`
+sends the mock's lines. "Turn on" sends Wake-on-LAN. The key pad, Back,
+Home, Menu and playback stay hidden until a hello offers `key`.
+
+Everything the app keeps is in `~/.lumen/remote/`: the key (`id_ed25519`,
+from `tools/remote.sh keygen`; the app makes none), `tv.conf` (the TV's
+address, SSH port and MAC, set under "This device" on the Pairing screen;
+the first run opens there) and `app.log` (links opening and closing, with
+ssh's reason, Wake-on-LAN, and the popup's timing line).
+
+Windows' ssh refuses a key that other accounts can read, and says so in the
+status chip with the fix:
+
+```bat
+icacls "%USERPROFILE%\.lumen\remote\id_ed25519" /inheritance:r /grant:r "%USERNAME%:F"
+```
+
+Build it on Windows (Rust 1.99, Node, the Tauri CLI: `cargo install
+tauri-cli --version 2.12.2 --locked`), not in the build container, which has
+no WebView2:
+
+```sh
+cd remote/ui && npm ci
+cd remote/app && cargo tauri build --no-bundle   # target/release/lumen-remote.exe
+cd remote/app && cargo tauri build               # also the per-user NSIS installer
+```
+
+The installer is per user, with no admin rights and no updater, and doesn't
+fetch WebView2 (Windows 11 has it). The first `cargo tauri build` with
+bundling downloads Tauri's NSIS tools from GitHub. `npm run build:pc` in
+`ui/` writes the page for the app to `ui/dist-pc/`, without the browser
+build's CSP meta tag: `app/tauri.conf.json` sets the app's own, which allows
+Tauri's IPC and no WebSockets.
+
+### Its checks
+
+* `make check` builds, lints and tests `lumen-remote-link`, the app's link
+  to the TV, with the rest of the shell workspace. Its `tests/fake_bus.rs`
+  runs the app's ssh session against `lumen-ctl serve --bus fake` through a
+  fake ssh.
+* In `ui/`, `npm test` includes `test/host.test.ts`: `RemoteClient` over the
+  app's socket, fed lines `lumen-ctl --bus fake` sent
+  (`test/fixtures/lumen-ctl-fake.jsonl`).
+* `cd remote/app && cargo clippy --all-targets -- -D warnings && cargo fmt
+  --check` for the app itself.
+* `npm run e2e:pc` in `ui/` starts the built app with a settings folder of
+  its own and drives it over WebView2's debugging port: first run, settings,
+  the Remote screen without keys, screen off and on, volume, mute, apps and a
+  launch. It needs `cargo build --features tauri/custom-protocol` in `app/`
+  (or `LUMEN_REMOTE_EXE` naming a release build), and `FAKE_SSH`: a stand-in
+  for ssh that runs `lumen-ctl serve --bus fake`. On a PC with the build
+  container, after `tools/dev.sh sh -c "cd shell && cargo build -p
+  lumen-ctl"`, this `fake-ssh.cmd` does (the volume is `lumen-target-` and
+  the checkout's hash, as `tools/dev.sh` names it):
+
+  ```bat
+  @echo off
+  docker run -i --rm -v lumen-target-<checkout>:/t lumen-dev:<tag> /t/debug/lumen-ctl serve --bus fake --log /tmp/ctl.log --config /tmp/none
+  ```
+
+## What waits
 
 **R4, `lumen-remote`:** serve `ui/dist/` and `/ctl` on one port as the mock
 does, over HTTPS (D4), with real pairing behind the Pairing screen

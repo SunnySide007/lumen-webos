@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Remote: the direction pad, OK, Back, Home and Menu, playback, power, and a
-// field whose typing goes to the TV's focused text field.
+// field whose typing goes to the TV's focused text field. The keys show only
+// once a hello has offered `key`: lumen-ctl leaves it out while the TV has no
+// key route (remote.md, risk 1), and a pad that can never work is noise.
 import { accepts, enableWhen } from "../context.ts";
 import type { Ctx, Screen } from "../context.ts";
 import { flash, h, holdRepeat } from "../dom.ts";
@@ -80,9 +82,37 @@ export function remoteScreen(ctx: Ctx): Screen {
     keyButton("fastforward", "Fast-forward", "fastforward", "round-button"),
   );
   off.push(enableWhen(ctx.link, [...keyButtons.values()], "key"));
+  const keyGroups = [pad, nav, playback];
+  off.push(
+    ctx.link.subscribe(() => {
+      const keys = ctx.client.lastVerbs?.has("key") === true;
+      for (const g of keyGroups) g.hidden = !keys;
+    }),
+  );
 
-  // Power. On is Wake-on-LAN from the PC app or Google Home (remote.md), so
-  // this page can only turn things off, and asks once more before it does.
+  // Power. On is Wake-on-LAN, which only the PC app can send (remote.md):
+  // the TV's own server is off whenever the TV is. A phone has Google Home.
+  // Off asks once more before it acts.
+  const pc = ctx.host.pc;
+  const wakeButton = h("button", { class: "pill-button wide", type: "button", hidden: true }, icon("power"), h("span", { text: "Turn on" }));
+  if (pc) {
+    wakeButton.addEventListener("click", () => {
+      wakeButton.disabled = true;
+      pc.wake().then(
+        () => {
+          ctx.say("Wake-on-LAN sent. The TV takes a few seconds to answer.");
+          ctx.client.retryNow();
+        },
+        (e: unknown) => ctx.say(String(e)),
+      ).finally(() => (wakeButton.disabled = false));
+    });
+    const paintWake = () => {
+      const l = ctx.link.get();
+      const p = ctx.tv.get().power;
+      wakeButton.hidden = l.kind === "open" && p !== "standby";
+    };
+    off.push(ctx.link.subscribe(paintWake), ctx.tv.subscribe(paintWake));
+  }
   const screenButton = h("button", { class: "pill-button wide", type: "button" }, icon("screenOff"), h("span"));
   const screenLabel = screenButton.querySelector("span")!;
   screenButton.addEventListener("click", () => {
@@ -123,7 +153,7 @@ export function remoteScreen(ctx: Ctx): Screen {
     void ctx.send("power.off");
   });
   off.push(enableWhen(ctx.link, [powerButton], "power.off"), disarm);
-  const power = h("div", { class: "power-row" }, screenButton, powerButton);
+  const power = h("div", { class: "power-row" }, wakeButton, screenButton, powerButton);
 
   // Typing. What the field holds is compared with what was sent after every
   // change; Backspace in an empty field still deletes on the TV.
@@ -175,7 +205,7 @@ export function remoteScreen(ctx: Ctx): Screen {
   off.push(rimLight(form), rimLight(playback));
 
   const noKeys = h("p", { class: "notice", hidden: true }, icon("warn"), h("span", {
-    text: "This TV has no route for keys yet (remote.md, risk 1): apps, inputs, typing and playback still work.",
+    text: "This TV has no route for keys yet (remote.md, risk 1), so the pad is hidden: power, sound, apps, inputs and typing still work.",
   }));
   off.push(
     ctx.link.subscribe((l) => {
@@ -204,6 +234,7 @@ export function remoteScreen(ctx: Ctx): Screen {
     h("div", { class: "remote-main" }, noKeys, pad, nav),
     h("div", { class: "remote-side" }, power, playback, form),
   );
+  off.push(ctx.link.subscribe(() => el.classList.toggle("no-keys", ctx.client.lastVerbs?.has("key") !== true)));
   return {
     el,
     destroy: () => off.forEach((f) => f()),

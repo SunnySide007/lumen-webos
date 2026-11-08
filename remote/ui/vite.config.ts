@@ -19,7 +19,9 @@ const CSP = [
 ].join("; ");
 
 /** Adds the content security policy to the built page only: Vite's dev
- * server injects styles inline, which the policy would block. */
+ * server injects styles inline, which the policy would block. The PC app's
+ * build (`--mode pc`) leaves it to Tauri, whose policy (remote/app/
+ * tauri.conf.json) allows its IPC instead of WebSockets. */
 function csp(): Plugin {
   return {
     name: "lumen-csp",
@@ -34,9 +36,10 @@ function csp(): Plugin {
   };
 }
 
-export default defineConfig({
-  plugins: [csp()],
+export default defineConfig(({ mode }) => ({
+  plugins: mode === "pc" ? [] : [csp()],
   build: {
+    outDir: mode === "pc" ? "dist-pc" : "dist",
     target: "es2023",
     modulePreload: { polyfill: false },
     assetsInlineLimit: 0,
@@ -48,4 +51,4 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     environment: "node",
   },
-});
+}));

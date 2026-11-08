@@ -1,0 +1,18 @@
+[package]
+name = "lumen-remote-link"
+description = "Lumen Remote's PC end: its settings, the SSH session to lumen-ctl serve, and Wake-on-LAN"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Only std: the Tauri app (remote/app) wraps this, and make check builds and
+# tests it with the rest of the workspace, lumen-ctl's fake bus included.
+[dependencies]
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"

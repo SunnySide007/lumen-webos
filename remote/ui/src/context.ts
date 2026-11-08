@@ -3,6 +3,7 @@
 // What every screen gets: the link, the TV's state, and a few helpers.
 import type { LinkState, RemoteClient } from "./client.ts";
 import { RequestError } from "./client.ts";
+import type { Host } from "./host.ts";
 import type { PairingStub } from "./pairing.ts";
 import type { ArgsOf, ResultOf, Verb } from "./protocol.ts";
 import type { Store, TvState } from "./store.ts";
@@ -17,6 +18,8 @@ export interface Ctx {
   tv: Store<TvState>;
   link: Store<LinkState>;
   pairing: PairingStub;
+  /** A browser, or the PC app with Wake-on-LAN and the TV's settings. */
+  host: Host;
   /** Sends a request; on failure says why in the snackbar and gives null. */
   send<V extends Verb>(verb: V, args?: ArgsOf<V>): Promise<ResultOf<V> | null>;
   /** A short message at the bottom, with an optional action such as Undo. */

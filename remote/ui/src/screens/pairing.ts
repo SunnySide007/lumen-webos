@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Pairing: the phone's side of R4's pairing, as a stub (pairing.ts), and this
-// device's settings: the TV's address and tilt from the phone's motion.
+// device's settings: the TV's address and tilt from the phone's motion. In
+// the PC app, the TV's address, SSH port and MAC (for Wake-on-LAN), and where
+// the app's key is; pairing a phone waits for R4.
 import type { Ctx, Screen } from "../context.ts";
+import type { PcHost, PcSettings } from "../host.ts";
+import { sshAddress } from "../host.ts";
 import { flash, h, setText } from "../dom.ts";
 import { icon } from "../icons.ts";
 import { deviceTilt, disableDeviceTilt, enableDeviceTilt, reducedMotion, rimLight } from "../motion.ts";
@@ -162,16 +166,88 @@ export function pairingScreen(ctx: Ctx): Screen {
   };
   off.push(deviceTilt.subscribe(paintTilt), reducedMotion.subscribe(paintTilt));
 
+  const pc = ctx.host.pc;
   const device = h(
     "div",
     { class: "device glass" },
     h("div", { class: "card-head" }, icon("tv"), h("h2", { text: "This device" })),
-    addressForm,
-    h("div", { class: "switch-row" }, icon("tilt"), h("span", { id: "tilt-label", text: "Tilt with the phone's motion" }), tiltSwitch),
-    tiltNote,
+    ...(pc
+      ? [pcForm(ctx, pc)]
+      : [
+          addressForm,
+          h("div", { class: "switch-row" }, icon("tilt"), h("span", { id: "tilt-label", text: "Tilt with the phone's motion" }), tiltSwitch),
+          tiltNote,
+        ]),
   );
+  if (pc) {
+    // The PC opens pairing for a phone; that and the TV's code come with R4.
+    card.replaceChildren(
+      h("div", { class: "card-head" }, icon("pair"), h("h2", { text: "Pair a phone" })),
+      h(
+        "ol",
+        { class: "steps" },
+        h("li", { text: "Here, choose Pair a phone: the TV shows a six-digit code for two minutes." }),
+        h("li", { text: "On the phone, open the TV's page and type the code." }),
+        h("li", { text: "Paired phones are listed here, and can be revoked." }),
+      ),
+      h("p", { class: "stub-note", text: "Comes with R4, when the TV serves the page to the phone. Nothing to pair yet." }),
+    );
+  }
   off.push(rimLight(card), rimLight(device));
 
   const el = h("section", { class: "pairing" }, card, device);
   return { el, destroy: () => off.forEach((f) => f()) };
+}
+
+/** The PC app's settings: where the TV is, and its MAC for Wake-on-LAN.
+ * Saved to ~/.lumen/remote/tv.conf by the app, which checks them again. */
+function pcForm(ctx: Ctx, pc: PcHost): HTMLElement {
+  const field = (id: string, label: string, attrs: Record<string, string>) => {
+    const input = h("input", { class: "text-field", id, autocomplete: "off", spellcheck: "false", ...attrs });
+    return { input, el: h("div", { class: "pc-field" }, h("label", { for: id, class: "field-label", text: label }), input) };
+  };
+  const host = field("tv-host", "The TV's address", { inputmode: "url", placeholder: "192.168.86.20" });
+  const port = field("tv-port", "SSH port", { inputmode: "numeric", placeholder: "22" });
+  const mac = field("tv-mac", "MAC address, for Turn on", { placeholder: "a8:23:fe:01:02:03" });
+  const key = h("p", { class: "hint" });
+  const save = h("button", { class: "pill-button accent", type: "submit" }, h("span", { text: "Save and connect" }));
+  const fill = (s: PcSettings) => {
+    host.input.value = s.host ?? "";
+    port.input.value = String(s.port);
+    mac.input.value = s.mac ?? "";
+    setText(
+      key,
+      s.keyFound
+        ? `Key: ${s.key}. ssh: ${s.ssh}.`
+        : `No key at ${s.key}: tools/remote.sh keygen makes one, and tools/remote.sh install puts it on the TV.`,
+    );
+    key.classList.toggle("bad", !s.keyFound);
+  };
+  void pc.settings().then(fill, (e: unknown) => ctx.say(String(e)));
+  const form = h(
+    "form",
+    { class: "address-form pc-form" },
+    h("div", { class: "pc-fields" }, host.el, port.el, mac.el),
+    key,
+    save,
+    h("p", {
+      class: "hint",
+      text: "The app reaches lumen-ctl over SSH with its own key, which runs nothing else on the TV. It talks to nothing but the TV.",
+    }),
+  );
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    save.disabled = true;
+    pc.saveSettings({ host: host.input.value, port: port.input.value || "22", mac: mac.input.value })
+      .then(
+        (s) => {
+          fill(s);
+          ctx.client.setUrl(sshAddress(s));
+          ctx.say(`Saved. Connecting to ${s.host ?? "the TV"}`);
+        },
+        (err: unknown) => ctx.say(String(err)),
+      )
+      .finally(() => (save.disabled = false));
+  });
+  return form;
 }

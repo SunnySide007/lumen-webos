@@ -1,0 +1,67 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Lumen Remote",
+  "version": "0.1.0",
+  "identifier": "io.github.sunnyside007.lumen.remote",
+  "build": {
+    "frontendDist": "../ui/dist-pc",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm --prefix ui run dev",
+    "beforeBuildCommand": "npm --prefix ui run build:pc"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; font-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'",
+      "freezePrototype": true
+    },
+    "windows": [
+      {
+        "label": "popup",
+        "url": "index.html?window=popup",
+        "title": "Lumen Remote",
+        "width": 420,
+        "height": 720,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "alwaysOnTop": true,
+        "shadow": true,
+        "focus": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
+        "windowEffects": { "effects": ["acrylic"] }
+      },
+      {
+        "label": "main",
+        "url": "index.html?window=main",
+        "title": "Lumen Remote",
+        "width": 1120,
+        "height": 780,
+        "minWidth": 380,
+        "minHeight": 560,
+        "visible": false,
+        "transparent": true,
+        "center": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
+        "windowEffects": { "effects": ["acrylic"] }
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "category": "Utility",
+    "shortDescription": "Lumen Remote",
+    "longDescription": "Controls a rooted LG TV running Lumen, over SSH to lumen-ctl. Talks only to the TV.",
+    "copyright": "GPL-3.0-or-later",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": { "type": "skip" },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

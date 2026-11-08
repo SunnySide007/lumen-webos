@@ -28,5 +28,8 @@ export default defineConfig({
   projects: [
     { name: "smoke", testMatch: /smoke\.spec\.ts/ },
     { name: "capture", testMatch: /capture\.spec\.ts/ },
+    // The PC app on Windows (remote/app), driven over WebView2's debugging
+    // port; it skips itself without FAKE_SSH and a built app.
+    { name: "pc", testMatch: /pc\.spec\.ts/ },
   ],
 });
