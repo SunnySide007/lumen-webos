@@ -34,7 +34,7 @@ for p in /proc/[0-9]*; do
 done
 n=0
 while [ $n -lt 10 ]; do
-    num=$(iptables -L INPUT -n --line-numbers 2>/dev/null | grep -E "tcp dpt:8443( |\$)" | head -n 1 | cut -d' ' -f1)
+    num=$(iptables -L INPUT -n --line-numbers 2>/dev/null | grep -E "^[0-9]+ +REJECT .*tcp dpt:8443( |\$)" | head -n 1 | cut -d' ' -f1)
     [ -n "$num" ] || break
     iptables -D INPUT "$num" || break
     echo "removed the tcp 8443 rule"

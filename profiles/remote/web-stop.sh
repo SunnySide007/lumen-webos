@@ -36,15 +36,16 @@ else
     echo "web-stop: lumen-remote was not running"
 fi
 
-# Every rule on the port, by its number, whatever network it names.
+# Every REJECT on the port, by its number, whatever network it names (the
+# home network may have changed since); any other rule on it isn't ours.
 n=0
 while [ $n -lt 10 ]; do
-    num=$(iptables -L INPUT -n --line-numbers | grep -E "tcp dpt:$PORT( |\$)" | head -n 1 | cut -d' ' -f1)
+    num=$(iptables -L INPUT -n --line-numbers | grep -E "^[0-9]+ +REJECT .*tcp dpt:$PORT( |\$)" | head -n 1 | cut -d' ' -f1)
     [ -n "$num" ] || break
     iptables -D INPUT "$num" || break
     n=$((n + 1))
 done
-if iptables -L INPUT -n | grep -Eq "tcp dpt:$PORT( |\$)"; then
+if iptables -L INPUT -n | grep -Eq "^REJECT .*tcp dpt:$PORT( |\$)"; then
     echo "web-stop: FAILED to take out the $PORT rule" >&2
     exit 1
 fi
