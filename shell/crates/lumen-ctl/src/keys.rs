@@ -4,8 +4,8 @@
 //! * `keymanager`: LG's `createKeyEvent`, with a payload built from the
 //!   template the PM writes into `/var/lib/lumen/remote/keys.json` once
 //!   `lumen-ctl probe-keys` has shown what the method wants.
-//! * `uinput` (`robot::UinputKeys`): a virtual remote through `/dev/uinput`, the other
-//!   route R0 found. It would be one more `KeyRoute`.
+//! * `inject` (`robot::RobotKeys`): key events written into the Magic
+//!   Remote's own input node, the bench robot's route (docs/device/bench.md).
 //!
 //! `keys.json`:
 //!

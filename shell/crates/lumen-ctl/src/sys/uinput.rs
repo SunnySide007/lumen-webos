@@ -107,6 +107,49 @@ pub fn parse_event(b: &[u8]) -> Option<InputEvent> {
     })
 }
 
+/// Where the robot's key events go.
+pub trait KeySink: Send {
+    /// One key event (1 down, 0 up, 2 a repeat) and its `SYN_REPORT`.
+    fn emit(&mut self, code: u16, value: i32) -> io::Result<()>;
+}
+
+fn key_and_sync(code: u16, value: i32) -> Vec<u8> {
+    let mut bytes = event_bytes(EV_KEY, code, value);
+    bytes.extend(event_bytes(EV_SYN, SYN_REPORT, 0));
+    bytes
+}
+
+/// An existing input node opened for writing. evdev's write
+/// (`input_inject_event`) hands the events to every reader of that device
+/// as if the device had sent them, so a compositor that opened its nodes at
+/// boot and never looks for new ones (LG's surface-manager on the B9) still
+/// gets them.
+pub struct Inject {
+    file: File,
+}
+
+impl Inject {
+    pub fn open(path: &Path) -> io::Result<Self> {
+        let file = OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .open(path)?;
+        Ok(Self { file })
+    }
+}
+
+impl KeySink for Inject {
+    fn emit(&mut self, code: u16, value: i32) -> io::Result<()> {
+        self.file.write_all(&key_and_sync(code, value))
+    }
+}
+
+impl KeySink for Uinput {
+    fn emit(&mut self, code: u16, value: i32) -> io::Result<()> {
+        Uinput::emit(self, code, value)
+    }
+}
+
 /// A virtual keyboard with the given key codes; destroyed when dropped.
 pub struct Uinput {
     file: File,
@@ -130,9 +173,7 @@ impl Uinput {
     /// One key event (1 down, 0 up, 2 a repeat) and its `SYN_REPORT`, in one
     /// write so a reader never sees half.
     pub fn emit(&mut self, code: u16, value: i32) -> io::Result<()> {
-        let mut bytes = event_bytes(EV_KEY, code, value);
-        bytes.extend(event_bytes(EV_SYN, SYN_REPORT, 0));
-        self.file.write_all(&bytes)
+        self.file.write_all(&key_and_sync(code, value))
     }
 }
 

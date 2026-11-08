@@ -36,7 +36,7 @@ use serde_json::json;
 use crate::bus::Bus;
 use crate::keys::KeyRoute;
 use crate::protocol::{ErrorCode, KEY_NAMES, Refusal};
-use crate::sys::uinput::{EV_KEY, EV_MSC, EV_SYN, Evdev, InputEvent, Uinput};
+use crate::sys::uinput::{EV_KEY, EV_MSC, EV_SYN, Evdev, Inject, InputEvent, KeySink, Uinput};
 
 pub const DEVICE_NAME: &str = "Lumen robot remote";
 
@@ -355,15 +355,15 @@ pub fn play(pattern: &Pattern, settle: Duration, out: &mut impl Write) -> ExitCo
 }
 
 fn play_inner(pattern: &Pattern, settle: Duration, out: &mut impl Write) -> Result<bool, String> {
-    // The real nodes are opened before the robot's exists, so it is never
-    // among them.
+    // The real nodes are opened before a virtual remote could exist, so it
+    // is never among them. Keys written into the Magic Remote's node come
+    // back to the watch there, as echoes.
     let mut watch = Watch::open()?;
-    let mut kb =
-        Uinput::create(DEVICE_NAME, &pattern.codes()).map_err(|e| format!("/dev/uinput: {e}"))?;
+    let (mut kb, via) = open_sink(&pattern.codes())?;
     let watched: Vec<&str> = watch.nodes.iter().map(|(_, e, _)| e.as_str()).collect();
     say(
         out,
-        &json!({ "ready": DEVICE_NAME, "watching": watched, "settle_ms": settle.as_millis() as u64,
+        &json!({ "ready": DEVICE_NAME, "via": via, "watching": watched, "settle_ms": settle.as_millis() as u64,
                  "presses": pattern.presses(), "length_ms": pattern.length_ms }),
     );
     if let Some(p) = watch.wait_until(Instant::now() + settle)? {
@@ -450,16 +450,40 @@ pub fn watch_remote(secs: u64, out: &mut impl Write) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `serve --keys uinput`: the Remote's `key` verb on one virtual remote,
-/// made at the first press and kept for the session, so only that press
-/// waits `SETTLE` for the compositor to find it. A key the Magic Remote has
-/// no code for (`menu`) is refused as unavailable.
-pub struct UinputKeys {
-    device: Mutex<Option<Uinput>>,
+/// The node the Magic Remote's keys arrive on, by its name in
+/// `/proc/bus/input/devices`.
+pub const MAGIC_REMOTE: &str = "LGE M-RCU";
+
+/// Where the robot's keys go: written into the Magic Remote's own node,
+/// which LG's compositor has held open since boot (it opens no node that
+/// appears later, and the B9 runs no udev; 2026-11-08), or, on a TV without
+/// one, a new virtual remote through `/dev/uinput`. Also says which.
+pub fn open_sink(codes: &[u16]) -> Result<(Box<dyn KeySink>, String), String> {
+    let text = std::fs::read_to_string("/proc/bus/input/devices")
+        .map_err(|e| format!("/proc/bus/input/devices: {e}"))?;
+    if let Some((name, event)) = input_nodes(&text)
+        .into_iter()
+        .find(|(name, _)| name.starts_with(MAGIC_REMOTE))
+    {
+        let path = PathBuf::from("/dev/input").join(&event);
+        let sink = Inject::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        return Ok((Box::new(sink), format!("{event} ({name})")));
+    }
+    let sink = Uinput::create(DEVICE_NAME, codes).map_err(|e| format!("/dev/uinput: {e}"))?;
+    Ok((Box::new(sink), "uinput".to_owned()))
+}
+
+/// `serve --keys inject`: the Remote's `key` verb through `open_sink`,
+/// opened at the first press and kept for the session. A key the Magic
+/// Remote has no code for (`menu`) is refused as unavailable.
+pub struct RobotKeys {
+    device: Mutex<Option<Box<dyn KeySink>>>,
     settle: Duration,
 }
 
-impl UinputKeys {
+impl RobotKeys {
+    /// `settle`: the wait after making a virtual remote, for a compositor
+    /// that finds new ones; none when writing into the remote's own node.
     pub fn new(settle: Duration) -> Self {
         Self {
             device: Mutex::new(None),
@@ -468,9 +492,9 @@ impl UinputKeys {
     }
 }
 
-impl KeyRoute for UinputKeys {
+impl KeyRoute for RobotKeys {
     fn name(&self) -> &'static str {
-        "uinput"
+        "inject"
     }
 
     fn any(&self) -> bool {
@@ -487,10 +511,11 @@ impl KeyRoute for UinputKeys {
         let mut device = self.device.lock().unwrap_or_else(|e| e.into_inner());
         if device.is_none() {
             let codes: Vec<u16> = CODES.iter().map(|&(_, c)| c).collect();
-            let made = Uinput::create(DEVICE_NAME, &codes)
-                .map_err(|e| Refusal::new(ErrorCode::Failed, format!("/dev/uinput: {e}")))?;
+            let (made, via) = open_sink(&codes).map_err(|e| Refusal::new(ErrorCode::Failed, e))?;
             *device = Some(made);
-            thread::sleep(self.settle);
+            if via == "uinput" {
+                thread::sleep(self.settle);
+            }
         }
         let Some(dev) = device.as_mut() else {
             return Err(Refusal::new(ErrorCode::Failed, "no virtual remote"));
@@ -618,9 +643,9 @@ mod tests {
     }
 
     #[test]
-    fn the_uinput_route_offers_keys_and_refuses_one_without_a_code() {
-        let route = UinputKeys::new(Duration::ZERO);
-        assert_eq!(route.name(), "uinput");
+    fn the_robot_route_offers_keys_and_refuses_one_without_a_code() {
+        let route = RobotKeys::new(Duration::ZERO);
+        assert_eq!(route.name(), "inject");
         assert!(route.any());
         let bus = crate::fake::FakeBus::new(false);
         assert_eq!(

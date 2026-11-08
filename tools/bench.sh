@@ -297,13 +297,14 @@ cmd_restore() {
 
 # Waits for a first frame after $1; 0 when it came.
 first_frame_after() {
-    i=0
-    while [ $i -lt "$FIRST_FRAME_S" ]; do
+    # Its own counter: cmd_run's loop counts runs in $i.
+    waited=0
+    while [ $waited -lt "$FIRST_FRAME_S" ]; do
         sleep 1
         if tv_step logsince "SINCE=$1" 2>/dev/null | grep -q '\] start: .*first frame'; then
             return 0
         fi
-        i=$((i + 1))
+        waited=$((waited + 1))
     done
     return 1
 }

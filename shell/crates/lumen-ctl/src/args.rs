@@ -11,7 +11,7 @@ use crate::keys::KEYS_FILE;
 use crate::log::LOG_FILE;
 
 pub const USAGE: &str = "\
-usage: lumen-ctl serve [--bus library|command] [--keys none|keymanager|uinput] [--log FILE]
+usage: lumen-ctl serve [--bus library|command] [--keys none|keymanager|inject] [--log FILE]
        lumen-ctl probe [--bus library|command]
        lumen-ctl probe-keys [--bus library|command]
        lumen-ctl play FILE [--settle-ms N]
@@ -23,7 +23,7 @@ stdout, one JSON object per line, until stdin ends or SIGTERM or SIGHUP comes.
 --bus picks how luna is reached: library (libluna-service2, with
 subscriptions) or command (/usr/bin/luna-send, polled). --keys picks the route
 for `key`: none, keymanager (LG's createKeyEvent, from the template in
-/var/lib/lumen/remote/keys.json) or uinput (a virtual remote, as play
+/var/lib/lumen/remote/keys.json) or inject (the robot remote, as play
 makes). Without the flags, /var/lib/lumen/remote/
 ctl.conf decides (`bus command`, `keys none` lines), else command and none.
 --log is where each request and reply is logged (default
@@ -35,13 +35,15 @@ createKeyEvent with no parameters, so LG's error names the ones it wants; no
 key is sent. It uses command unless --bus says otherwise.
 
 play, key and watch-remote are the bench's robot remote (docs/device/
-bench.md): play makes a virtual remote through /dev/uinput and plays a
-pattern file on it after --settle-ms (default 1500) for the compositor to
-find it; key plays one press (held --hold-ms, default 60) of up, down, left,
-right, ok, back, home, play, pause, stop, rewind or fastforward. Both watch
-every other input node meanwhile, never grabbing it, and stop at the first
-person's event (exit 3). watch-remote prints the people's events on those
-nodes for SECONDS, with the kernel's stamps. Each prints JSON lines.
+bench.md): play writes a pattern file's keys into the Magic Remote's own
+input node (or, on a TV without one, a virtual remote made through
+/dev/uinput), after --settle-ms (default 1500); key plays one press (held
+--hold-ms, default 60) of up, down, left, right, ok, back, home, play,
+pause, stop, rewind or fastforward. Both watch every input node meanwhile,
+never grabbing it, and stop at the first person's event (exit 3); the
+robot's own keys coming back on the remote's node are echoes, not a
+person. watch-remote prints the people's events on those nodes for
+SECONDS, with the kernel's stamps. Each prints JSON lines.
 
 For tests and the PC: --bus fake (a TV in the process, no luna), --config
 FILE, --keys-file FILE and --alive-ms N.
@@ -72,7 +74,7 @@ impl BusKind {
 pub enum KeysKind {
     None,
     Keymanager,
-    Uinput,
+    Inject,
 }
 
 impl KeysKind {
@@ -80,9 +82,9 @@ impl KeysKind {
         match value {
             "none" => Ok(Self::None),
             "keymanager" => Ok(Self::Keymanager),
-            "uinput" => Ok(Self::Uinput),
+            "inject" => Ok(Self::Inject),
             other => Err(format!(
-                "--keys must be none, keymanager or uinput, not {other}"
+                "--keys must be none, keymanager or inject, not {other}"
             )),
         }
     }

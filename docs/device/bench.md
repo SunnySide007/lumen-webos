@@ -110,27 +110,37 @@ other (safety rule 3).
 ## The robot remote
 
 `lumen-ctl play FILE`, `lumen-ctl key NAME` and `lumen-ctl watch-remote
-SECONDS` (shell/crates/lumen-ctl/src/robot.rs). `play` makes a virtual
-remote, "Lumen robot remote", through `/dev/uinput` (the kernel is 4.4, so
-the old `uinput_user_dev` set-up), waits 1.5 s for the compositor to find
-it, then plays the pattern with fixed timing.
+SECONDS` (shell/crates/lumen-ctl/src/robot.rs). `play` writes the pattern's
+key events into the Magic Remote's own input node ("LGE M-RCU - Builtin",
+event3 on the B9), with fixed timing, and only falls back to a `/dev/uinput`
+device when no such node exists. The ready line names the route (`via`).
+
+A `/dev/uinput` remote does not work on the B9: LG's surface-manager opens
+event0 to event5 once at boot and there is no udevd, so a device made later
+is never read (smoke run 1, 2026-11-08: no key reached the shell). Writing
+an `input_event` into an evdev node hands it to every reader of that node,
+surface-manager included, so the shell sees the robot's keys as the remote's
+(smoke run 2 on 3a89955, B9 OLED55B9PUA, firmware 05.50.00: 90 of 90 presses
+shown, each 17 to 18 ms after the key).
 
 * **Codes.** The Linux codes the Magic Remote's own node declares (its key
   map, read on 2026-11-08): arrows 103, 108, 105, 106; OK 28; Back 412;
   Home 773 (LG's code, held 150 to 200 ms before each trip through LG's
   launcher in the 2026-10-22 recordings; not yet tried from the robot);
   play 207, pause 119, stop 128, rewind 168, fast forward 208.
-* **Yield.** Every other input node is opened read-only before the robot's
-  exists and never grabbed. Any event there other than a separator or a
-  scan code is a person: the robot lets go of what it holds and stops
-  (exit 3), and the bench puts things back. An event on another node with a
-  code the robot sent within 250 ms is counted as an echo instead, in case
-  LG's input service mirrors new devices; the run's last line counts them.
+* **Yield.** Every input node, the remote's included, is opened read-only
+  before the first key and never grabbed. Any event other than a separator
+  or a scan code is a person, unless it carries a code the robot wrote
+  within 250 ms (its own echo: on the remote's node every key comes back
+  once). A person's key makes the robot let go of what it holds and stop
+  (exit 3), and the bench puts things back. The run's last line counts the
+  echoes; smoke run 2 had 180 for 90 presses, a down and an up each.
 * **Repeats.** The real remote's held keys reach the shell as SDL repeats,
   the first about 510 ms after the press, then every 50 ms (B9, 2026-11-07).
-  The pattern sends only presses and releases (`repeat off`); whether LG
-  makes those repeats for a robot's held key too is for the first run's
-  `SDL repeat` lines to show. `repeat 500 50` sends kernel repeats instead.
+  The pattern sends only presses and releases (`repeat off`); smoke run 2
+  logged no `SDL repeat` lines, so the shell's own repeat (400 ms, then
+  every 120 ms) is what a held robot key gives. `repeat 500 50` sends kernel
+  repeats instead.
 
 ## The speed gate
 

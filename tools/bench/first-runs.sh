@@ -5,6 +5,9 @@
 # stopped (a yield, a closed window).
 #
 #   sh tools/bench/first-runs.sh FIX.ipk
+#
+# BENCH_FLAGS=--force runs them outside a lab window: only when the owner
+# says the TV is free.
 set -u
 cd "$(dirname "$0")/../.." || exit 1
 FIX=${1:?usage: first-runs.sh FIX.ipk}
@@ -15,7 +18,8 @@ step() {
     name=$1
     shift
     [ -f "tools/out/bench/done-$name" ] && return 0
-    sh tools/bench.sh run --name "$name" "$@"
+    # shellcheck disable=SC2086 # flags, split on purpose
+    sh tools/bench.sh run --name "$name" ${BENCH_FLAGS:-} "$@"
     rc=$?
     [ "$rc" = 0 ] && : >"tools/out/bench/done-$name"
     return "$rc"
@@ -34,5 +38,6 @@ step base-3a89955 --ipk "$BASE" --settle &&
     step fix-nodither --ipk "$FIX" --params '{"look":"-dither"}' &&
     step fix-full --ipk "$FIX" &&
     if [ ! -f tools/out/bench/done-apps ]; then
-        sh tools/bench.sh apps && : >tools/out/bench/done-apps
+        # shellcheck disable=SC2086 # flags, split on purpose
+        sh tools/bench.sh apps ${BENCH_FLAGS:-} && : >tools/out/bench/done-apps
     fi
