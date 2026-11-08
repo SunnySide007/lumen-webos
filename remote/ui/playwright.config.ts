@@ -31,5 +31,8 @@ export default defineConfig({
     // The PC app on Windows (remote/app), driven over WebView2's debugging
     // port; it skips itself without FAKE_SSH and a built app.
     { name: "pc", testMatch: /pc\.spec\.ts/ },
+    // The phone against lumen-remote and lumen-ctl in the build container
+    // (e2e/phone-tv.sh): needs Docker and tools/dev.sh's image.
+    { name: "phone", testMatch: /phone\.spec\.ts/, timeout: 60_000 },
   ],
 });

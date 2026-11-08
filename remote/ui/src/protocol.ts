@@ -147,6 +147,28 @@ export interface PrivacyState {
   guard: { since: string; lookups: number; blocked: number } | null;
 }
 
+/** What a paired device may do (decision 12): "remote" is power, volume,
+ * inputs, apps, keys, typing and the picture and sound presets; "owner"
+ * adds privacy, toasts and every setting. Only the PC grants owner. */
+export type Role = "remote" | "owner";
+
+/** One paired device, as the PC lists them. */
+export interface DeviceInfo {
+  /** Eight hex digits. */
+  id: string;
+  name: string;
+  role: Role;
+  /** When it paired, ISO 8601. */
+  paired: string;
+}
+
+/** `devices.list`, and the `devices` event: the paired devices, and
+ * whether pairing is open (never its code). */
+export interface DevicesState {
+  devices: DeviceInfo[];
+  pairing: { open: boolean; secondsLeft: number; attemptsLeft: number };
+}
+
 // ---------------------------------------------------------------- verbs
 
 type NoArgs = Record<string, never>;
@@ -173,6 +195,12 @@ export interface Verbs {
   "settings.get": { args: { keys?: SettingKey[] }; result: { values: Partial<SettingValues> } };
   "settings.set": { args: SettingChange; result: Done };
   toast: { args: { text: string }; result: Done };
+  // The PC's only (lumen-ctl over SSH): pairing and the devices' rights.
+  "pair.open": { args: NoArgs; result: { code: string; seconds: number; toasted: boolean } };
+  "pair.close": { args: NoArgs; result: Done };
+  "devices.list": { args: NoArgs; result: DevicesState };
+  "devices.revoke": { args: { id: string }; result: Done };
+  "devices.role": { args: { id: string; role: Role }; result: Done };
 }
 export type Verb = keyof Verbs;
 export type ArgsOf<V extends Verb> = Verbs[V]["args"];
@@ -189,6 +217,11 @@ export const MAX_TOAST = 120;
 /** App and input ids: webOS's reverse-DNS ids and short ones like "netflix". */
 const APP_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const COLOR = /^#[0-9a-fA-F]{6}$/;
+const DEVICE_ID = /^[0-9a-f]{8}$/;
+/** The settings a remote-only phone may change: the presets. */
+export const REMOTE_SETTINGS: readonly string[] = ["picture.mode", "sound.mode"];
+/** Verbs only the PC's SSH session takes; a phone never sees them. */
+export const PC_ONLY: readonly Verb[] = ["pair.open", "pair.close", "devices.list", "devices.revoke", "devices.role"];
 // Control characters, C0 and C1: text.insert can't carry a newline or a tab.
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
@@ -288,6 +321,15 @@ const ARG_CHECKS: { [V in Verb]: ArgCheck } = {
   },
   "settings.set": (a) => onlyKeys(a, ["key", "value"]) ?? checkSetting(a.key, a.value),
   toast: (a) => onlyKeys(a, ["text"]) ?? checkText("text", a.text, MAX_TOAST),
+  "pair.open": none,
+  "pair.close": none,
+  "devices.list": none,
+  "devices.revoke": (a) =>
+    onlyKeys(a, ["id"]) ?? (typeof a.id === "string" && DEVICE_ID.test(a.id) ? null : "id must be a device id"),
+  "devices.role": (a) =>
+    onlyKeys(a, ["id", "role"]) ??
+    (typeof a.id === "string" && DEVICE_ID.test(a.id) ? null : "id must be a device id") ??
+    (a.role === "remote" || a.role === "owner" ? null : "role must be remote or owner"),
 };
 
 export const VERBS = Object.keys(ARG_CHECKS) as Verb[];
@@ -312,6 +354,7 @@ export function checkArgs(verb: Verb, args: unknown): string | null {
  * - `not-found`: no app, input or setting by that name on the TV
  * - `unavailable`: a known verb the TV can't do now (no route for keys, off)
  * - `failed`: LG's service refused or didn't answer
+ * - `forbidden`: the device isn't paired, or its role doesn't allow the verb
  */
 export const ERROR_CODES = [
   "bad-line",
@@ -320,6 +363,7 @@ export const ERROR_CODES = [
   "not-found",
   "unavailable",
   "failed",
+  "forbidden",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 export interface ErrorInfo {
@@ -334,8 +378,9 @@ export type Reply = ReplyOk | ReplyErr;
 // ---------------------------------------------------------------- events
 
 export interface Events {
-  /** The first line on every connection. */
-  hello: { protocol: number; server: string; verbs: Verb[] };
+  /** The first line on every connection. Through lumen-remote (the
+   * phone) it also names the device and its role; the PC is the owner. */
+  hello: { protocol: number; server: string; verbs: Verb[]; role?: Role; device?: { id: string; name: string } };
   power: { state: PowerState };
   volume: { level: number; muted: boolean };
   /** The app or input in front; null when LG reports none. */
@@ -344,6 +389,9 @@ export interface Events {
   /** The settings that changed, or all of them on connecting. */
   settings: { values: Partial<SettingValues> };
   alive: NoArgs;
+  /** The PC's only: a device paired, was revoked or changed role, or
+   * pairing opened or closed. */
+  devices: DevicesState;
 }
 export type EventName = keyof Events;
 export type Event = { [E in EventName]: { event: E; data: Events[E] } }[EventName];
@@ -418,6 +466,24 @@ function isSettingValues(v: unknown): v is Partial<SettingValues> {
   return isObject(v) && Object.entries(v).every(([k, value]) => checkSetting(k, value) === null);
 }
 
+function isDevicesState(v: unknown): v is DevicesState {
+  if (!isObject(v) || !Array.isArray(v.devices) || !isObject(v.pairing)) return false;
+  const p = v.pairing;
+  return (
+    v.devices.every(
+      (d) =>
+        isObject(d) &&
+        typeof d.id === "string" &&
+        typeof d.name === "string" &&
+        (d.role === "remote" || d.role === "owner") &&
+        typeof d.paired === "string",
+    ) &&
+    typeof p.open === "boolean" &&
+    isInt(p.secondsLeft, 0, 86_400) &&
+    isInt(p.attemptsLeft, 0, 100)
+  );
+}
+
 function isCount(v: unknown): v is number {
   return isInt(v, 0, Number.MAX_SAFE_INTEGER);
 }
@@ -447,13 +513,17 @@ const EVENT_CHECKS: { [E in EventName]: (d: Obj) => boolean } = {
     isInt(d.protocol, 0, MAX_REQUEST_ID) &&
     typeof d.server === "string" &&
     Array.isArray(d.verbs) &&
-    d.verbs.every((v) => typeof v === "string"),
+    d.verbs.every((v) => typeof v === "string") &&
+    (d.role === undefined || d.role === "remote" || d.role === "owner") &&
+    (d.device === undefined ||
+      (isObject(d.device) && typeof d.device.id === "string" && typeof d.device.name === "string")),
   power: (d) => (POWER_STATES as readonly unknown[]).includes(d.state),
   volume: (d) => isInt(d.level, 0, 100) && typeof d.muted === "boolean",
   foreground: (d) => d.id === null || typeof d.id === "string",
   inputs: (d) => Array.isArray(d.inputs) && d.inputs.every(isInputStatus),
   settings: (d) => isSettingValues(d.values),
   alive: () => true,
+  devices: isDevicesState,
 };
 
 /**
@@ -501,6 +571,8 @@ const RESULT_CHECKS: Partial<{ [V in Verb]: (r: Obj) => boolean }> = {
   "apps.list": (r) => Array.isArray(r.apps) && r.apps.every(isAppInfo),
   "privacy.state": isPrivacyState,
   "settings.get": (r) => isSettingValues(r.values),
+  "pair.open": (r) => typeof r.code === "string" && /^\d{6}$/.test(r.code) && isInt(r.seconds, 1, 3600),
+  "devices.list": isDevicesState,
 };
 
 /** Checks a reply's result against its verb; null if it has the wrong shape. */

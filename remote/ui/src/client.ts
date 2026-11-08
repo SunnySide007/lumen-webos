@@ -16,7 +16,10 @@ import {
   parseServerLine,
   splitLines,
 } from "./protocol.ts";
-import type { ArgsOf, ErrorCode, Event, Request, ResultOf, Verb } from "./protocol.ts";
+import type { ArgsOf, ErrorCode, Event, Request, ResultOf, Role, Verb } from "./protocol.ts";
+
+/** lumen-remote's close code when the PC revoked this device. */
+export const CLOSE_REVOKED = 4401;
 
 /** What the client needs of a WebSocket; the PC app (R3, host.ts) hands it
  * an SSH session instead. A close may say why, as a CloseEvent's `reason`
@@ -24,7 +27,7 @@ import type { ArgsOf, ErrorCode, Event, Request, ResultOf, Verb } from "./protoc
 export interface SocketLike {
   onopen: (() => void) | null;
   onmessage: ((ev: { data: unknown }) => void) | null;
-  onclose: ((ev?: { reason?: string }) => void) | null;
+  onclose: ((ev?: { reason?: string; code?: number }) => void) | null;
   onerror: (() => void) | null;
   send(data: string): void;
   close(code?: number, reason?: string): void;
@@ -33,7 +36,19 @@ export type SocketFactory = (url: string) => SocketLike;
 
 export type LinkState =
   | { kind: "connecting"; attempt: number }
-  | { kind: "open"; server: string; verbs: ReadonlySet<Verb>; stale: boolean }
+  | {
+      kind: "open";
+      server: string;
+      verbs: ReadonlySet<Verb>;
+      stale: boolean;
+      /** Through lumen-remote, this device's role and name; null from the
+       * PC's own session, which is the owner. */
+      role: Role | null;
+      device: { id: string; name: string } | null;
+    }
+  /** The PC revoked this device: no more tries; the page goes back to
+   * the TV's pairing page. */
+  | { kind: "revoked" }
   | { kind: "waiting"; attempt: number; retryAt: number; reason: string }
   | { kind: "incompatible"; protocol: number }
   | { kind: "paused" };
@@ -244,6 +259,12 @@ export class RemoteClient {
       if (this.ws !== ws) return;
       this.ws = null;
       this.failPending("disconnected", "the link to the TV closed");
+      if (ev?.code === CLOSE_REVOKED) {
+        this.running = false;
+        this.clearTimers();
+        this.setState({ kind: "revoked" });
+        return;
+      }
       this.scheduleRetry(ev?.reason || "the link closed");
     };
   }
@@ -267,6 +288,8 @@ export class RemoteClient {
           server: msg.data.server,
           verbs: new Set(msg.data.verbs),
           stale: false,
+          role: msg.data.role ?? null,
+          device: msg.data.device ?? null,
         });
       } else if (this.current.kind === "open" && this.current.stale) {
         this.setState({ ...this.current, stale: false });

@@ -63,9 +63,15 @@ is_days() {
 }
 
 # The authority's name constraints and the TV's subjectAltName, from the
-# names file: one "IP:addr" or "DNS:name" per line.
+# names file: one "IP:addr" or "DNS:name" per line. Constraints bind only
+# the kinds of name they list, so an authority for an address alone gets a
+# DNS subtree too, under the reserved .invalid, or its key could still sign
+# any DNS name.
 constraints() {
-    sed -e 's|^IP:\(.*\)$|permitted;IP:\1/255.255.255.255|' -e 's|^DNS:|permitted;DNS:|' "$DIR/names" | paste -sd, -
+    {
+        sed -e 's|^IP:\(.*\)$|permitted;IP:\1/255.255.255.255|' -e 's|^DNS:|permitted;DNS:|' "$DIR/names"
+        grep -q '^DNS:' "$DIR/names" || echo "permitted;DNS:lumen.invalid"
+    } | paste -sd, -
 }
 
 alt_names() {
@@ -105,6 +111,9 @@ EOF
     rm -f "$conf"
 }
 
+# The TV's certificate. Its CN is a label, not a name: browsers read only
+# subjectAltName, and OpenSSL checks a CN that looks like a host name (an
+# address does) against the authority's DNS constraints.
 make_leaf() {
     conf=$DIR/.leaf.cnf
     cat >"$conf" <<EOF
@@ -112,7 +121,7 @@ make_leaf() {
 distinguished_name = dn
 prompt = no
 [dn]
-CN = $(first_name)
+CN = Lumen TV at $(first_name)
 [leaf]
 basicConstraints = critical,CA:FALSE
 keyUsage = critical,digitalSignature
@@ -137,6 +146,7 @@ windows_hint() {
     case $(uname -s 2>/dev/null) in
         MINGW* | MSYS* | CYGWIN*)
             echo "on Windows, keep the keys yours alone, as the SSH key:"
+            # shellcheck disable=SC2028 # the backslashes are Windows', printed as they are
             echo "  icacls \"%USERPROFILE%\\.lumen\\remote\\ca\" /inheritance:r /grant:r \"%USERNAME%:(OI)(CI)F\""
             ;;
     esac
@@ -177,8 +187,9 @@ cmd_init() {
 }
 
 cmd_issue() {
-    [ -f "$DIR/lumen-ca.key" ] && [ -f "$DIR/names" ] ||
+    if [ ! -f "$DIR/lumen-ca.key" ] || [ ! -f "$DIR/names" ]; then
         die "no authority in $DIR: tools/remote/ca.sh init --ip ADDR"
+    fi
     make_leaf
     echo "made a new certificate for the TV: $DIR/server.crt; tools/remote.sh web install puts it there"
 }

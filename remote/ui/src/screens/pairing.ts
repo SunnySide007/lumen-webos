@@ -1,113 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Pairing: the phone's side of R4's pairing, as a stub (pairing.ts), and this
-// device's settings: the TV's address and tilt from the phone's motion. In
-// the PC app, the TV's address, SSH port and MAC (for Wake-on-LAN), and where
-// the app's key is; pairing a phone waits for R4.
+// Pairing (R4). In the PC app: open pairing (the TV and this screen show a
+// six-digit code for two minutes), the paired devices, owner rights given
+// or taken back, revoking; then the PC's own settings (the TV's address,
+// SSH port and MAC). On a phone, which the TV serves only once it is
+// paired: who this phone is and what its role allows, then this device's
+// settings (the TV's address and tilt from the phone's motion).
 import type { Ctx, Screen } from "../context.ts";
 import type { PcHost, PcSettings } from "../host.ts";
 import { sshAddress } from "../host.ts";
 import { flash, h, setText } from "../dom.ts";
 import { icon } from "../icons.ts";
 import { deviceTilt, disableDeviceTilt, enableDeviceTilt, reducedMotion, rimLight } from "../motion.ts";
-import { MAX_ATTEMPTS, STUB_WRONG_CODE } from "../pairing.ts";
+import type { DeviceInfo } from "../protocol.ts";
+import { MAX_ATTEMPTS } from "../pairing.ts";
+
+/** The port lumen-remote listens on (tools/remote.sh web start). */
+export const WEB_PORT = 8443;
+
+const ROLE_TEXT = {
+  remote: "Remote only: power, volume, inputs, apps, keys, typing and the picture and sound modes.",
+  owner: "Owner: everything here, privacy and every setting included, as the PC granted.",
+} as const;
 
 export function pairingScreen(ctx: Ctx): Screen {
   const off: (() => void)[] = [];
-
-  // Six cells over one real input, so typing, pasting and the phone's
-  // one-time-code suggestion all work.
-  const cells = Array.from({ length: 6 }, () => h("span", { class: "code-cell", "aria-hidden": "true" }));
-  const code = h("input", {
-    class: "code-input",
-    id: "pair-code",
-    inputmode: "numeric",
-    autocomplete: "one-time-code",
-    pattern: "[0-9]{6}",
-    maxlength: "6",
-    "aria-label": "Pairing code, six digits",
-  });
-  const codeBox = h("div", { class: "code" }, ...cells, code);
-  const pairButton = h("button", { class: "pill-button accent", type: "submit" }, icon("link"), h("span", { text: "Pair" }));
-  const status = h("p", { class: "pair-status", role: "status" });
-  const forget = h("button", { class: "pill-button", type: "button" }, h("span", { text: "Forget this pairing" }));
-  forget.addEventListener("click", () => ctx.pairing.forget());
-
-  const paintCells = () => {
-    const digits = code.value.replace(/\D/g, "").slice(0, 6);
-    if (digits !== code.value) code.value = digits;
-    cells.forEach((c, i) => {
-      setText(c, digits[i] ?? "");
-      c.classList.toggle("filled", i < digits.length);
-      c.classList.toggle("caret", i === Math.min(digits.length, 5) && document.activeElement === code);
-    });
-    pairButton.disabled = digits.length !== 6 || ctx.pairing.state.get().kind !== "unpaired";
-  };
-  for (const ev of ["input", "focus", "blur"]) code.addEventListener(ev, paintCells);
-
-  const form = h(
-    "form",
-    { class: "pair-form" },
-    h("label", { for: "pair-code", class: "field-label", text: "The code on the TV" }),
-    codeBox,
-    pairButton,
-  );
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    void ctx.pairing.pair(code.value);
-  });
-
-  const card = h(
-    "div",
-    { class: "pair-card glass" },
-    h("div", { class: "card-head" }, icon("pair"), h("h2", { text: "Pair this phone" })),
-    h(
-      "ol",
-      { class: "steps" },
-      h("li", { text: "On the PC, open Lumen Remote and choose Pair a phone." }),
-      h("li", { text: "The TV shows a six-digit code for two minutes." }),
-      h("li", { text: "Type it here. Five wrong codes close pairing." }),
-    ),
-    form,
-    status,
-    forget,
-    h("p", {
-      class: "stub-note",
-      text: `A stub until R4: nothing on the TV checks the code yet. Any six digits pair, except ${STUB_WRONG_CODE}, which stands for a wrong one. The token stays in this page's memory only.`,
-    }),
-  );
-
-  off.push(
-    ctx.pairing.state.subscribe((s, before) => {
-      card.dataset.state = s.kind;
-      form.hidden = s.kind === "paired" || s.kind === "closed";
-      forget.hidden = s.kind !== "paired";
-      code.disabled = s.kind === "checking";
-      switch (s.kind) {
-        case "unpaired":
-          setText(
-            status,
-            s.wrong ? `That code is wrong. ${s.attemptsLeft} of ${MAX_ATTEMPTS} tries left.` : "Not paired.",
-          );
-          if (s.wrong && before.kind === "checking") {
-            flash(codeBox, "shake", 500);
-            code.value = "";
-          }
-          break;
-        case "checking":
-          setText(status, "Checking the code…");
-          break;
-        case "paired":
-          setText(status, `Paired at ${s.since.toLocaleTimeString()}. Closing this page forgets the token.`);
-          code.value = "";
-          break;
-        case "closed":
-          setText(status, "Pairing closed after five wrong codes. Open it again from the PC app.");
-          break;
-      }
-      paintCells();
-    }),
-  );
+  const pc = ctx.host.pc;
+  const card = pc ? pcPairing(ctx, pc, off) : phoneCard(ctx, off);
 
   // This device.
   const address = h("input", {
@@ -166,7 +85,6 @@ export function pairingScreen(ctx: Ctx): Screen {
   };
   off.push(deviceTilt.subscribe(paintTilt), reducedMotion.subscribe(paintTilt));
 
-  const pc = ctx.host.pc;
   const device = h(
     "div",
     { class: "device glass" },
@@ -179,24 +97,198 @@ export function pairingScreen(ctx: Ctx): Screen {
           tiltNote,
         ]),
   );
-  if (pc) {
-    // The PC opens pairing for a phone; that and the TV's code come with R4.
-    card.replaceChildren(
-      h("div", { class: "card-head" }, icon("pair"), h("h2", { text: "Pair a phone" })),
-      h(
-        "ol",
-        { class: "steps" },
-        h("li", { text: "Here, choose Pair a phone: the TV shows a six-digit code for two minutes." }),
-        h("li", { text: "On the phone, open the TV's page and type the code." }),
-        h("li", { text: "Paired phones are listed here, and can be revoked." }),
-      ),
-      h("p", { class: "stub-note", text: "Comes with R4, when the TV serves the page to the phone. Nothing to pair yet." }),
-    );
-  }
   off.push(rimLight(card), rimLight(device));
 
   const el = h("section", { class: "pairing" }, card, device);
   return { el, destroy: () => off.forEach((f) => f()) };
+}
+
+/** A phone's card: who it is to the TV, from lumen-remote's hello. */
+function phoneCard(ctx: Ctx, off: (() => void)[]): HTMLElement {
+  const name = h("h2", { text: "This phone" });
+  const role = h("p", { class: "pair-status", role: "status" });
+  const what = h("p", { class: "hint" });
+  const card = h(
+    "div",
+    { class: "pair-card glass" },
+    h("div", { class: "card-head" }, icon("pair"), name),
+    role,
+    what,
+    h("p", { class: "hint", text: "To unpair it, revoke it in Lumen Remote on the PC. Owner rights come only from there too." }),
+  );
+  off.push(
+    ctx.link.subscribe((l) => {
+      if (l.kind !== "open") {
+        card.dataset.state = "unknown";
+        setText(role, l.kind === "revoked" ? "Revoked from the PC." : "Not connected to the TV.");
+        setText(what, "");
+        return;
+      }
+      if (!l.device || !l.role) {
+        card.dataset.state = "unknown";
+        setText(name, "Pairing");
+        setText(role, "Not paired through the TV: this page didn't come from lumen-remote.");
+        setText(what, "On the TV's own address, an unpaired phone gets the pairing page first.");
+        return;
+      }
+      card.dataset.state = "paired";
+      setText(name, l.device.name);
+      setText(role, l.role === "owner" ? "Paired, with owner rights" : "Paired, remote only");
+      setText(what, ROLE_TEXT[l.role]);
+    }),
+  );
+  return card;
+}
+
+/** The PC's card: pairing a phone, and the paired devices. */
+function pcPairing(ctx: Ctx, pc: PcHost, off: (() => void)[]): HTMLElement {
+  const p = ctx.pairing;
+  const where = h("li", { text: `On the phone, open the TV's page, https://<the TV>:${WEB_PORT}.` });
+  void pc.settings().then(
+    (s) => {
+      if (s.host) setText(where, `On the phone, open https://${s.host}:${WEB_PORT}.`);
+    },
+    () => undefined,
+  );
+  const cells = Array.from({ length: 6 }, () => h("span", { class: "code-cell filled" }));
+  const code = h("div", { class: "code pc-code", "aria-label": "The pairing code", role: "group" }, ...cells);
+  const left = h("p", { class: "pair-status", role: "status" });
+  const openButton = h("button", { class: "pill-button accent", type: "button" }, icon("link"), h("span", { text: "Pair a phone" }));
+  const closeButton = h("button", { class: "pill-button", type: "button" }, h("span", { text: "Close pairing" }));
+  openButton.addEventListener("click", () => {
+    openButton.disabled = true;
+    p.open()
+      .then(() => flash(code, "pop", 400))
+      .catch((e: unknown) => ctx.say(`Pairing didn't open: ${String(e)}`))
+      .finally(() => (openButton.disabled = !p.available));
+  });
+  closeButton.addEventListener("click", () => void p.close().catch((e: unknown) => ctx.say(String(e))));
+
+  const list = h("ul", { class: "device-list", "aria-label": "Paired devices" });
+  const empty = h("p", { class: "hint", text: "No phone is paired." });
+  const card = h(
+    "div",
+    { class: "pair-card glass" },
+    h("div", { class: "card-head" }, icon("pair"), h("h2", { text: "Pair a phone" })),
+    h(
+      "ol",
+      { class: "steps" },
+      h("li", { text: "Choose Pair a phone: the TV and this screen show a six-digit code for two minutes." }),
+      where,
+      h("li", { text: `Type the code there. ${MAX_ATTEMPTS} wrong codes close pairing.` }),
+    ),
+    code,
+    left,
+    h("div", { class: "pair-actions" }, openButton, closeButton),
+    h("h3", { class: "field-label", text: "Paired devices" }),
+    list,
+    empty,
+  );
+
+  const row = (d: DeviceInfo): HTMLElement => {
+    const owner = d.role === "owner";
+    const role = h("button", { class: "pill-button small", type: "button" }, h("span", { text: owner ? "Make remote only" : "Make owner" }));
+    role.addEventListener("click", () => {
+      role.disabled = true;
+      p.setRole(d.id, owner ? "remote" : "owner")
+        .then(() => ctx.say(owner ? `${d.name} is remote only now` : `${d.name} has owner rights now`))
+        .catch((e: unknown) => ctx.say(String(e)))
+        .finally(() => (role.disabled = false));
+    });
+    // Revoking asks once more, as Turn off does.
+    const label = h("span", { text: "Revoke" });
+    const revoke = h("button", { class: "pill-button small danger", type: "button" }, label);
+    let armed: ReturnType<typeof setTimeout> | null = null;
+    revoke.addEventListener("click", () => {
+      if (!armed) {
+        setText(label, "Revoke? Tap again");
+        revoke.classList.add("armed");
+        armed = setTimeout(() => {
+          armed = null;
+          revoke.classList.remove("armed");
+          setText(label, "Revoke");
+        }, 4000);
+        return;
+      }
+      clearTimeout(armed);
+      revoke.disabled = true;
+      p.revoke(d.id)
+        .then(() => ctx.say(`${d.name} is revoked: its link closed`))
+        .catch((e: unknown) => {
+          revoke.disabled = false;
+          ctx.say(String(e));
+        });
+    });
+    return h(
+      "li",
+      { class: "device-row", "data-role": d.role, "data-id": d.id },
+      h(
+        "div",
+        { class: "device-what" },
+        h("span", { class: "device-name", text: d.name }),
+        h("span", { class: "device-meta", text: `${owner ? "Owner" : "Remote only"} · paired ${new Date(d.paired).toLocaleDateString()}` }),
+      ),
+      role,
+      revoke,
+    );
+  };
+
+  let shown = "";
+  let ticker: ReturnType<typeof setInterval> | null = null;
+  const paint = () => {
+    const v = p.state.get();
+    const on = p.available;
+    openButton.disabled = !on;
+    const w = v.window;
+    const secs = p.secondsLeft();
+    const open = w !== null && secs > 0;
+    card.dataset.state = open ? "open" : "idle";
+    code.hidden = !open || !w.code;
+    closeButton.hidden = !open;
+    const openLabel = openButton.querySelector("span");
+    if (openLabel) setText(openLabel, open ? "New code" : "Pair a phone");
+    if (open) {
+      const digits = (w.code ?? "").split("");
+      cells.forEach((c, i) => setText(c, digits[i] ?? ""));
+      setText(
+        left,
+        `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")} left · ${w.attemptsLeft} of ${MAX_ATTEMPTS} tries${w.toasted ? " · shown on the TV" : ""}`,
+      );
+    } else {
+      setText(left, on ? "Pairing is closed." : "Pairing needs the PC's link to the TV.");
+    }
+    // The list changes rarely; rebuild it only when it does.
+    const key = JSON.stringify(v.devices);
+    if (key !== shown) {
+      shown = key;
+      list.replaceChildren(...v.devices.map(row));
+    }
+    empty.hidden = v.devices.length > 0 || !v.loaded;
+    // Still once the window has ended.
+    if (!open && ticker) {
+      clearInterval(ticker);
+      ticker = null;
+    }
+  };
+  off.push(
+    p.state.subscribe(() => {
+      paint();
+      const ticking = p.secondsLeft() > 0;
+      if (ticking && !ticker) ticker = setInterval(paint, 1000);
+      if (!ticking && ticker) {
+        clearInterval(ticker);
+        ticker = null;
+      }
+    }),
+    ctx.link.subscribe((l) => {
+      if (l.kind === "open" && p.available) void p.refresh().catch(() => undefined);
+      paint();
+    }),
+    () => {
+      if (ticker) clearInterval(ticker);
+    },
+  );
+  return card;
 }
 
 /** The PC app's settings: where the TV is, and its MAC for Wake-on-LAN.

@@ -43,9 +43,28 @@ describe("FakeTv", () => {
       "settings.set": { key: "sound.mode", value: "music" },
       toast: { text: "hi" },
     };
-    VERBS.forEach((verb, i) => {
+    // devices.revoke and devices.role need a paired phone: their own test.
+    const needPhone = ["devices.revoke", "devices.role"];
+    VERBS.filter((v) => !needPhone.includes(v)).forEach((verb, i) => {
       expect(ask(verb, args[verb], i + 1), verb).toMatchObject({ id: i + 1, ok: true });
     });
+  });
+
+  it("pairs a phone in the window the PC opened, then promotes and revokes it", () => {
+    expect(tv.phonePairs("Pixel")).toBe(false);
+    const open = ask("pair.open");
+    expect(open).toMatchObject({ ok: true, result: { seconds: 120, toasted: true } });
+    expect(events.at(-1)).toMatchObject({ event: "devices", data: { pairing: { open: true, attemptsLeft: 5 } } });
+    expect(tv.phonePairs("Pixel")).toBe(true);
+    const listed = ask("devices.list");
+    expect(listed).toMatchObject({ ok: true, result: { pairing: { open: false }, devices: [{ name: "Pixel", role: "remote" }] } });
+    const id = tv.devices[0]!.id;
+    expect(ask("devices.role", { id, role: "owner" })).toMatchObject({ ok: true });
+    expect(tv.devices[0]!.role).toBe("owner");
+    expect(ask("devices.revoke", { id })).toMatchObject({ ok: true });
+    expect(tv.devices).toEqual([]);
+    expect(ask("devices.revoke", { id })).toMatchObject({ ok: false, error: { code: "not-found" } });
+    expect(events.at(-1)).toMatchObject({ event: "devices", data: { devices: [] } });
   });
 
   it("changes the volume and pushes it", () => {

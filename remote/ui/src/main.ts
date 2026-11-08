@@ -17,7 +17,7 @@ import { icon, muteIcon } from "./icons.ts";
 import type { IconName } from "./icons.ts";
 import { POWER_LABELS } from "./labels.ts";
 import { detectRefraction, installSprings, morph, rimLight } from "./motion.ts";
-import { PairingStub } from "./pairing.ts";
+import { Pairing } from "./pairing.ts";
 import { EMPTY_STATE, Store, ambientColor, applyEvent, frontApp, frontTitle } from "./store.ts";
 import type { TvState } from "./store.ts";
 import { appsScreen } from "./screens/apps.ts";
@@ -56,12 +56,17 @@ function boot(host: Host): void {
   });
   const tv = new Store<TvState>(EMPTY_STATE);
   const link = new Store<LinkState>(client.state);
-  const pairing = new PairingStub();
-  client.onState((s) => link.set(s));
+  const pairing = new Pairing(client);
+  client.onState((s) => {
+    link.set(s);
+    if (s.kind !== "open") pairing.onLinkLost();
+  });
   client.onEvent((e) => {
     if (e.event === "hello") void refreshApps();
+    pairing.onEvent(e);
     tv.update((s) => applyEvent(s, e));
   });
+  if (!host.pc) watchPairing(link);
 
   async function refreshApps(): Promise<void> {
     try {
@@ -222,6 +227,10 @@ function statusLine(tv: Store<TvState>, link: Store<LinkState>, client: RemoteCl
         text = "Paused";
         tone = "busy";
         break;
+      case "revoked":
+        text = "Revoked";
+        tone = "bad";
+        break;
     }
     setText(linkText, text);
     linkChip.dataset.tone = tone;
@@ -247,6 +256,28 @@ function statusLine(tv: Store<TvState>, link: Store<LinkState>, client: RemoteCl
   });
 
   return h("div", { class: "status" }, h("div", { class: "status-tv" }, front, vol, power), linkChip);
+}
+
+/** In a browser served by the TV: once the PC has revoked this phone, the
+ * TV serves the pairing page again, so the page goes back to it. A
+ * revoked phone's open link is closed with 4401; one that was away when it
+ * was revoked finds out from /whoami when its WebSocket keeps failing. */
+function watchPairing(link: Store<LinkState>): void {
+  let asked = false;
+  link.subscribe((s) => {
+    if (s.kind === "revoked") {
+      location.replace("/");
+      return;
+    }
+    if (s.kind === "open") asked = false;
+    if (s.kind !== "waiting" || s.attempt < 1 || asked || location.protocol !== "https:") return;
+    asked = true;
+    void fetch("/whoami", { cache: "no-store", credentials: "same-origin" })
+      .then((r) => {
+        if (r.status === 401) location.replace("/");
+      })
+      .catch(() => undefined);
+  });
 }
 
 function makeSnack(): { el: HTMLElement; say(message: string, action?: SnackAction): void } {

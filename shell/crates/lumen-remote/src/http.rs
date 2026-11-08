@@ -251,7 +251,10 @@ impl Response {
         self
     }
 
-    /// The bytes on the wire; HEAD gets the head only.
+    /// The bytes on the wire; HEAD gets the head only. Referrer-Policy is
+    /// same-origin, not no-referrer: under no-referrer a browser sends
+    /// `Origin: null` with the pairing form's POST, which the origin check
+    /// then refuses; same-origin still sends no referrer to another site.
     pub fn bytes(&self, head_only: bool, keep_alive: bool) -> Vec<u8> {
         let mut out = format!("HTTP/1.1 {} {}\r\n", self.status, reason(self.status));
         for (name, value) in &self.headers {
@@ -267,7 +270,7 @@ impl Response {
         }
         out.push_str(
             "X-Content-Type-Options: nosniff\r\n\
-             Referrer-Policy: no-referrer\r\n\
+             Referrer-Policy: same-origin\r\n\
              X-Frame-Options: DENY\r\n\
              Cross-Origin-Opener-Policy: same-origin\r\n\
              Cross-Origin-Resource-Policy: same-origin\r\n\r\n",

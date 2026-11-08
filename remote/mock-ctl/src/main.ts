@@ -32,6 +32,7 @@ const CONSOLE_HELP = `console, standing in for the Magic Remote and LG's menus:
   volume <0-100>     mute on|off       app <id>          apps
   power active|screen-off|screensaver|standby
   input <1-4> on|off [device name]     silence <seconds> drop
+  phone [name]       pairs a phone while "Pair a phone" is open
   help               quit`;
 
 function main(): void {
@@ -136,6 +137,9 @@ function runConsole(tv: FakeTv, server: Awaited<ReturnType<typeof startServer>>)
       case "silence":
         server.silence(Number(a) || 30);
         return;
+      case "phone":
+        console.log(tv.phonePairs(rest.join(" ") || "Phone") ? "paired" : "pairing isn't open: Pair a phone on the PC screen first");
+        break;
       case "drop":
         server.dropAll("dropped from the console");
         return;

@@ -4,7 +4,7 @@
 import type { LinkState, RemoteClient } from "./client.ts";
 import { RequestError } from "./client.ts";
 import type { Host } from "./host.ts";
-import type { PairingStub } from "./pairing.ts";
+import type { Pairing } from "./pairing.ts";
 import type { ArgsOf, ResultOf, Verb } from "./protocol.ts";
 import type { Store, TvState } from "./store.ts";
 
@@ -17,7 +17,8 @@ export interface Ctx {
   client: RemoteClient;
   tv: Store<TvState>;
   link: Store<LinkState>;
-  pairing: PairingStub;
+  /** The PC app's pairing and paired devices (R4). */
+  pairing: Pairing;
   /** A browser, or the PC app with Wake-on-LAN and the TV's settings. */
   host: Host;
   /** Sends a request; on failure says why in the snackbar and gives null. */

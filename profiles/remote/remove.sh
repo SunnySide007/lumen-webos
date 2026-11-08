@@ -8,7 +8,10 @@
 # ends with lumen-remote, and no other. It refuses, changing nothing, when no
 # other key would be left, since that would lock out tools/tv.sh. Then it
 # deletes /var/lib/lumen/remote/: lumen-ctl, its settings, its log and the
-# copy of authorized_keys from before the first install. A session that is
+# copy of authorized_keys from before the first install, and R4's
+# lumen-remote, its page, its certificate and the paired devices. Before
+# all that it stops lumen-remote and takes out its tcp 8443 rule (R4), so
+# it runs only ahead of the line's removal and its own. A session that is
 # open keeps running until its connection ends. Safe to run twice. busybox
 # sh.
 set -eu
@@ -22,6 +25,21 @@ fail() {
     echo "remove.sh: $*; nothing was changed" >&2
     exit 1
 }
+
+# lumen-remote (R4) first, and its INPUT rule, as web-stop.sh does.
+for p in /proc/[0-9]*; do
+    if tr '\0' ' ' 2>/dev/null <"$p/cmdline" | grep -q "^$DIR/lumen-remote "; then
+        kill "${p#/proc/}" 2>/dev/null && echo "stopped lumen-remote (pid ${p#/proc/})"
+    fi
+done
+n=0
+while [ $n -lt 10 ]; do
+    num=$(iptables -L INPUT -n --line-numbers 2>/dev/null | grep -E "tcp dpt:8443( |\$)" | head -n 1 | cut -d' ' -f1)
+    [ -n "$num" ] || break
+    iptables -D INPUT "$num" || break
+    echo "removed the tcp 8443 rule"
+    n=$((n + 1))
+done
 
 if [ -f $AK ] && grep -q "$OURS" $AK; then
     [ ! -L $AK ] || fail "$AK is a link"

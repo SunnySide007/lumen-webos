@@ -201,7 +201,7 @@ pub fn pair_page(message: Option<(&str, bool)>) -> Vec<u8> {
     format!(
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-<meta name=\"color-scheme\" content=\"dark\"><meta name=\"referrer\" content=\"no-referrer\">\
+<meta name=\"color-scheme\" content=\"dark\"><meta name=\"referrer\" content=\"same-origin\">\
 <title>Pair with Lumen Remote</title><style>{STYLE}</style></head><body><main>\
 <h1>Pair this phone</h1>\
 <ol><li>On the PC, open Lumen Remote and choose Pair a phone.</li>\

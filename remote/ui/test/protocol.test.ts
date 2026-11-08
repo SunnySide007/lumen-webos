@@ -35,6 +35,11 @@ const GOOD: Record<Verb, unknown> = {
   "settings.get": { keys: ["picture.mode"] },
   "settings.set": { key: "picture.oledLight", value: 80 },
   toast: { text: "Volume 20" },
+  "pair.open": {},
+  "pair.close": {},
+  "devices.list": {},
+  "devices.revoke": { id: "0a1b2c3d" },
+  "devices.role": { id: "0a1b2c3d", role: "owner" },
 };
 
 /** Arguments each verb must refuse. */
@@ -55,6 +60,9 @@ const BAD: Partial<Record<Verb, unknown[]>> = {
     { key: "picture.mode" },
   ],
   toast: [{ text: "x".repeat(121) }, { text: "" }],
+  "pair.open": [{ code: "123456" }],
+  "devices.revoke": [{}, { id: "0A1B2C3D" }, { id: "0a1b2c3" }, { id: 5 }],
+  "devices.role": [{ id: "0a1b2c3d" }, { id: "0a1b2c3d", role: "admin" }, { role: "owner" }],
 };
 
 describe("verbs", () => {
@@ -80,6 +88,11 @@ describe("verbs", () => {
         "settings.get",
         "settings.set",
         "toast",
+        "pair.open",
+        "pair.close",
+        "devices.list",
+        "devices.revoke",
+        "devices.role",
       ].sort(),
     );
   });

@@ -89,15 +89,12 @@ test("Lumen: privacy state, and starting ambient", async ({ page }) => {
   await expect(page.locator(".chip.power")).toBeHidden();
 });
 
-test("Pairing: a wrong code, then a paired stub", async ({ page }) => {
+test("Pairing: a page the TV didn't serve says how a phone pairs", async ({ page }) => {
+  // The mock's hello carries no device: pairing itself is e2e/phone.spec.ts,
+  // against lumen-remote and lumen-ctl.
   await open(page, "pairing");
-  const code = page.getByLabel("Pairing code, six digits");
-  await code.fill("000000");
-  await page.getByRole("button", { name: "Pair" }).click();
-  await expect(page.locator(".pair-status")).toContainText("4 of 5 tries left");
-  await code.fill("482913");
-  await page.getByRole("button", { name: "Pair" }).click();
-  await expect(page.locator(".pair-status")).toContainText("Paired");
+  await expect(page.locator(".pair-status")).toContainText("Not paired through the TV");
+  await expect(page.getByRole("button", { name: "Pair a phone" })).toHaveCount(0);
 });
 
 test("The link: drops when the TV turns off and comes back by itself", async ({ page }) => {

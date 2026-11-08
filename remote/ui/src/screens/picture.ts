@@ -11,7 +11,7 @@ import { icon } from "../icons.ts";
 import type { IconName } from "../icons.ts";
 import { SETTING_LABELS, valueLabel } from "../labels.ts";
 import { rimLight } from "../motion.ts";
-import { SETTINGS } from "../protocol.ts";
+import { REMOTE_SETTINGS, SETTINGS } from "../protocol.ts";
 import type { SettingChange, SettingKey } from "../protocol.ts";
 
 const GROUPS: { key: SettingKey; icon: IconName; note: string }[] = [
@@ -149,7 +149,14 @@ export function pictureScreen(ctx: Ctx): Screen {
   let wasOpen = false;
   off.push(
     ctx.link.subscribe((l) => {
-      for (const c of all) c.disabled = !accepts(l, "settings.set");
+      // A remote-only phone changes the presets; the rest is the owner's.
+      for (const [key, card] of cards) {
+        const ownerOnly = l.kind === "open" && l.role === "remote" && !REMOTE_SETTINGS.includes(key);
+        card.classList.toggle("owner-only", ownerOnly);
+        if (ownerOnly) card.title = "Owner only: the PC gives owner rights";
+        else card.removeAttribute("title");
+        for (const c of all) if (card.contains(c)) c.disabled = !accepts(l, "settings.set") || ownerOnly;
+      }
       // Read on opening the screen and after each reconnect.
       if (l.kind === "open" && !wasOpen) void read();
       wasOpen = l.kind === "open";

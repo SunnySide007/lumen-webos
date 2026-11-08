@@ -11,6 +11,8 @@ import {
   parseRequest,
 } from "../../ui/src/protocol.ts";
 import type {
+  DeviceInfo,
+  DevicesState,
   ErrorCode,
   Event,
   InputStatus,
@@ -57,6 +59,9 @@ export class FakeTv {
   text = "";
   /** Called after power.off has answered: the server drops every client. */
   onPowerOff: (() => void) | null = null;
+  /** The PC's pairing (R4): the paired devices and the open window. */
+  devices: DeviceInfo[] = [];
+  pairing: { code: string; until: number; attemptsLeft: number } | null = null;
 
   private readonly keys: boolean;
   private readonly privacy: PrivacyState;
@@ -194,7 +199,54 @@ export class FakeTv {
       case "toast":
         this.log(`toast on the TV: ${JSON.stringify(r.args.text)}`);
         return {};
+      case "pair.open": {
+        const code = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
+        this.pairing = { code, until: Date.now() + 120_000, attemptsLeft: 5 };
+        this.log(`pairing open: code ${code} (type "phone <name>" here to pair one)`);
+        this.emitDevices();
+        return { code, seconds: 120, toasted: true };
+      }
+      case "pair.close":
+        this.pairing = null;
+        this.emitDevices();
+        return {};
+      case "devices.list":
+        return this.devicesState();
+      case "devices.revoke":
+      case "devices.role": {
+        const { id } = r.args;
+        const at = this.devices.findIndex((d) => d.id === id);
+        if (at < 0) throw new Refusal("not-found", `no device ${id}`);
+        if (r.verb === "devices.revoke") this.devices.splice(at, 1);
+        else this.devices[at]!.role = r.args.role;
+        this.emitDevices();
+        return {};
+      }
     }
+  }
+
+  devicesState(): DevicesState {
+    const left = this.pairing ? Math.ceil((this.pairing.until - Date.now()) / 1000) : 0;
+    const open = this.pairing !== null && left > 0;
+    return {
+      devices: this.devices.map((d) => ({ ...d })),
+      pairing: { open, secondsLeft: open ? left : 0, attemptsLeft: open ? this.pairing!.attemptsLeft : 0 },
+    };
+  }
+
+  /** A phone types the code into lumen-remote's page: the console's
+   * stand-in for R4's pairing page. */
+  phonePairs(name: string): boolean {
+    if (!this.pairing || this.pairing.until <= Date.now()) return false;
+    const id = Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, "0");
+    this.devices.push({ id, name, role: "remote", paired: new Date().toISOString() });
+    this.pairing = null;
+    this.emitDevices();
+    return true;
+  }
+
+  private emitDevices(): void {
+    this.emit({ event: "devices", data: this.devicesState() });
   }
 
   // The changes below also come from outside: the demo script and the
