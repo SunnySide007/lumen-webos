@@ -175,9 +175,10 @@ runs a build, the median of each; reports in `tools/out/bench/`.
 | 86b3527 | full | 29.62 ms | 256 | 528 ms | |
 | d7de95e (home design) | plain | 16.49 ms | 0.30 | 521 ms | |
 
-Between runs of one build the average moved by at most 0.12 ms and the
-skips by up to 4.6 per 10 s, so the skip limit's floor of 12 is not too
-tight. Every press was shown within 17 to 18 ms (36 ms once in 270).
+Between runs of one build at 60 fps the average moved by at most 0.12 ms
+and the skips by up to 4.7 per 10 s, so the skip limit's floor of 12 is
+not too tight. Every press was shown within 17 to 18 ms (36 ms once in
+270).
 
 App switches (`apps`, with Lumen at 3a89955): a cold start in front after
 1,710 ms (Netflix), 1,990 ms (YouTube) and 2,280 ms (plxnative); warm,
