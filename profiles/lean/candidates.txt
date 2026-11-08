@@ -1,0 +1,10 @@
+# The lean track's candidates (docs/device/bench.md, "The lean track"): LG
+# upstart jobs the "just a TV" contract never uses (decision 10), which
+# tools/bench.sh lean-try may stop, one at a time and only until the next
+# boot. A job is kept stopped (later, by a boot hook) only if the bench
+# shows that app launch times or free memory measurably improve.
+#
+# One job a line: its upstart name, then why, after a #. A job here that
+# also matches profiles/lean/never-touch.txt is refused all the same.
+# Filled from the first survey (tools/bench.sh lean-survey); empty until
+# then, so lean-try refuses everything.

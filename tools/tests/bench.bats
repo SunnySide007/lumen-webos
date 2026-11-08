@@ -122,6 +122,38 @@ SAVER=com.webos.app.screensaver
     [[ "$output" == *"unknown command"* ]]
 }
 
+@test "lean-try refuses a job that is not a candidate, or matches never-touch, before the TV" {
+    mkdir -p "$TMP/lean"
+    printf '# test\nvoiced  # voice, unused\naudiovoice # matches never-touch\n' >"$TMP/lean/candidates.txt"
+    printf '# test\naudio\nlumen\n' >"$TMP/lean/never-touch.txt"
+    export LUMEN_LEAN_PROFILE="$TMP/lean"
+    run sh "$BENCH" lean-try tipsd
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"tipsd is not in profiles/lean/candidates.txt"* ]]
+    run sh "$BENCH" lean-try audiovoice
+    [[ "$output" == *"matches never-touch \"audio\""* ]]
+    run sh "$BENCH" lean-try 'voiced;reboot'
+    [[ "$output" == *"not a plain job name"* ]]
+    # A candidate passes the lists and then needs a recent backup.
+    LUMEN_BACKUP_DIR="$TMP/no-backups" run sh "$BENCH" lean-try voiced
+    [[ "$output" == *"no backup in the last 24 h"* ]]
+}
+
+@test "lean-plan is a dry run over the candidates" {
+    mkdir -p "$TMP/lean"
+    printf 'voiced  # voice, unused\naudiovoice # x\n' >"$TMP/lean/candidates.txt"
+    printf 'audio\n' >"$TMP/lean/never-touch.txt"
+    export LUMEN_LEAN_PROFILE="$TMP/lean"
+    printf '===== jobs (name state pid rss_kB)\nvoiced start/running 812 23400\n===== processes\n' >"$TMP/survey.txt"
+    run sh "$BENCH" lean-plan "$TMP/survey.txt"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"would stop voiced (voiced start/running 812 23400)"* ]]
+    [[ "$output" == *"REFUSED audiovoice"* ]]
+    : >"$TMP/lean/candidates.txt"
+    run sh "$BENCH" lean-plan "$TMP/survey.txt"
+    [[ "$output" == *"no candidates yet"* ]]
+}
+
 # The TV-side step, run here: lib.sh's lumen_dir finds the log in /tmp, so
 # the step is given a copy that reads from a folder of the test's own.
 window_step() {

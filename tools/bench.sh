@@ -31,6 +31,16 @@
 #                                      robot Home press back to Lumen, then
 #                                      warm and Home again; apps not running
 #                                      before are closed after
+#   tools/bench.sh lean-survey [--force]
+#                                      the lean track's read-only survey:
+#                                      memory, upstart jobs and their memory,
+#                                      keep-alive apps, the largest processes
+#   tools/bench.sh lean-plan [SURVEY]  dry run: what lean-try would stop
+#   tools/bench.sh lean-try JOB [--force]
+#                                      tier B: stop one candidate job until
+#                                      the next boot, after a backup of the
+#                                      last 24 h, noted for lean-undo
+#   tools/bench.sh lean-undo [JOB]     start again what lean-try stopped
 #   tools/bench.sh restore             put back the last good build
 #   tools/bench.sh gate DIR [BASE]     the speed gate: DIR/summary.json against
 #                                      BASE (default tools/out/bench/baseline.json)
@@ -53,6 +63,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TV=${LUMEN_TV_SH:-$ROOT/tools/tv.sh}
 BENCH=$ROOT/tools/bench
 OUTROOT=$ROOT/tools/out/bench
+LEAN=${LUMEN_LEAN_PROFILE:-$ROOT/profiles/lean}
 LAST_GOOD=$OUTROOT/last-good
 APP=io.github.sunnyside007.lumen.shell
 SAVER=com.webos.app.screensaver
@@ -544,6 +555,107 @@ cmd_apps() {
     cat "$OUT/apps.tsv"
 }
 
+# The lean track (docs/device/bench.md): a job may be stopped only if
+# profiles/lean/candidates.txt lists it and never-touch.txt matches none of
+# its name. Prints why not, or nothing.
+lean_refused() {
+    job=$1
+    case $job in *[!A-Za-z0-9._-]* | '') echo "not a plain job name: $job"; return ;; esac
+    lower=$(printf '%s' "$job" | tr '[:upper:]' '[:lower:]')
+    while read -r word _; do
+        case $word in '' | '#'*) continue ;; esac
+        case $lower in *"$word"*) echo "$job matches never-touch \"$word\""; return ;; esac
+    done <"$LEAN/never-touch.txt"
+    grep -qE "^$job([[:space:]]|$)" "$LEAN/candidates.txt" ||
+        echo "$job is not in profiles/lean/candidates.txt"
+}
+
+# Exits unless a window is open: the night window (lights nothing), or the
+# day's, or --force.
+lean_window() {
+    [ "${1:-}" = --force ] && return 0
+    why=$(window_closed night)
+    [ -z "$why" ] && return 0
+    why2=$(window_closed)
+    [ -z "$why2" ] && return 0
+    echo "bench: no lab window: $why; $why2"
+    exit 5
+}
+
+cmd_lean_survey() {
+    lean_window "${1:-}"
+    mkdir -p "$OUTROOT/../lean"
+    out=$OUTROOT/../lean/survey-$(date -u +%Y%m%dT%H%M%SZ).txt
+    {
+        tv check </dev/null | grep -E '"(modelName|firmwareVersion)"' | tr -d ' ,'
+        echo "front $(value fg "$(tv_step window)")"
+        tv_step lean-survey
+    } >"$out"
+    echo "survey: ${out#"$ROOT"/}"
+    sed -n '/^===== memory/,/^===== uptime/p' "$out" | sed '$d'
+}
+
+cmd_lean_plan() {
+    survey=${1:-}
+    if [ -z "$survey" ]; then
+        for f in "$OUTROOT"/../lean/survey-*.txt; do [ -f "$f" ] && survey=$f; done
+    fi
+    echo "dry run: what lean-try would stop, from ${survey:-no survey}"
+    n=0
+    while read -r job why; do
+        case $job in '' | '#'*) continue ;; esac
+        n=$((n + 1))
+        line=''
+        [ -z "$survey" ] || line=$(sed -n '/^===== jobs/,/^=====  *processes/p' "$survey" | grep -E "^$job " | head -n 1)
+        why_not=$(lean_refused "$job")
+        if [ -n "$why_not" ]; then
+            echo "  REFUSED $job: $why_not"
+        else
+            echo "  would stop $job (${line:-not in the survey}) ${why}"
+            echo "    tools/bench.sh lean-try $job; undo: tools/bench.sh lean-undo $job, or a reboot"
+        fi
+    done <"$LEAN/candidates.txt"
+    [ "$n" -gt 0 ] || echo "  no candidates yet: profiles/lean/candidates.txt is empty"
+}
+
+# The newest backup's age in seconds, or nothing.
+backup_age() {
+    dir=${LUMEN_BACKUP_DIR:-$HOME/Documents/Lumen-backups}
+    newest=''
+    for d in "$dir"/[0-9]*T[0-9]*Z; do [ -d "$d" ] && newest=${d##*/}; done
+    [ -n "$newest" ] || return 0
+    t=$(date -u -d "$(echo "$newest" | sed 's/^\(....\)\(..\)\(..\)T\(..\)\(..\)\(..\)Z$/\1-\2-\3 \4:\5:\6/')" +%s 2>/dev/null) || return 0
+    echo $(($(date +%s) - t))
+}
+
+cmd_lean_try() {
+    job=${1:-}
+    [ -n "$job" ] || die "lean-try JOB [--force]"
+    why=$(lean_refused "$job")
+    [ -z "$why" ] || die "refused: $why"
+    age=$(backup_age)
+    if [ -z "$age" ] || [ "$age" -ge 86400 ]; then
+        die "no backup in the last 24 h: tools/backup.sh first"
+    fi
+    lean_window "${2:-}"
+    mkdir -p "$OUTROOT/../lean"
+    r=$(tv_step lean-try "JOB=$job")
+    echo "$r"
+    err=$(value error "$r")
+    [ -z "$err" ] || die "$err"
+    printf '%s\t%s\t%s\t%s\ttools/bench.sh lean-undo %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$job" \
+        "$(value avail_before_kb "$r")" "$(value avail_after_kb "$r")" "$job" >>"$OUTROOT/../lean/changes.tsv"
+    echo "tier B: $job stopped until the next boot; undo: tools/bench.sh lean-undo $job"
+}
+
+cmd_lean_undo() {
+    if [ -n "${1:-}" ]; then
+        tv_step lean-undo "JOB=$1"
+    else
+        tv_step lean-undo
+    fi
+}
+
 cmd_gate() {
     [ -f "${1:-}/summary.json" ] || die "no summary.json in ${1:-?}"
     "$PY" -I "$BENCH/gate.py" check "$1/summary.json" "${2:-$OUTROOT/baseline.json}"
@@ -557,6 +669,10 @@ case $cmd in
     last-good) cmd_last_good "$@" ;;
     run) cmd_run "$@" ;;
     apps) cmd_apps "$@" ;;
+    lean-survey) cmd_lean_survey "$@" ;;
+    lean-plan) cmd_lean_plan "$@" ;;
+    lean-try) cmd_lean_try "$@" ;;
+    lean-undo) cmd_lean_undo "$@" ;;
     restore) cmd_restore ;;
     gate) cmd_gate "$@" ;;
     -h | --help | help | '') usage ;;

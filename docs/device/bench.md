@@ -78,6 +78,35 @@ YouTube and plx-native, through: a cold launch (closed first if it runs),
 * An HDMI input is left out for now: switching to one may wake other
   devices over HDMI-CEC, which the family would notice.
 
+## The lean track
+
+Stage 2 of the plan stops what the "just a TV" contract never uses, one
+thing at a time, and keeps a change only if the bench shows app launch
+times or free memory measurably improve. The B9 had about 310 MB available
+and 156 MB in swap with Lumen in front (b9.md, "Memory").
+
+* `tools/bench.sh lean-survey` (read-only, any lab window): memory, every
+  upstart job with its main process's resident memory, SAM's keep-alive
+  apps, the running apps and the 40 largest processes, to
+  `tools/out/lean/survey-<stamp>.txt`.
+* `profiles/lean/candidates.txt` lists the jobs that may be stopped, each
+  with why; it starts empty and is filled from the survey.
+  `profiles/lean/never-touch.txt` refuses any job whose name holds one of
+  its words (picture, sound, inputs, remote, network, apps, store, DRM,
+  root access, Lumen), whatever the candidates say.
+* `tools/bench.sh lean-plan` is the dry run: each candidate, its memory in
+  the latest survey, and the command that would stop it, or why it is
+  refused.
+* `tools/bench.sh lean-try JOB` (tier B, a lab window, a backup from the
+  last 24 hours): notes the job in `/var/lib/lumen/lean/stopped`, stops it
+  with `initctl stop` until the next boot, and logs the memory available
+  before and 10 s after to `tools/out/lean/changes.tsv` with its undo.
+* `tools/bench.sh lean-undo [JOB]` starts again only what that record
+  lists. A reboot undoes every stop.
+
+A stop that helps becomes lasting only through a boot hook, tested like any
+other (safety rule 3).
+
 ## The robot remote
 
 `lumen-ctl play FILE`, `lumen-ctl key NAME` and `lumen-ctl watch-remote

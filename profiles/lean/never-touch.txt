@@ -1,0 +1,54 @@
+# Upstart jobs the lean track never stops, whatever candidates.txt says:
+# a job whose name holds any of these words (case ignored) is refused.
+# Broad on purpose: the TV's picture, sound, inputs, remote, network,
+# apps, store, DRM, root access and Lumen itself (docs/safety.md, rule 7).
+hub
+luna
+sam
+surface
+compositor
+config
+settings
+power
+nop
+memchute
+connman
+wpa
+wifi
+wlan
+network
+audio
+pulse
+sound
+media
+video
+drm
+playready
+widevine
+netflix
+amazon
+youtube
+plex
+install
+store
+sdp
+input
+remote
+mrcu
+bluetooth
+cec
+hdmi
+tv
+time
+webosbrew
+hbchannel
+dropbear
+ssh
+lumen
+upstart
+udev
+dbus
+syslog
+pmlog
+fs
+mount
