@@ -334,6 +334,84 @@ Each verb's time from the PC to the TV acting is recorded.
 **Undo:** uninstall the app, and `tools/remote.sh remove` takes its key off
 the TV.
 
+**Built on 2026-11-08** (`remote/app`, `shell/crates/lumen-remote-link`,
+`remote/ui/src/host.ts`; remote/README.md, "The PC app"), against
+`lumen-ctl serve --bus fake` only. Not yet run against the B9; its check list
+went to the builder session the same day. `lumen-ctl` is unchanged.
+* **App:** Tauri 2.12.3. The tray, the popup (420 × 720, above the icon,
+  hidden when it loses the focus) and the window are as the brief says.
+  Closing the window leaves the app in the tray. Pair a phone opens the
+  Pairing screen, where pairing waits for R4. A first run with no TV set
+  opens the window on "This device" (address, SSH port, MAC).
+* **Reaching the TV:** Windows' own OpenSSH (`System32\OpenSSH\ssh.exe`,
+  9.5p2 on the owner's PC), picked over a Rust SSH crate.
+  * **Why:** the app holds no SSH or crypto code, and it runs the options
+    `ctl.py` proved on the B9: `-F none`, only the app's key, `BatchMode`,
+    no password, no terminal, `ClearAllForwardings`, `accept-new`.
+  * **The session:** one per shown window, and a hidden window lets its
+    session go after 60 s. Lines pass through both ways (64 KiB at most),
+    and the page's `RemoteClient` checks the hello and every reply, as over
+    the mock's WebSocket.
+  * **Errors:** ssh's complaints reach the status chip in plain words, such
+    as a refused key, a changed host key, no answer, or a key other accounts
+    can read.
+* **Settings:** `~/.lumen/remote/tv.conf` (host, port, MAC, optionally
+  another ssh), beside the key and `app.log`. The app makes no key.
+* **Power on:** Wake-on-LAN, sent twice to 255.255.255.255:9 and to the TV's
+  /24 broadcast. "Turn on" shows on the Remote screen while the link is down
+  or the TV is in standby.
+* **Keys:** the pad, Back, Home, Menu and playback stay hidden until a hello
+  offers `key`, and stay hidden through reconnects. A notice says why.
+* **Look:** Acrylic behind both windows, with the page's backdrop
+  translucent over it, and the shared front-end's motion. The popup uses the
+  phone layout.
+* **WebView2:**
+  * **Content security policy** (`tauri.conf.json`): the app's own files and
+    Tauri's IPC, no WebSockets.
+  * **The one capability** grants event listening and the app's eight
+    commands, nothing else of Tauri's.
+  * **SmartScreen** is off: `msSmartScreenProtection` is in the
+    `--disable-features` list, pinned in the config.
+  * **Crash dumps:** not done. Keeping them on the PC is WebView2's
+    `IsCustomCrashReportingEnabled`, an environment option Tauri 2.12 doesn't
+    expose.
+* **Install:** NSIS, per user, `webviewInstallMode: skip` (nothing
+  downloaded), no updater. The installer itself isn't built yet: the first
+  bundling run downloads Tauri's NSIS tools, so the builds so far are
+  `--no-bundle` (`lumen-remote.exe`, 3.3 MB).
+* **Build and checks:** the Windows build runs on the host, since the
+  container has no WebView2 or Windows target.
+  * `make check` builds, lints (PC and TV targets) and tests
+    `lumen-remote-link`, `tests/fake_bus.rs` included: the app's session
+    through a fake ssh to `lumen-ctl --bus fake`.
+  * `remote/ui` adds `test/host.test.ts`, over lines captured from
+    `lumen-ctl --bus fake`.
+  * `npm run e2e:pc` drives the built app over WebView2's debugging port.
+* **On the owner's PC** (Windows 11 Pro 10.0.26300, 3440 × 1440), against
+  the fake bus through a stand-in ssh in the build container:
+  * **Popup:** painted 20 and 21 ms after a tray click, by `app.log`'s
+    timing line (a debug build). That is short of "done when", which wants
+    a warm popup in a release build against the B9.
+  * **Hidden:** after the link had gone, 31 ms of CPU in 30 s across the app
+    and its seven WebView2 processes (0.10 % of one core).
+  * **End to end:** `e2e:pc` passed against the debug build, and 4 of 5
+    runs against the release build. The failure's output was overwritten
+    before it was read.
+* **Open:**
+  * **Licences:** `tools/licenses.py` over the app's `Cargo.lock` finds
+    MPL-2.0 in Tauri's tree. It comes from cssparser, selectors and
+    dtoa-short (tauri-utils' build-time HTML parsing) and from option-ext
+    (`dirs`), and three crates spell their licences the old `A/B` way.
+    MPL-2.0 can be met under GPL-3.0-or-later (MPL 2.0 §3.3), but it isn't
+    on the list, so that is the owner's decision. Until it is made, the
+    app's tree isn't in `make check`.
+  * **The key's permissions:** Windows' ssh refuses the key in
+    `~/.lumen/remote/` as it is. It inherits read access for a sandbox-users
+    group, and `ssh-keygen -y` says "UNPROTECTED PRIVATE KEY FILE". The app
+    shows the `icacls` line that fixes it.
+  * **Not done yet:** the `pktmon` capture, a single-instance guard, and
+    D12.
+
 ### R4: the phone: the TV serves the web UI
 
 **Brief.**

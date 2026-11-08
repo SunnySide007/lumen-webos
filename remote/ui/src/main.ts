@@ -11,6 +11,8 @@ import type { LinkState } from "./client.ts";
 import { failureText } from "./context.ts";
 import type { Ctx, Screen, SnackAction } from "./context.ts";
 import { h, setText, flash } from "./dom.ts";
+import { detectHost } from "./host.ts";
+import type { Host } from "./host.ts";
 import { icon, muteIcon } from "./icons.ts";
 import type { IconName } from "./icons.ts";
 import { POWER_LABELS } from "./labels.ts";
@@ -42,19 +44,16 @@ const ROUTES: Route[] = [
   { id: "pairing", title: "Pairing", short: "Pairing", icon: "pair", make: pairingScreen },
 ];
 
-/** The WebSocket: ?ctl=… when given (the PC app, tests), else /ctl on the
- * host that served this page (the TV, or the mock). */
-export function defaultAddress(loc: Location): string {
-  const given = new URLSearchParams(loc.search).get("ctl");
-  if (given) return given;
-  return `${loc.protocol === "https:" ? "wss" : "ws"}://${loc.host}/ctl`;
-}
-
-function boot(): void {
+function boot(host: Host): void {
   installSprings();
   detectRefraction();
+  if (host.pc) document.documentElement.classList.add("host-pc", `window-${host.pc.window}`);
 
-  const client = new RemoteClient({ url: defaultAddress(location) });
+  const client = new RemoteClient({
+    url: host.address,
+    ...(host.socket ? { socket: host.socket } : {}),
+    ...(host.helloTimeoutMs ? { helloTimeoutMs: host.helloTimeoutMs } : {}),
+  });
   const tv = new Store<TvState>(EMPTY_STATE);
   const link = new Store<LinkState>(client.state);
   const pairing = new PairingStub();
@@ -79,6 +78,7 @@ function boot(): void {
     tv,
     link,
     pairing,
+    host,
     async send(verb, args) {
       try {
         return await client.call(verb, args);
@@ -142,18 +142,20 @@ function boot(): void {
   show();
 
   // A hidden page (the phone's screen off, the tray popup closed) lets the
-  // link go after a while instead of keeping the radio awake for it.
+  // link go after a while instead of keeping the radio awake for it. The
+  // PC app's windows start hidden, so they connect when first shown.
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      hideTimer = setTimeout(() => client.pause(), 15_000);
-    } else {
-      if (hideTimer) clearTimeout(hideTimer);
-      if (client.state.kind === "paused") client.start();
+  host.onVisible((visible) => {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = null;
+    if (!visible) {
+      hideTimer = setTimeout(() => client.pause(), host.hideGraceMs);
+    } else if (client.state.kind === "paused") {
+      client.start();
     }
   });
 
-  client.start();
+  if (!host.pc) client.start();
 }
 
 /** The line at the top: what's in front, the volume, the TV's power and the
@@ -272,4 +274,4 @@ function makeSnack(): { el: HTMLElement; say(message: string, action?: SnackActi
   };
 }
 
-boot();
+void detectHost(location, document).then(boot);

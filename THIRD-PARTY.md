@@ -20,6 +20,8 @@ any of them is marked at the point of use with its origin and license.
 | [libc](https://github.com/rust-lang/libc) | The C calls `std` lacks in Lumen Guard (the DSCP mark, `poll`, SIGTERM, the local date) and in `lumen-ctl` (signals, `_exit`, `getauxval`); in `lumend`, signals, `mount`, `kill`, inotify, `SO_PEERCRED` and the link trial's uid change | MIT or Apache-2.0 |
 | [Inter](https://github.com/rsms/inter) 4.1 | The shell's typeface: `shell/assets/fonts/Inter-SemiBold.ttf`, unmodified, built into the binary, with its licence beside it (`Inter-LICENSE.txt`); its kerning, read out of the font's GPOS table into `Inter-SemiBold.kern` by `tools/font/kern_table.py` and built in too | SIL Open Font License 1.1 |
 | [Inter](https://github.com/rsms/inter), through [Fontsource](https://github.com/fontsource/font-files) | The typeface of the Remote web front-end, bundled in `remote/ui` (variable, Latin subset) | OFL-1.1 |
+| [Tauri](https://github.com/tauri-apps/tauri) (`tauri`, `tauri-build`) | Lumen Remote for Windows (`remote/app`): the tray icon, its menu, the popup and the window around `remote/ui`, in Microsoft's WebView2, which Windows 11 ships and the app doesn't bundle | MIT or Apache-2.0 |
+| [serde](https://github.com/serde-rs/serde) | `remote/app`'s command arguments and the messages it sends the page | MIT or Apache-2.0 |
 
 Trademarks (LG, webOS, Apple, tvOS, Netflix, Prime Video, Plex) belong to their
 owners. "Inspired by tvOS" describes a design direction only: Lumen ships no

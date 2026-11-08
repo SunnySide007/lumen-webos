@@ -59,12 +59,13 @@ pub fn argv(ssh: &Path, key: &Path, host: &str, port: u16) -> Vec<OsString> {
 /// terms where they are ones we know.
 pub fn explain(stderr: &str, code: Option<i32>, key: &Path, host: &str) -> String {
     let has = |s: &str| stderr.contains(s);
-    if has("UNPROTECTED PRIVATE KEY FILE") || has("bad permissions") {
+    if has("UNPROTECTED PRIVATE KEY FILE") || has("ad permissions") {
+        // The account's own name, so the line pastes into any shell.
+        let user = std::env::var("USERNAME").unwrap_or_else(|_| "%USERNAME%".into());
         return format!(
-            "Windows' ssh refuses the key: other accounts can read {}. Make it yours alone: \
-             icacls \"{}\" /inheritance:r /grant:r \"%USERNAME%:F\"",
-            key.display(),
-            key.display()
+            "Windows' ssh refuses the key: other accounts can read {key}. Make it yours \
+             alone: icacls \"{key}\" /inheritance:r /grant:r \"{user}:F\"",
+            key = key.display(),
         );
     }
     if has("REMOTE HOST IDENTIFICATION HAS CHANGED") || has("Host key verification failed") {
