@@ -1,0 +1,90 @@
+# Lumen Guard's allowlist (stage G2, decision 11): on the B9 (OLED55B9PUA,
+# webOS 4.10.2, US store) a name resolves only when a rule here, or in the
+# owner's own file, allows it. Everything else gets 0.0.0.0 or :: from Guard.
+#
+# This is the public, generic list: the Content Store, DRM, the apps the
+# family pays for, casting, and Lumen's own probes, each with its reason. The
+# owner's additions (what else the household uses) stay off this repository,
+# on the TV and in the owner's backups (decision 12): tools/guard.sh owner.
+#
+# tools/store-safe-check.sh fails if any of these is sinkholed, and Guard
+# itself refuses to block while its rules would block the store, DRM or the
+# paid apps (rules.rs, MUST_RESOLVE).
+#
+# Format: one rule per line; text after # is a comment.
+#   name     matches the name and every name under it (netflix.com matches
+#            www.netflix.com but not notnetflix.com)
+#   =name    matches that exact name only
+# A more specific carve-out (carve-outs.txt, imported/) still blocks a name
+# under one of these suffixes; an exact rule here beats any list's suffix.
+#
+# Sources: "seed" is the Phase 1 research (docs/roadmap.md, decision 5) and
+# the owner's must-keep list (2026-10-20); "G1" marks names Guard logged on
+# the B9 in its week, 2026-10-31 06:31Z to 2026-11-08 20:29Z (8,211 lookups
+# of 94 names). Seed suffixes the week didn't show stay until a log shows
+# what is under them: the store and the paid apps come first.
+
+# --- LG Content Store and app updates (webOS 4, US) ---
+us.lgtvsdp.com          # seed, G1 (320 lookups): Content Store (SDP), US host
+=lgtvsdp.com            # seed: apex; the TV's clock sync and TLS checks use it.
+                        # Exact only: rdx2 and other *.lgtvsdp.com names report
+=us.security.lgtvsdp.com # G1: asked with us.lgtvsdp.com during a store visit
+us.lgeapi.com           # seed: LG account and store API
+=us.tvsdp.lgeapi.com    # G1: asked with us.lgtvsdp.com during a store visit
+a.lgappstv.com          # seed: store app downloads
+nextlgsdp.com           # seed: store-related SDP hosts on newer firmware; not
+                        # seen in G1's week. Its report and ad hosts stay
+                        # blocked by the imported lists' more specific names
+gfts.lge.com            # seed, G1 (store visit): store and feature flags;
+                        # does not cover ngfts.lge.com or aic-ngfts.lge.com
+
+# --- DRM ---
+googleapis.com          # seed: Widevine provisioning and licences
+
+# --- Netflix (decision 11 and P5: its logging names stay allowed) ---
+netflix.com             # seed, G1: app, API, push and logs
+netflix.net             # G1: lg-tv-2019.prod.partner.netflix.net, the LG
+                        # device partner config asked at every Netflix start
+nflxext.com             # seed, G1: assets
+nflximg.net             # seed
+nflximg.com             # seed, G1: artwork
+nflxso.net              # seed, G1: artwork and Open Connect steering
+nflxvideo.net           # seed, G1: video CDN (Open Connect)
+nflxsearch.net          # seed
+
+# --- Amazon Prime Video ---
+amazon.com              # seed, G1: sign-in, catalogue, licences
+amazonvideo.com         # seed, G1: the Prime Video API
+aiv-cdn.net             # seed: video CDN
+aiv-delivery.net        # seed: video CDN
+media-amazon.com        # seed, G1: artwork
+amazonaws.com           # seed: AWS endpoints Prime Video and others use; not
+                        # seen in G1's week, so a candidate to narrow
+primevideo.com          # seed: Prime Video's own domain
+=d184dfn36gombl.cloudfront.net # G1: asked with Prime Video's names at each
+                        # of its starts; its role is not known, so it stays
+                        # exact rather than allowing all of CloudFront
+
+# --- Plex (plx-native) ---
+plex.tv                 # seed: sign-in, QR link, server discovery
+plex.direct             # seed: TLS names for the owner's Plex server
+
+# --- Spotify (Spotify Connect from the Pixel) ---
+spotify.com             # seed
+scdn.co                 # seed: audio and artwork CDN
+spotifycdn.com          # seed
+spotifycdn.net          # seed
+
+# --- YouTube and casting from the Pixel ---
+youtube.com             # seed, G1
+googlevideo.com         # seed, G1: video CDN
+ytimg.com               # seed, G1: thumbnails
+ggpht.com               # seed, G1: channel art
+google.com              # seed, G1: sign-in, casting
+gstatic.com             # G1: www.gstatic.com, YouTube's static files
+googleusercontent.com   # G1: lh3 and yt3, YouTube's avatars and art
+
+# --- Lumen's own probes (profiles/privacy/lumen-guard) ---
+lumen.invalid           # the watchdog's heartbeat.lumen.invalid: forwarded,
+                        # so the router's NXDOMAIN proves Guard and upstream
+=lumen-probe.invalid    # lumen-guard --probe's default name, at start-up

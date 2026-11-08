@@ -2,14 +2,15 @@
 //! two-byte length, then the message), at most 32 connections at once. The
 //! asker has 3 s to send its query, and the upstream 3 s to answer it; the
 //! answer streams back unchanged, a buffer of up to 4,096 bytes at a time, so
-//! answers longer than that still pass.
+//! answers longer than that still pass. A query the rules refuse in block
+//! mode gets Guard's own answer, and no upstream connection is made.
 
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::fd::AsFd;
 use std::time::{Duration, Instant};
 
-use crate::guard::{Guard, Throttle};
+use crate::guard::{Action, Guard, Throttle};
 use crate::sys::{self, Interest, Poller};
 use crate::udp::TICK;
 use crate::wire::{self, HEADER, MAX_MESSAGE};
@@ -97,7 +98,20 @@ impl Conn {
                         if !wire::is_query(msg) {
                             return Step::Close;
                         }
-                        guard.record(msg);
+                        if let Action::Reply(answer) = guard.handle(msg) {
+                            // Sent as if the upstream had: the Answer stage
+                            // writes it out, and closes once it has.
+                            let len = answer.len();
+                            self.buf.clear();
+                            self.buf.extend_from_slice(&(len as u16).to_be_bytes());
+                            self.buf.extend_from_slice(&answer);
+                            self.sent = 0;
+                            self.relayed = len + 2;
+                            self.total = Some(len + 2);
+                            self.stage = Stage::Answer;
+                            self.deadline = Instant::now() + DEADLINE;
+                            continue;
+                        }
                         match sys::connect_marked(guard.config.upstream, guard.config.dscp) {
                             Ok(stream) => self.upstream = Some(stream),
                             Err(_) => {
@@ -241,7 +255,8 @@ pub fn serve(guard: &Guard, listener: &TcpListener) -> io::Result<()> {
         let mut upstream_late = 0;
         conns.retain(|c| {
             let alive = c.deadline > now;
-            if !alive && c.stage != Stage::Query {
+            // Guard's own answers have no upstream to be late.
+            if !alive && c.stage != Stage::Query && c.upstream.is_some() {
                 upstream_late += 1;
             }
             alive

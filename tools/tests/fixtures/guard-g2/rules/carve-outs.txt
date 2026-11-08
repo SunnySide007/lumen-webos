@@ -1,0 +1,4 @@
+# Carve-outs: the allowlist's syntax, each blocking.
+unagi-na.amazon.com     # and everything under it
+=logs.netflix.com       # that name only
+shared.example

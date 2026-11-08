@@ -1,0 +1,23 @@
+# Lumen Guard's carve-outs (stage G2, decision 11): names under an allowed
+# suffix in allowlist.txt that stay blocked. Only Lumen's own picks are here;
+# the imported lists (imported/) add theirs the same way.
+#
+# Format: the allowlist's.
+#   name     blocks the name and every name under it
+#   =name    blocks that exact name only
+# The most specific rule wins, so a carve-out beats a shorter allowed suffix,
+# and an exact allowlist rule beats a carve-out's suffix.
+#
+# Each was measured in G1's week (2026-10-31 to 2026-11-08) and only reports:
+# none is a name the app needs to play. Each is a trial row in
+# docs/specs/privacy.md, checked with its app before blocking goes on for the
+# family, and the owner can let one through again in the owner's file
+# (=name). Netflix's logging names are not here (P5: one trial, if wanted).
+
+# --- Amazon Prime Video, under amazon.com ---
+unagi-na.amazon.com     # G1 (834 lookups, the most after Netflix's logs):
+                        # Amazon's device metrics; nothing it answers is shown
+
+# --- YouTube, under googlevideo.com ---
+=eligibility-panelresearch.googlevideo.com # G1 (22 lookups): YouTube's
+                        # audience-panel eligibility, measurement only

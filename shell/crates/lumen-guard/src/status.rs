@@ -1,6 +1,7 @@
 //! Guard's counts and the status file: plain `key value` lines, rewritten
 //! whole (a temporary file renamed over the old one) every ten seconds and at
 //! exit, for `tools/guard.sh status` and the shell's Privacy panel (G5).
+//! Every value is one word, so a reader splits each line once.
 
 use std::fmt::{self, Write as _};
 use std::fs;
@@ -8,6 +9,7 @@ use std::io;
 use std::net::SocketAddrV4;
 use std::path::Path;
 
+use crate::control::Mode;
 use crate::rules::Verdict;
 
 /// A calendar date in the TV's local time.
@@ -27,14 +29,25 @@ impl fmt::Display for Date {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Counts {
     pub lookups: u64,
+    /// Lookups the rules don't allow: blocked in block mode, forwarded and
+    /// only logged in log mode.
     pub would_block: u64,
+    /// Lookups Guard answered itself instead of forwarding.
+    pub blocked: u64,
+    /// Lookups allowed only because a learning window was open.
+    pub learned: u64,
 }
 
 impl Counts {
-    fn add(&mut self, verdict: Verdict) {
+    fn add(&mut self, verdict: Verdict, replied: bool) {
         self.lookups += 1;
-        if verdict == Verdict::WouldBlock {
-            self.would_block += 1;
+        match verdict {
+            Verdict::Block => self.would_block += 1,
+            Verdict::Learn => self.learned += 1,
+            Verdict::Allow => {}
+        }
+        if replied {
+            self.blocked += 1;
         }
     }
 }
@@ -52,11 +65,12 @@ pub struct Stats {
 }
 
 impl Stats {
-    /// Counts one lookup on `today` (the local date; `None` if unknown).
-    pub fn count(&mut self, verdict: Verdict, today: Option<Date>) {
+    /// Counts one lookup on `today` (the local date; `None` if unknown);
+    /// `replied` when Guard answered it itself.
+    pub fn count(&mut self, verdict: Verdict, replied: bool, today: Option<Date>) {
         self.roll(today);
-        self.total.add(verdict);
-        self.today.add(verdict);
+        self.total.add(verdict, replied);
+        self.today.add(verdict, replied);
     }
 
     /// Starts a new day's counts when the date has changed.
@@ -69,25 +83,38 @@ impl Stats {
 }
 
 /// What the status file says besides the counts.
-pub struct Info {
+pub struct Info<'a> {
+    pub mode: Mode,
+    /// The name that kept Guard from blocking, when blocking was asked for.
+    pub refused: Option<&'a str>,
     pub listen: SocketAddrV4,
     pub upstream: SocketAddrV4,
     pub dscp: u8,
     pub pid: u32,
     pub started: u64,
+    /// The open learning window's end, or 0.
+    pub learning_until: u64,
+    /// New names the latest window learned.
+    pub learned: usize,
+    pub owner_rules: usize,
 }
 
-pub fn render(info: &Info, stats: &Stats, log_dropped: u64, now: u64) -> String {
+pub fn render(info: &Info<'_>, stats: &Stats, log_dropped: u64, now: u64) -> String {
     let mut out = String::new();
     let day = stats
         .day
         .map_or_else(|| "unknown".to_owned(), |d| d.to_string());
     let _ = write!(
         out,
-        "version {}\nmode log\nlisten {}\nupstream {}\ndscp {}\npid {}\nstarted {}\nupdated {}\n\
-         lookups {}\nwould_block {}\nday {}\nlookups_today {}\nwould_block_today {}\n\
+        "version {}\nmode {}\nblock_refused {}\nlisten {}\nupstream {}\ndscp {}\npid {}\n\
+         started {}\nupdated {}\n\
+         lookups {}\nwould_block {}\nblocked {}\nlearned {}\nday {}\nlookups_today {}\n\
+         would_block_today {}\nblocked_today {}\nlearned_today {}\n\
+         learning_until {}\nlearned_names {}\nowner_rules {}\n\
          upstream_errors {}\nupstream_timeouts {}\nlog_dropped {}\n",
         env!("CARGO_PKG_VERSION"),
+        info.mode.word(),
+        info.refused.unwrap_or("none"),
         info.listen,
         info.upstream,
         info.dscp,
@@ -96,9 +123,16 @@ pub fn render(info: &Info, stats: &Stats, log_dropped: u64, now: u64) -> String 
         now,
         stats.total.lookups,
         stats.total.would_block,
+        stats.total.blocked,
+        stats.total.learned,
         day,
         stats.today.lookups,
         stats.today.would_block,
+        stats.today.blocked,
+        stats.today.learned,
+        info.learning_until,
+        info.learned,
+        info.owner_rules,
         stats.upstream_errors,
         stats.upstream_timeouts,
         log_dropped,
@@ -131,33 +165,46 @@ mod tests {
         day: 31,
     };
 
+    fn info() -> Info<'static> {
+        Info {
+            mode: Mode::Block,
+            refused: None,
+            listen: SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 2), 53),
+            upstream: SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 53),
+            dscp: 7,
+            pid: 42,
+            started: 1_793_318_400,
+            learning_until: 0,
+            learned: 0,
+            owner_rules: 0,
+        }
+    }
+
     #[test]
     fn today_starts_again_at_midnight() {
         let mut stats = Stats::default();
-        stats.count(Verdict::Allow, Some(OCT_30));
-        stats.count(Verdict::WouldBlock, Some(OCT_30));
+        stats.count(Verdict::Allow, false, Some(OCT_30));
+        stats.count(Verdict::Block, true, Some(OCT_30));
+        stats.count(Verdict::Learn, false, Some(OCT_30));
         assert_eq!(
             stats.today,
             Counts {
-                lookups: 2,
-                would_block: 1
+                lookups: 3,
+                would_block: 1,
+                blocked: 1,
+                learned: 1,
             }
         );
-        stats.count(Verdict::Allow, Some(OCT_31));
+        stats.count(Verdict::Allow, false, Some(OCT_31));
         assert_eq!(
             stats.today,
             Counts {
                 lookups: 1,
-                would_block: 0
+                ..Counts::default()
             }
         );
-        assert_eq!(
-            stats.total,
-            Counts {
-                lookups: 3,
-                would_block: 1
-            }
-        );
+        assert_eq!(stats.total.lookups, 4);
+        assert_eq!(stats.total.would_block, 1);
         // A status write after midnight with no lookup yet shows zero.
         stats.roll(Some(Date {
             year: 2026,
@@ -165,35 +212,41 @@ mod tests {
             day: 1,
         }));
         assert_eq!(stats.today, Counts::default());
-        assert_eq!(stats.total.lookups, 3);
+        assert_eq!(stats.total.lookups, 4);
     }
 
     #[test]
     fn renders_key_value_lines() {
         let mut stats = Stats::default();
-        stats.count(Verdict::WouldBlock, Some(OCT_30));
+        stats.count(Verdict::Block, true, Some(OCT_30));
+        // Log mode: the rules say no, and the lookup is forwarded all the same.
+        stats.count(Verdict::Block, false, Some(OCT_30));
         stats.upstream_timeouts = 2;
-        let info = Info {
-            listen: SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 2), 53),
-            upstream: SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 53),
-            dscp: 7,
-            pid: 42,
-            started: 1_793_318_400,
-        };
+        let mut info = info();
+        info.learning_until = 1_793_319_300;
+        info.learned = 3;
+        info.owner_rules = 5;
         let text = render(&info, &stats, 3, 1_793_318_410);
         for line in [
-            "mode log",
+            "mode block",
+            "block_refused none",
             "listen 127.0.0.2:53",
             "upstream 192.0.2.1:53",
             "dscp 7",
             "pid 42",
             "started 1793318400",
             "updated 1793318410",
-            "lookups 1",
-            "would_block 1",
+            "lookups 2",
+            "would_block 2",
+            "blocked 1",
+            "learned 0",
             "day 2026-10-30",
-            "lookups_today 1",
-            "would_block_today 1",
+            "lookups_today 2",
+            "would_block_today 2",
+            "blocked_today 1",
+            "learning_until 1793319300",
+            "learned_names 3",
+            "owner_rules 5",
             "upstream_timeouts 2",
             "log_dropped 3",
         ] {
@@ -204,18 +257,20 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_date_is_said_so() {
+    fn a_refusal_and_an_unknown_date_are_said_so() {
         let mut stats = Stats::default();
-        stats.count(Verdict::Allow, None);
+        stats.count(Verdict::Allow, false, None);
         assert_eq!(stats.today.lookups, 1);
-        let info = Info {
-            listen: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 5353),
-            upstream: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 5354),
-            dscp: 0,
-            pid: 1,
-            started: 0,
-        };
-        assert!(render(&info, &stats, 0, 0).contains("\nday unknown\n"));
+        let mut info = info();
+        info.mode = Mode::Log;
+        info.refused = Some("us.lgtvsdp.com");
+        let text = render(&info, &stats, 0, 0);
+        assert!(text.contains("\nday unknown\n"), "{text}");
+        assert!(
+            text.contains("\nmode log\nblock_refused us.lgtvsdp.com\n"),
+            "{text}"
+        );
+        assert!(text.lines().all(|l| l.split(' ').count() == 2), "{text}");
     }
 
     #[test]

@@ -1,0 +1,51 @@
+# name  verdict  window: what Guard decides with the rules in rules/ and the
+# owner's file owner.txt, with no learning window ("closed") or one open
+# ("learning"). Read by rules.rs's tests and tools/tests/test_guard_rules.py.
+
+# The allowlist: suffixes and exact names
+us.lgtvsdp.com                  allow   closed
+cdn.us.lgtvsdp.com              allow   closed
+lgtvsdp.com                     allow   closed
+www.netflix.com                 allow   closed
+notnetflix.com                  block   closed
+lone.example.net                allow   closed
+sub.lone.example.net            block   closed
+
+# Carve-outs: more specific than the allowed suffix
+logs.netflix.com                block   closed
+nrdp.logs.netflix.com           allow   closed
+unagi-na.amazon.com             block   closed
+x.unagi-na.amazon.com           block   closed
+api.amazon.com                  allow   closed
+shared.example                  allow   closed
+
+# Imported: exact, subtree, hosts lines
+us.rdx2.lgtvsdp.com             block   closed
+rdx2.lgtvsdp.com                block   closed
+us.nextlgsdp.com                block   closed
+x.us.nextlgsdp.com              allow   closed
+de.nextlgsdp.com                allow   closed
+a.track.example                 block   closed
+v6.example                      block   closed
+x.lgtvsdp.com                   block   closed
+
+# The owner's file
+ads.example                     allow   closed
+household.example               allow   closed
+cdn.household.example           allow   closed
+ichnaea.netflix.com             block   closed
+x.ichnaea.netflix.com           allow   closed
+tracker.amazon.com              block   closed
+a.tracker.amazon.com            block   closed
+
+# Firmware hosts, whatever the owner says
+snu.lge.com                     block   closed
+su.lge.com                      block   learning
+
+# Default deny, and the learning window
+nobody.example                  block   closed
+nobody.example                  learn   learning
+not-a-sinkhole.example          learn   learning
+logs.netflix.com                block   learning
+ads.example                     allow   learning
+a.track.example                 block   learning

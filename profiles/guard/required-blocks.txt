@@ -1,0 +1,20 @@
+# Names that MUST resolve to 0.0.0.0 on the B9: LG's firmware update servers.
+#
+# An LG firmware update can remove root and close the exploit that gave it
+# (docs/safety.md, rule 8). Lumen Guard blocks these whatever any other rule
+# says, the owner's own file included, in block mode; in log mode it logs them
+# as would-block. tools/store-safe-check.sh fails until every one is
+# sinkholed: in the TV's /etc/hosts up to stage 4, by Guard's answer at
+# stage 5. Homebrew Channel's hosts file has snu, su, su-ssl and su-dev, not
+# nsu or snu-dev (privacy survey of 2026-10-28).
+#
+# One exact name per line; text after # is a comment. App updates come from
+# the Content Store (allowlist.txt), not from these hosts.
+
+snu.lge.com             # firmware update check
+su.lge.com              # firmware update
+su-ssl.lge.com          # firmware update over TLS
+su-dev.lge.com          # firmware update, developer channel
+nsu.lge.com             # firmware update, newer clients
+snu-dev.lge.com         # firmware update check, developer endpoint
+                        # (/usr/sbin/update; Glasshouse's HBC_UPDATE_HOSTS)

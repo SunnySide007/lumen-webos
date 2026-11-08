@@ -27,12 +27,26 @@ pub enum WireError {
     NameTooLong,
 }
 
+/// Response codes Guard sends itself (RFC 1035, 4.1.1).
+pub const FORMERR: u8 = 1;
+pub const REFUSED: u8 = 5;
+/// Record types Guard answers with a sinkhole address.
+pub const TYPE_A: u16 = 1;
+pub const TYPE_AAAA: u16 = 28;
+const CLASS_IN: u16 = 1;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Question {
     /// Lower case, in presentation form: labels joined by dots, every octet
     /// other than a letter, digit, `-` or `_` written `\DDD`, the root as `.`.
     pub name: String,
     pub qtype: u16,
+    pub qclass: u16,
+    /// The offset just past QCLASS: the question is `msg[HEADER..end]`.
+    pub end: usize,
+    /// Whether the name used a compression pointer, so its bytes can't be
+    /// copied into an answer as they are.
+    pub compressed: bool,
 }
 
 /// The message's ID, which an answer must repeat.
@@ -45,26 +59,86 @@ pub fn is_query(msg: &[u8]) -> bool {
     msg.len() >= HEADER && msg[2] & 0x80 == 0
 }
 
+/// The header's OPCODE: 0 is a standard query.
+pub fn opcode(msg: &[u8]) -> u8 {
+    msg.get(2).map_or(0, |b| (b >> 3) & 0x0F)
+}
+
+/// The header's QDCOUNT.
+pub fn question_count(msg: &[u8]) -> u16 {
+    match msg.get(4..6) {
+        Some(n) => u16::from_be_bytes([n[0], n[1]]),
+        None => 0,
+    }
+}
+
 /// The first question of a message, or `None` when it has none.
 pub fn first_question(msg: &[u8]) -> Result<Option<Question>, WireError> {
     if msg.len() < HEADER {
         return Err(WireError::Short);
     }
-    if u16::from_be_bytes([msg[4], msg[5]]) == 0 {
+    if question_count(msg) == 0 {
         return Ok(None);
     }
-    let (name, end) = read_name(msg, HEADER)?;
-    // QTYPE, then QCLASS, which Guard does not need.
+    let (name, end, compressed) = read_name(msg, HEADER)?;
     let fixed = msg.get(end..end + 4).ok_or(WireError::Truncated)?;
     Ok(Some(Question {
         name,
         qtype: u16::from_be_bytes([fixed[0], fixed[1]]),
+        qclass: u16::from_be_bytes([fixed[2], fixed[3]]),
+        end: end + 4,
+        compressed,
     }))
 }
 
-/// Reads a possibly compressed name at `off`; returns it and the offset just
-/// past it in the message (past the first pointer, if it used one).
-fn read_name(msg: &[u8], mut off: usize) -> Result<(String, usize), WireError> {
+/// The header of Guard's own answer to `query`: its ID, QR set, its opcode
+/// and RD bit kept, RA set, then `rcode` and the four counts.
+fn answer_header(query: &[u8], rcode: u8, qd: u16, an: u16) -> Vec<u8> {
+    let mut out = Vec::with_capacity(HEADER + 64);
+    out.extend_from_slice(&query[..2]);
+    out.push(0x80 | (query[2] & 0x79));
+    out.push(0x80 | (rcode & 0x0F));
+    out.extend_from_slice(&qd.to_be_bytes());
+    out.extend_from_slice(&an.to_be_bytes());
+    out.extend_from_slice(&[0, 0, 0, 0]);
+    out
+}
+
+/// An answer with no question and no records, only `rcode`: for a query
+/// Guard won't forward and can't answer with a sinkhole (FORMERR, REFUSED).
+pub fn error_answer(query: &[u8], rcode: u8) -> Vec<u8> {
+    answer_header(query, rcode, 0, 0)
+}
+
+/// Guard's answer for a blocked name, as a hosts-file sinkhole gives it
+/// (decision 11): the question repeated, then 0.0.0.0 for A, `::` for AAAA,
+/// and no records for any other type (NOERROR, no data), with `ttl`.
+/// `q` must be `query`'s first question and not compressed.
+pub fn sinkhole_answer(query: &[u8], q: &Question, ttl: u32) -> Vec<u8> {
+    let rdata: &[u8] = match (q.qtype, q.qclass) {
+        (TYPE_A, CLASS_IN) => &[0; 4],
+        (TYPE_AAAA, CLASS_IN) => &[0; 16],
+        _ => &[],
+    };
+    let an = u16::from(!rdata.is_empty());
+    let mut out = answer_header(query, 0, 1, an);
+    out.extend_from_slice(&query[HEADER..q.end]);
+    if an == 1 {
+        // The name as a pointer to the question's, at offset 12.
+        out.extend_from_slice(&[0xC0, HEADER as u8]);
+        out.extend_from_slice(&q.qtype.to_be_bytes());
+        out.extend_from_slice(&CLASS_IN.to_be_bytes());
+        out.extend_from_slice(&ttl.to_be_bytes());
+        out.extend_from_slice(&(rdata.len() as u16).to_be_bytes());
+        out.extend_from_slice(rdata);
+    }
+    out
+}
+
+/// Reads a possibly compressed name at `off`; returns it, the offset just
+/// past it in the message (past the first pointer, if it used one), and
+/// whether it used one.
+fn read_name(msg: &[u8], mut off: usize) -> Result<(String, usize, bool), WireError> {
     let mut name = String::new();
     let mut end = None;
     let mut jumps = 0;
@@ -104,7 +178,7 @@ fn read_name(msg: &[u8], mut off: usize) -> Result<(String, usize), WireError> {
     if name.is_empty() {
         name.push('.');
     }
-    Ok((name, end.unwrap_or(off)))
+    Ok((name, end.unwrap_or(off), end.is_some()))
 }
 
 /// Names come off the wire: only plain host-name octets are written as they
@@ -266,6 +340,79 @@ mod tests {
         msg[2] |= 0x80;
         assert!(!is_query(&msg));
         assert!(!is_query(&msg[..4]));
+    }
+
+    #[test]
+    fn reads_class_end_and_compression() {
+        let msg = query(1, "a.example", 28);
+        let q = first_question(&msg).unwrap().unwrap();
+        assert_eq!((q.qclass, q.end, q.compressed), (1, msg.len(), false));
+        let mut msg = header(1);
+        msg.extend_from_slice(b"\x03www\xC0\x16");
+        msg.extend_from_slice(&[0, 1, 0, 1]);
+        msg.extend_from_slice(b"\x07example\x03com\x00");
+        let q = first_question(&msg).unwrap().unwrap();
+        assert_eq!((q.end, q.compressed), (0x16, true));
+        assert_eq!(opcode(&msg), 0);
+        assert_eq!(question_count(&msg), 1);
+    }
+
+    #[test]
+    fn sinkhole_answers_for_a_aaaa_and_other_types() {
+        for (qtype, rdata) in [(TYPE_A, &[0u8; 4][..]), (TYPE_AAAA, &[0; 16]), (65, &[])] {
+            let msg = query(0xBEEF, "Ads.Example", qtype);
+            let q = first_question(&msg).unwrap().unwrap();
+            let a = sinkhole_answer(&msg, &q, 60);
+            assert!(!is_query(&a));
+            assert_eq!(id(&a), Some([0xBE, 0xEF]));
+            // RD kept, RA set, NOERROR.
+            assert_eq!((a[2], a[3]), (0x81, 0x80));
+            assert_eq!(question_count(&a), 1);
+            let an = u16::from_be_bytes([a[6], a[7]]);
+            // The question repeated as it came, case and all.
+            assert_eq!(&a[HEADER..q.end], &msg[HEADER..q.end]);
+            if rdata.is_empty() {
+                assert_eq!((an, a.len()), (0, q.end));
+                continue;
+            }
+            assert_eq!(an, 1);
+            let rr = &a[q.end..];
+            assert_eq!(&rr[..2], &[0xC0, 12]);
+            assert_eq!(u16::from_be_bytes([rr[2], rr[3]]), qtype);
+            assert_eq!(u16::from_be_bytes([rr[4], rr[5]]), 1);
+            assert_eq!(u32::from_be_bytes([rr[6], rr[7], rr[8], rr[9]]), 60);
+            assert_eq!(
+                usize::from(u16::from_be_bytes([rr[10], rr[11]])),
+                rdata.len()
+            );
+            assert_eq!(&rr[12..], rdata);
+            // The answer's own question reads back as the query's.
+            assert_eq!(first_question(&a).unwrap().unwrap().name, "ads.example");
+        }
+    }
+
+    #[test]
+    fn another_class_gets_no_records() {
+        let mut msg = query(2, "x.example", 1);
+        let n = msg.len();
+        msg[n - 1] = 3; // CHAOS
+        let q = first_question(&msg).unwrap().unwrap();
+        let a = sinkhole_answer(&msg, &q, 60);
+        assert_eq!(u16::from_be_bytes([a[6], a[7]]), 0);
+    }
+
+    #[test]
+    fn error_answers_carry_only_the_code() {
+        let mut msg = query(0x0102, "x.example", 1);
+        msg[2] = 0x29; // opcode 5 (UPDATE), RD
+        assert_eq!(opcode(&msg), 5);
+        let a = error_answer(&msg, REFUSED);
+        assert_eq!(a.len(), HEADER);
+        assert_eq!(id(&a), Some([1, 2]));
+        assert_eq!(opcode(&a), 5);
+        assert_eq!(a[3] & 0x0F, REFUSED);
+        assert_eq!(question_count(&a), 0);
+        assert!(!is_query(&a));
     }
 
     #[test]

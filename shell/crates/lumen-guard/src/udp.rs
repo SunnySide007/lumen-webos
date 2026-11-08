@@ -1,15 +1,17 @@
-//! The UDP side, on the main thread. Each query goes upstream on a socket of
-//! its own (a fresh source port, the DSCP mark), and the first datagram back
-//! with the query's ID goes to the asker unchanged. No answer within 3 s and
-//! nothing is sent back: the asker retries. The loop also rewrites the status
-//! file every ten seconds.
+//! The UDP side, on the main thread. A query the rules refuse in block mode
+//! gets Guard's own answer at once. Every other query goes upstream on a
+//! socket of its own (a fresh source port, the DSCP mark), and the first
+//! datagram back with the query's ID goes to the asker unchanged. No answer
+//! within 3 s and nothing is sent back: the asker retries. The loop also
+//! reads the owner's control files every second and rewrites the status file
+//! every ten.
 
 use std::io::{self, ErrorKind};
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::os::fd::AsFd;
 use std::time::{Duration, Instant};
 
-use crate::guard::{Guard, Throttle};
+use crate::guard::{Action, Guard, Throttle};
 use crate::sys::{self, Interest, Poller};
 use crate::wire::{self, MAX_MESSAGE};
 
@@ -17,6 +19,8 @@ use crate::wire::{self, MAX_MESSAGE};
 const MAX_PENDING: usize = 256;
 const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(3);
 const STATUS_EVERY: Duration = Duration::from_secs(10);
+/// How often the owner's control files are looked at (a `stat` each).
+const CONTROL_EVERY: Duration = Duration::from_secs(1);
 /// The longest wait in `poll`, so a stop request is seen within it.
 pub const TICK: Duration = Duration::from_secs(1);
 /// Datagrams read from the listen socket per wake-up.
@@ -41,6 +45,7 @@ pub fn serve(guard: &Guard, listen: &UdpSocket) -> io::Result<()> {
     let mut buf = vec![0; MAX_MESSAGE + 1];
     let mut poller = Poller::default();
     let mut next_status = Instant::now();
+    let mut next_control = Instant::now() + CONTROL_EVERY;
     let mut status_errors = Throttle::new("status file");
     let mut receive_errors = Throttle::new("udp receive");
     let mut upstream_errors = Throttle::new("udp upstream");
@@ -52,6 +57,10 @@ pub fn serve(guard: &Guard, listen: &UdpSocket) -> io::Result<()> {
                 status_errors.warn(&err);
             }
             next_status = now + STATUS_EVERY;
+        }
+        if now >= next_control {
+            guard.poll_control();
+            next_control = now + CONTROL_EVERY;
         }
         let before = pending.len();
         pending.retain(|p| p.deadline > now);
@@ -68,6 +77,7 @@ pub fn serve(guard: &Guard, listen: &UdpSocket) -> io::Result<()> {
             .min()
             .unwrap_or(next_status);
         let wait = next_status
+            .min(next_control)
             .min(first_deadline)
             .saturating_duration_since(now)
             .min(TICK);
@@ -105,7 +115,11 @@ pub fn serve(guard: &Guard, listen: &UdpSocket) -> io::Result<()> {
                 if n > MAX_MESSAGE || !wire::is_query(msg) {
                     continue;
                 }
-                guard.record(msg);
+                if let Action::Reply(answer) = guard.handle(msg) {
+                    // The asker may be gone; that is its business.
+                    let _ = listen.send_to(&answer, client);
+                    continue;
+                }
                 if pending.len() >= MAX_PENDING {
                     guard.upstream_error();
                     continue;

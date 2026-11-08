@@ -1,20 +1,24 @@
 //! lumen-guard end to end on loopback: the binary on a high port, a fake
 //! upstream in this test that answers with canned bytes, real UDP and TCP
-//! queries, then the answers, the lookup log and the status file. No network
-//! beyond 127.0.0.1.
+//! queries, then the answers, the lookup log and the status file. The rules
+//! are tools/tests/fixtures/guard-g2's, and the owner's control files are
+//! written as the tests go. No network beyond 127.0.0.1.
 
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const GUARD: &str = env!("CARGO_BIN_EXE_lumen-guard");
 /// The name the fake upstream never answers.
 const SILENT: &str = "silent.example";
+/// The address in the fake upstream's answers; Guard's own are all zeros.
+const UPSTREAM_A: [u8; 4] = [192, 0, 2, 33];
 
 /// Picking a free port and binding it are two steps, and the tests run in
 /// parallel: this keeps one test from taking the port another just picked.
@@ -44,7 +48,8 @@ fn canned_answer(query: &[u8], pad: usize) -> Vec<u8> {
     let mut answer = query.to_vec();
     answer[2] |= 0x80;
     answer[7] = 1; // ANCOUNT
-    answer.extend_from_slice(&[0xC0, 12, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 0, 2, 33]);
+    answer.extend_from_slice(&[0xC0, 12, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4]);
+    answer.extend_from_slice(&UPSTREAM_A);
     answer.extend(std::iter::repeat_n(0xEE, pad));
     answer
 }
@@ -52,6 +57,42 @@ fn canned_answer(query: &[u8], pad: usize) -> Vec<u8> {
 fn mentions(msg: &[u8], name: &str) -> bool {
     let first = name.split('.').next().unwrap_or("");
     msg.windows(first.len()).any(|w| w == first.as_bytes())
+}
+
+fn rcode(answer: &[u8]) -> u8 {
+    answer[3] & 0x0F
+}
+
+fn ancount(answer: &[u8]) -> u16 {
+    u16::from_be_bytes([answer[6], answer[7]])
+}
+
+/// The first answer record's data, for an answer to a plain one-question
+/// query (no compression in the question).
+fn first_rdata(answer: &[u8]) -> Option<Vec<u8>> {
+    if ancount(answer) == 0 {
+        return None;
+    }
+    let mut off = 12;
+    while answer[off] != 0 {
+        off += 1 + usize::from(answer[off]);
+    }
+    off += 1 + 4; // the root label, QTYPE and QCLASS
+    off += 2 + 2 + 2 + 4; // a name pointer, TYPE, CLASS, TTL
+    let len = usize::from(u16::from_be_bytes([answer[off], answer[off + 1]]));
+    Some(answer[off + 2..off + 2 + len].to_vec())
+}
+
+/// Guard's sinkhole for `q`: its ID, NOERROR, and all-zero data for A and
+/// AAAA or no record for another type.
+fn is_sinkhole(q: &[u8], answer: &[u8]) -> bool {
+    answer[..2] == q[..2]
+        && answer[2] & 0x80 != 0
+        && rcode(answer) == 0
+        && match first_rdata(answer) {
+            Some(data) => !data.is_empty() && data.iter().all(|b| *b == 0),
+            None => true,
+        }
 }
 
 /// The fake upstream: UDP and TCP on one port, as a router's resolver is.
@@ -105,6 +146,10 @@ impl Upstream {
     fn received(&self) -> Vec<Vec<u8>> {
         self.got.lock().unwrap().clone()
     }
+
+    fn saw(&self, name: &str) -> bool {
+        self.received().iter().any(|q| mentions(q, name))
+    }
 }
 
 /// A UDP socket and a TCP listener on the same free loopback port.
@@ -126,6 +171,25 @@ fn free_port() -> u16 {
     port
 }
 
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// Waits up to 5 s for `cond`: Guard reads its control files every second.
+fn eventually(what: &str, mut cond: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if cond() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    panic!("never: {what}");
+}
+
 struct Guard {
     child: Child,
     listen: SocketAddr,
@@ -133,19 +197,28 @@ struct Guard {
 }
 
 impl Guard {
+    /// Guard with the shared fixture's rules, the owner's control files in
+    /// its folder (none written yet), and `extra` arguments.
     fn start(name: &str, upstream: SocketAddr, extra: &[&str]) -> Self {
+        Self::start_with(name, upstream, extra, true)
+    }
+
+    fn start_with(name: &str, upstream: SocketAddr, extra: &[&str], allowlist: bool) -> Self {
         let dir =
             std::env::temp_dir().join(format!("lumen-guard-it-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(dir.join("rules")).unwrap();
+        fs::create_dir_all(dir.join("rules/imported")).unwrap();
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../tools/tests/fixtures/store-safe/profile");
+            .join("../../../tools/tests/fixtures/guard-g2/rules");
         for file in [
             "allowlist.txt",
+            "carve-outs.txt",
             "required-blocks.txt",
-            "b9-aggressive.hosts",
+            "imported/list.txt",
         ] {
-            fs::copy(fixture.join(file), dir.join("rules").join(file)).unwrap();
+            if file != "allowlist.txt" || allowlist {
+                fs::copy(fixture.join(file), dir.join("rules").join(file)).unwrap();
+            }
         }
         // Held until Guard answers, so its port is still free when it binds.
         let ports = ports();
@@ -161,6 +234,12 @@ impl Guard {
             .arg(&dir)
             .arg("--status")
             .arg(dir.join("status"))
+            .arg("--mode-file")
+            .arg(dir.join("mode"))
+            .arg("--owner")
+            .arg(dir.join("owner.txt"))
+            .arg("--learn")
+            .arg(dir.join("learn"))
             .args(extra)
             .stderr(Stdio::piped())
             .spawn()
@@ -198,6 +277,23 @@ impl Guard {
         panic!("lumen-guard never answered on {}", self.listen);
     }
 
+    /// Writes one of the owner's control files as tools/guard.sh does: whole,
+    /// owner-only, renamed into place.
+    fn control(&self, file: &str, text: &str) {
+        let tmp = self.dir.join(format!("{file}.tmp"));
+        fs::write(&tmp, text).unwrap();
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::rename(&tmp, self.dir.join(file)).unwrap();
+    }
+
+    fn remove(&self, file: &str) {
+        fs::remove_file(self.dir.join(file)).unwrap();
+    }
+
+    fn status(&self) -> String {
+        fs::read_to_string(self.dir.join("status")).unwrap_or_default()
+    }
+
     fn udp(&self, msg: &[u8], wait: Duration) -> Option<Vec<u8>> {
         let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         sock.set_read_timeout(Some(wait)).unwrap();
@@ -205,6 +301,20 @@ impl Guard {
         let mut buf = [0; 4096];
         let (n, _) = sock.recv_from(&mut buf).ok()?;
         Some(buf[..n].to_vec())
+    }
+
+    /// One UDP query for `name`, answered within 5 s.
+    fn ask(&self, id: u16, name: &str, qtype: u16) -> (Vec<u8>, Vec<u8>) {
+        let q = query(id, name, qtype);
+        let answer = self
+            .udp(&q, Duration::from_secs(5))
+            .unwrap_or_else(|| panic!("no UDP answer for {name}"));
+        (q, answer)
+    }
+
+    fn sinkholed(&self, id: u16, name: &str) -> bool {
+        let (q, answer) = self.ask(id, name, 1);
+        is_sinkhole(&q, &answer)
     }
 
     fn tcp(&self, msg: &[u8]) -> Vec<u8> {
@@ -280,53 +390,227 @@ fn status_value<'a>(state: &'a str, key: &str) -> &'a str {
 }
 
 #[test]
-fn forwards_and_logs_udp_and_tcp_lookups() {
+fn log_mode_forwards_everything_and_logs_the_verdict() {
     let upstream = Upstream::start(5000);
-    let guard = Guard::start("both", upstream.addr, &["--dscp", "7"]);
+    let guard = Guard::start("log", upstream.addr, &["--dscp", "7"]);
 
     // UDP: the bytes go up and come back unchanged.
-    let q1 = query(0x1234, "WWW.Netflix.com", 1);
-    let answer = guard
-        .udp(&q1, Duration::from_secs(5))
-        .expect("no UDP answer");
+    let (q1, answer) = guard.ask(0x1234, "WWW.Netflix.com", 1);
     assert_eq!(answer, canned_answer(&q1, 0));
 
-    // On a block list: G1 still forwards it, and logs what it would do.
-    let q2 = query(0x4321, "snu.lge.com", 28);
-    let answer = guard
-        .udp(&q2, Duration::from_secs(5))
-        .expect("no UDP answer");
+    // No rule allows it, and the firmware host: forwarded all the same.
+    let (q2, answer) = guard.ask(0x4321, "nobody.example", 28);
     assert_eq!(answer, canned_answer(&q2, 0));
+    let (q3, answer) = guard.ask(0x4322, "snu.lge.com", 1);
+    assert_eq!(answer, canned_answer(&q3, 0));
 
     // TCP, with an answer longer than Guard's 4,096-byte buffer.
-    let q3 = query(0x0BAD, "ads.example.com", 65);
-    let answer = guard.tcp(&q3);
-    assert_eq!(answer, canned_answer(&q3, 5000));
+    let q4 = query(0x0BAD, "ads.example", 65);
+    assert_eq!(guard.tcp(&q4), canned_answer(&q4, 5000));
 
-    // The upstream saw each query exactly as it was sent.
     let received = upstream.received();
-    for q in [&q1, &q2, &q3] {
+    for q in [&q1, &q2, &q3, &q4] {
         assert!(received.iter().any(|r| r == q), "upstream never got {q:?}");
     }
 
     let (log, state, stderr) = guard.stop();
     assert!(has_line(&log, "A www.netflix.com allow"), "{log}");
-    assert!(has_line(&log, "AAAA snu.lge.com would-block"), "{log}");
-    assert!(has_line(&log, "HTTPS ads.example.com would-block"), "{log}");
+    assert!(has_line(&log, "AAAA nobody.example would-block"), "{log}");
+    assert!(has_line(&log, "A snu.lge.com would-block"), "{log}");
+    assert!(has_line(&log, "HTTPS ads.example would-block"), "{log}");
     // Names only: no addresses or ports in the log.
     assert!(!log.contains("127.0.0.1"), "{log}");
     assert!(stderr.contains("listening on"), "{stderr}");
+    assert!(stderr.contains("mode log"), "{stderr}");
     assert!(stderr.contains("stopped"), "{stderr}");
 
     assert_eq!(status_value(&state, "mode"), "log");
+    assert_eq!(status_value(&state, "block_refused"), "none");
     assert_eq!(status_value(&state, "upstream"), upstream.addr.to_string());
     assert_eq!(status_value(&state, "dscp"), "7");
-    // Three lookups plus the start-up probes, which are lookups too.
+    // Four lookups plus the start-up probes, which no rule allows either.
     let lookups: u64 = status_value(&state, "lookups").parse().unwrap();
-    assert!(lookups >= 4, "{state}");
-    assert_eq!(status_value(&state, "would_block"), "2");
-    assert_eq!(status_value(&state, "would_block_today"), "2");
+    assert!(lookups >= 5, "{state}");
+    let would: u64 = status_value(&state, "would_block").parse().unwrap();
+    assert_eq!(would, lookups - 1, "{state}");
+    assert_eq!(status_value(&state, "blocked"), "0");
     assert_eq!(status_value(&state, "upstream_timeouts"), "0");
+}
+
+#[test]
+fn block_mode_answers_what_the_rules_refuse_itself() {
+    let upstream = Upstream::start(5000);
+    let guard = Guard::start("block", upstream.addr, &["--mode", "block"]);
+
+    // Allowed: forwarded, the upstream's answer unchanged.
+    let (q, answer) = guard.ask(0x0101, "us.lgtvsdp.com", 1);
+    assert_eq!(answer, canned_answer(&q, 0));
+
+    // Not allowed: A gets 0.0.0.0, AAAA ::, HTTPS no record.
+    for (id, name, qtype, len) in [
+        (0x0201, "nobody.example", 1, Some(4)),
+        (0x0202, "nobody.example", 28, Some(16)),
+        (0x0203, "nobody.example", 65, None),
+        (0x0204, "logs.netflix.com", 1, Some(4)),
+        (0x0205, "us.rdx2.lgtvsdp.com", 1, Some(4)),
+        (0x0206, "snu.lge.com", 1, Some(4)),
+    ] {
+        let (q, answer) = guard.ask(id, name, qtype);
+        assert!(is_sinkhole(&q, &answer), "{name} {qtype}: {answer:?}");
+        assert_eq!(first_rdata(&answer).map(|d| d.len()), len, "{name}");
+    }
+
+    // TCP: the same sinkhole, and no upstream connection for it.
+    let q = query(0x0301, "a.track.example", 1);
+    let answer = guard.tcp(&q);
+    assert!(is_sinkhole(&q, &answer), "{answer:?}");
+    let q = query(0x0302, "www.netflix.com", 1);
+    assert_eq!(guard.tcp(&q), canned_answer(&q, 5000));
+
+    for name in ["nobody", "logs", "rdx2", "snu", "track"] {
+        assert!(!upstream.saw(name), "upstream got a blocked query: {name}");
+    }
+
+    let (log, state, _) = guard.stop();
+    assert!(has_line(&log, "A us.lgtvsdp.com allow"), "{log}");
+    assert!(has_line(&log, "AAAA nobody.example block"), "{log}");
+    assert!(has_line(&log, "A logs.netflix.com block"), "{log}");
+    assert!(has_line(&log, "A a.track.example block"), "{log}");
+    assert_eq!(status_value(&state, "mode"), "block");
+    let blocked: u64 = status_value(&state, "blocked").parse().unwrap();
+    assert!(blocked >= 7, "{state}");
+    assert_eq!(status_value(&state, "blocked_today"), blocked.to_string());
+}
+
+#[test]
+fn block_mode_refuses_what_it_cannot_read_or_answer() {
+    let upstream = Upstream::start(0);
+    let guard = Guard::start("junk", upstream.addr, &["--mode", "block"]);
+    // A standard query with two questions: FORMERR, nothing upstream.
+    let mut two = query(0x0401, "us.lgtvsdp.com", 1);
+    two[5] = 2;
+    let answer = guard.udp(&two, Duration::from_secs(5)).unwrap();
+    assert_eq!((rcode(&answer), &answer[..2]), (1, &two[..2]));
+    // Another opcode (UPDATE), for an allowed name: REFUSED.
+    let mut update = query(0x0402, "us.lgtvsdp.com", 1);
+    update[2] = 0x28;
+    let answer = guard.udp(&update, Duration::from_secs(5)).unwrap();
+    assert_eq!(rcode(&answer), 5);
+    // A question that can't be read: FORMERR.
+    let mut cut = query(0x0403, "cut.example", 1);
+    cut.truncate(16);
+    let answer = guard.udp(&cut, Duration::from_secs(5)).unwrap();
+    assert_eq!(rcode(&answer), 1);
+    // Answers sent to Guard are dropped.
+    let reply = canned_answer(&query(1, "x.example", 1), 0);
+    assert_eq!(guard.udp(&reply, Duration::from_millis(300)), None);
+    assert!(
+        !upstream
+            .received()
+            .iter()
+            .any(|q| q[..2] == two[..2] || q[..2] == update[..2] || q[..2] == cut[..2]),
+        "upstream got a refused query"
+    );
+    let (log, _, _) = guard.stop();
+    assert!(has_line(&log, "- - block"), "{log}");
+    assert!(has_line(&log, "A us.lgtvsdp.com block"), "{log}");
+    assert!(!log.contains("x.example"), "{log}");
+}
+
+#[test]
+fn the_mode_file_switches_blocking_on_and_off() {
+    let upstream = Upstream::start(0);
+    let guard = Guard::start("modefile", upstream.addr, &[]);
+    assert!(!guard.sinkholed(0x0501, "nobody.example"));
+    guard.control("mode", "block\n");
+    eventually("blocking on", || guard.sinkholed(0x0502, "nobody.example"));
+    // A trial for another boot is over: back to logging.
+    guard.control("mode", "block 00000000-0000-0000-0000-000000000000\n");
+    eventually("trial over", || !guard.sinkholed(0x0503, "nobody.example"));
+    // This boot's trial blocks.
+    let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+    guard.control("mode", &format!("block {}", boot.trim()));
+    eventually("trial on", || guard.sinkholed(0x0504, "nobody.example"));
+    // The undo: the file goes, and so does blocking.
+    guard.remove("mode");
+    eventually("blocking off", || {
+        !guard.sinkholed(0x0505, "nobody.example")
+    });
+    // A mode file anyone could write is left out.
+    guard.control("mode", "block\n");
+    fs::set_permissions(guard.dir.join("mode"), fs::Permissions::from_mode(0o666)).unwrap();
+    thread::sleep(Duration::from_millis(1500));
+    assert!(!guard.sinkholed(0x0506, "nobody.example"));
+    let (_, _, stderr) = guard.stop();
+    assert!(stderr.contains("mode block"), "{stderr}");
+    assert!(stderr.contains("writable by others"), "{stderr}");
+}
+
+#[test]
+fn a_learning_window_and_the_owners_rules() {
+    let upstream = Upstream::start(0);
+    let guard = Guard::start("learn", upstream.addr, &["--mode", "block"]);
+    assert!(guard.sinkholed(0x0601, "new-app.example"));
+
+    // The window: names no rule covers resolve, and are logged as learned.
+    let now = unix_now();
+    guard.control("learn", &format!("{} {}\n", now - 1, now + 600));
+    eventually("learning", || !guard.sinkholed(0x0602, "new-app.example"));
+    assert!(upstream.saw("new-app"));
+    // A carve-out and an imported name stay blocked while learning.
+    assert!(guard.sinkholed(0x0603, "logs.netflix.com"));
+    assert!(guard.sinkholed(0x0604, "a.track.example"));
+    // The window closed by hand: blocked again.
+    guard.remove("learn");
+    eventually("window closed", || {
+        guard.sinkholed(0x0605, "new-app.example")
+    });
+
+    // Kept by the owner: it resolves for good.
+    guard.control("owner.txt", "=new-app.example\n!=www.amazon.com.example\n");
+    eventually("owner rule", || !guard.sinkholed(0x0606, "new-app.example"));
+    // An owner file that would block the store is refused whole.
+    guard.control("owner.txt", "!=us.lgtvsdp.com\n");
+    thread::sleep(Duration::from_millis(1500));
+    assert!(!guard.sinkholed(0x0607, "new-app.example"));
+    assert!(!guard.sinkholed(0x0608, "us.lgtvsdp.com"));
+    // Dropped: the owner's file loses the name, and it is blocked again.
+    guard.control("owner.txt", "# nothing kept\n");
+    eventually("dropped", || guard.sinkholed(0x0609, "new-app.example"));
+
+    let (log, state, stderr) = guard.stop();
+    assert!(has_line(&log, "A new-app.example learn"), "{log}");
+    assert!(has_line(&log, "A new-app.example block"), "{log}");
+    assert!(has_line(&log, "A new-app.example allow"), "{log}");
+    assert!(stderr.contains("learning window open"), "{stderr}");
+    assert!(
+        stderr.contains("learning window closed: 1 new names"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("owner rules refused"), "{stderr}");
+    assert_eq!(status_value(&state, "learning_until"), "0");
+    assert_eq!(status_value(&state, "learned_names"), "1");
+    assert_eq!(status_value(&state, "owner_rules"), "0");
+}
+
+#[test]
+fn rules_that_would_block_the_store_keep_guard_to_logging() {
+    let upstream = Upstream::start(0);
+    // No allowlist.txt: blocking would cut the store off.
+    let guard = Guard::start_with("unsafe", upstream.addr, &["--mode", "block"], false);
+    let (q, answer) = guard.ask(0x0701, "us.lgtvsdp.com", 1);
+    assert_eq!(answer, canned_answer(&q, 0));
+    let (q, answer) = guard.ask(0x0702, "nobody.example", 1);
+    assert_eq!(answer, canned_answer(&q, 0));
+    eventually("status written", || {
+        guard.status().contains("block_refused")
+    });
+    let (log, state, stderr) = guard.stop();
+    assert_eq!(status_value(&state, "mode"), "log");
+    assert_eq!(status_value(&state, "block_refused"), "allowlist.txt");
+    assert!(has_line(&log, "A nobody.example would-block"), "{log}");
+    assert!(stderr.contains("blocking refused"), "{stderr}");
+    assert!(stderr.contains("allowlist.txt"), "{stderr}");
 }
 
 #[test]
@@ -338,25 +622,8 @@ fn sends_nothing_back_when_the_upstream_is_silent() {
     // Guard counts the timeout at its next tick.
     thread::sleep(Duration::from_millis(1200));
     let (log, state, _) = guard.stop();
-    assert!(has_line(&log, "A silent.example allow"), "{log}");
+    assert!(has_line(&log, "A silent.example would-block"), "{log}");
     assert_eq!(status_value(&state, "upstream_timeouts"), "1");
-}
-
-#[test]
-fn drops_answers_and_junk_sent_to_it() {
-    let upstream = Upstream::start(0);
-    let guard = Guard::start("junk", upstream.addr, &[]);
-    let mut answer = canned_answer(&query(1, "x.example", 1), 0);
-    assert_eq!(guard.udp(&answer, Duration::from_millis(300)), None);
-    answer.truncate(5);
-    assert_eq!(guard.udp(&answer, Duration::from_millis(300)), None);
-    // A query whose question can't be read still goes up, logged as "- -".
-    let mut cut = query(9, "cut.example", 1);
-    cut.truncate(16);
-    assert!(guard.udp(&cut, Duration::from_secs(5)).is_some());
-    let (log, _, _) = guard.stop();
-    assert!(has_line(&log, "- - allow"), "{log}");
-    assert!(!log.contains("x.example"), "{log}");
 }
 
 #[test]
@@ -380,17 +647,21 @@ fn probe_exits_by_whether_anything_answered() {
         .unwrap();
     assert_eq!(nobody.code(), Some(1));
     let (log, _, _) = guard.stop();
-    assert!(has_line(&log, "A lumen-check-1.invalid allow"), "{log}");
+    // Not under lumen.invalid, so no rule allows it: logged, and forwarded.
+    assert!(
+        has_line(&log, "A lumen-check-1.invalid would-block"),
+        "{log}"
+    );
 }
 
 #[test]
 fn bad_arguments_exit_2_and_say_why() {
     let out = Command::new(GUARD)
-        .args(["--mode", "block"])
+        .args(["--mode", "loud"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("G2"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("log or block"));
     let out = Command::new(GUARD).arg("--listen").output().unwrap();
     assert_eq!(out.status.code(), Some(2));
 }
