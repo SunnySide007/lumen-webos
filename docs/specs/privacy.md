@@ -431,7 +431,8 @@ plan is under "G2 on the TV".
   denied everywhere else; for G3, rustls (with ring, rustls-webpki,
   rustls-pki-types, untrusted, subtle, zeroize, getrandom, once_cell and
   cfg-if under it) and webpki-roots in one module (`dot.rs`), no async
-  runtime. Five threads: UDP, TCP and three TLS workers. Under 4 MB
+  runtime. rustls and ring are the same versions and features as
+  `lumen-remote`'s (R4), one copy of each in `Cargo.lock`. Five threads: UDP, TCP and three TLS workers. Under 4 MB
   resident was the target, and the B9 measured 940 kB for G1 on
   2026-10-31. G2's rules add about 1,000 names in hash tables; G2's and
   G3's memory on the TV are not measured yet.
