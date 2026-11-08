@@ -31,6 +31,8 @@ impl Session {
             .arg(dir.join("lumen-ctl.log"))
             .arg("--config")
             .arg(dir.join("no-ctl.conf"))
+            .arg("--state")
+            .arg(&dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -148,7 +150,9 @@ fn hello_the_state_a_reply_an_event_alive_and_the_end() {
     assert_eq!(hello["data"]["keys"], json!("none"));
     assert_eq!(hello["data"]["polling"], json!(["power"]));
     let verbs = hello["data"]["verbs"].as_array().unwrap();
-    assert_eq!(verbs.len(), 17);
+    // The 19 of R2 less key and ambient.start, and the PC's five pairing verbs.
+    assert_eq!(verbs.len(), 22);
+    assert!(verbs.contains(&json!("pair.open")));
     assert!(!verbs.contains(&json!("key")) && !verbs.contains(&json!("ambient.start")));
 
     let first: Vec<Value> = (0..5).map(|_| s.next()).collect();
@@ -227,7 +231,7 @@ fn hello_the_state_a_reply_an_event_alive_and_the_end() {
     assert!(took < Duration::from_secs(1), "{took:?}");
     let log = s.log();
     assert!(
-        log.contains("start: fake bus, keys none, polling [\"power\"]"),
+        log.contains("start: ssh link, fake bus, keys none, polling [\"power\"]"),
         "{log}"
     );
     assert!(log.contains("> 1 volume.set {\"level\":20}"), "{log}");

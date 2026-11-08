@@ -15,6 +15,7 @@
 
 mod args;
 mod bus;
+mod devices;
 mod fake;
 mod keys;
 mod lg;
@@ -24,6 +25,7 @@ mod probe;
 mod protocol;
 mod robot;
 mod serve;
+mod sha256;
 #[allow(unsafe_code)]
 mod sys;
 mod watch;

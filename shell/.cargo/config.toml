@@ -8,3 +8,9 @@
 [target.armv7-unknown-linux-gnueabi]
 linker = "arm-webos-linux-gnueabi-gcc"
 rustflags = ["-Ctarget-feature=-soft-float,+vfp4,+neon"]
+
+# ring (lumen-remote's TLS) compiles C and assembly for the TV with the same
+# SDK; these name its compiler for the cc crate. The host build is untouched.
+[env]
+CC_armv7_unknown_linux_gnueabi = "arm-webos-linux-gnueabi-gcc"
+AR_armv7_unknown_linux_gnueabi = "arm-webos-linux-gnueabi-ar"

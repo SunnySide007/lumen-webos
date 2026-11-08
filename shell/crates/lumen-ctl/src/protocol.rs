@@ -21,6 +21,8 @@ pub const MAX_INSERT: usize = 256;
 pub const MAX_DELETE: u16 = 256;
 /// The longest `toast`, in code points.
 pub const MAX_TOAST: usize = 120;
+/// The longest name a phone gives itself when it pairs, in code points.
+pub const MAX_DEVICE_NAME: usize = 40;
 
 /// Keys `key` can press, in protocol.ts's order.
 pub const KEY_NAMES: [&str; 13] = [
@@ -114,6 +116,42 @@ impl SettingValue {
     }
 }
 
+/// What a paired device may do (decision 12): `Remote` is power, volume,
+/// inputs, apps, keys, typing and picture presets; `Owner` adds privacy,
+/// toasts and every setting. Only the PC, over its SSH key, grants owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Remote,
+    Owner,
+}
+
+impl Role {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Remote => "remote",
+            Self::Owner => "owner",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "remote" => Some(Self::Remote),
+            "owner" => Some(Self::Owner),
+            _ => None,
+        }
+    }
+}
+
+/// Who is at the other end of the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Link {
+    /// The PC, through `authorized_keys`' forced command: the owner.
+    Ssh,
+    /// `lumen-remote`, for the paired phones: every request carries the
+    /// device's token, checked here against `devices.json`.
+    Web,
+}
+
 /// Every verb and its checked arguments.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verb {
@@ -137,10 +175,22 @@ pub enum Verb {
     SettingsGet(Option<Vec<&'static Setting>>),
     SettingsSet(&'static Setting, SettingValue),
     Toast(String),
+    PairOpen,
+    PairClose,
+    DevicesList,
+    DevicesRevoke(String),
+    DevicesRole(String, Role),
+    /// `lumen-remote`'s only, for a phone's code.
+    PairComplete {
+        code: String,
+        name: String,
+    },
+    /// `lumen-remote`'s only: whose token the request carries.
+    DeviceAuth,
 }
 
 /// Every verb's name, in protocol.ts's order (`VERBS`).
-pub const VERBS: [&str; 19] = [
+pub const VERBS: [&str; 24] = [
     "power.off",
     "screen.off",
     "screen.on",
@@ -160,7 +210,66 @@ pub const VERBS: [&str; 19] = [
     "settings.get",
     "settings.set",
     "toast",
+    "pair.open",
+    "pair.close",
+    "devices.list",
+    "devices.revoke",
+    "devices.role",
 ];
+
+/// Verbs only the PC's SSH session takes: pairing and the devices' rights.
+pub const SSH_ONLY: [&str; 5] = [
+    "pair.open",
+    "pair.close",
+    "devices.list",
+    "devices.revoke",
+    "devices.role",
+];
+
+/// Verbs only `lumen-remote` sends, never a client: not in protocol.ts.
+pub const WEB_ONLY: [&str; 2] = ["pair.complete", "device.auth"];
+
+/// The settings a remote-only device may change: the presets.
+pub const REMOTE_SETTINGS: [&str; 2] = ["picture.mode", "sound.mode"];
+
+/// Whether `verb` is in a link's list.
+pub fn takes(link: Link, verb: &str) -> bool {
+    match link {
+        Link::Ssh => VERBS.contains(&verb),
+        Link::Web => {
+            (VERBS.contains(&verb) && !SSH_ONLY.contains(&verb)) || WEB_ONLY.contains(&verb)
+        }
+    }
+}
+
+/// The verbs a role may send through `lumen-remote`, by name: the list
+/// lumen-ctl gives `lumen-remote` in its hello, so the two check from one
+/// table. `settings.set` is in both, and a remote-only device's is held to
+/// `REMOTE_SETTINGS`.
+pub fn role_verbs(role: Role) -> Vec<&'static str> {
+    VERBS
+        .iter()
+        .copied()
+        .filter(|v| !SSH_ONLY.contains(v))
+        .filter(|v| role == Role::Owner || !matches!(*v, "privacy.state" | "toast"))
+        .collect()
+}
+
+impl Verb {
+    /// Whether a remote-only device is refused this request.
+    pub fn owner_only(&self) -> bool {
+        match self {
+            Self::PrivacyState | Self::Toast(_) => true,
+            Self::SettingsSet(s, _) => !REMOTE_SETTINGS.contains(&s.key),
+            Self::PairOpen
+            | Self::PairClose
+            | Self::DevicesList
+            | Self::DevicesRevoke(_)
+            | Self::DevicesRole(..) => true,
+            _ => false,
+        }
+    }
+}
 
 impl Verb {
     pub fn name(&self) -> &'static str {
@@ -184,6 +293,13 @@ impl Verb {
             Self::SettingsGet(_) => "settings.get",
             Self::SettingsSet(..) => "settings.set",
             Self::Toast(_) => "toast",
+            Self::PairOpen => "pair.open",
+            Self::PairClose => "pair.close",
+            Self::DevicesList => "devices.list",
+            Self::DevicesRevoke(_) => "devices.revoke",
+            Self::DevicesRole(..) => "devices.role",
+            Self::PairComplete { .. } => "pair.complete",
+            Self::DeviceAuth => "device.auth",
         }
     }
 
@@ -197,6 +313,9 @@ impl Verb {
             Self::Key(name) => json!({ "name": name }).to_string(),
             Self::TextDelete(count) => json!({ "count": count }).to_string(),
             Self::TextInsert(_) | Self::Toast(_) => "(text withheld)".to_owned(),
+            Self::PairComplete { .. } => "(code and name withheld)".to_owned(),
+            Self::DevicesRevoke(id) => json!({ "id": id }).to_string(),
+            Self::DevicesRole(id, role) => json!({ "id": id, "role": role.as_str() }).to_string(),
             Self::SettingsGet(Some(keys)) => {
                 json!({ "keys": keys.iter().map(|s| s.key).collect::<Vec<_>>() }).to_string()
             }
@@ -218,6 +337,8 @@ pub enum ErrorCode {
     Unavailable,
     /// LG's service refused or didn't answer.
     Failed,
+    /// The device isn't paired, or its role doesn't allow the verb.
+    Forbidden,
 }
 
 impl ErrorCode {
@@ -229,6 +350,7 @@ impl ErrorCode {
             Self::NotFound => "not-found",
             Self::Unavailable => "unavailable",
             Self::Failed => "failed",
+            Self::Forbidden => "forbidden",
         }
     }
 }
@@ -253,6 +375,8 @@ impl Refusal {
 pub struct Request {
     pub id: u32,
     pub verb: Verb,
+    /// The device's token, on the web link only (64 hex digits).
+    pub token: Option<String>,
 }
 
 /// A line refused before it reached a verb; `id` is `None` when the line had
@@ -375,6 +499,14 @@ pub fn check_setting(
     }
 }
 
+/// A device id: eight lower-case hex digits.
+fn device_id(v: Option<&Value>) -> Result<String, String> {
+    match v.and_then(Value::as_str) {
+        Some(id) if crate::devices::is_device_id(id) => Ok(id.to_owned()),
+        _ => Err("id must be a device id".to_owned()),
+    }
+}
+
 /// protocol.ts's `checkArgs` for one verb, giving it typed.
 fn check_args(verb: &str, args: &Map<String, Value>) -> Result<Verb, String> {
     let none = |v: Verb| only_keys(args, &[]).map(|()| v);
@@ -456,13 +588,40 @@ fn check_args(verb: &str, args: &Map<String, Value>) -> Result<Verb, String> {
             only_keys(args, &["text"])?;
             check_text("text", args.get("text"), MAX_TOAST).map(Verb::Toast)
         }
+        "pair.open" => none(Verb::PairOpen),
+        "pair.close" => none(Verb::PairClose),
+        "devices.list" => none(Verb::DevicesList),
+        "devices.revoke" => {
+            only_keys(args, &["id"])?;
+            device_id(args.get("id")).map(Verb::DevicesRevoke)
+        }
+        "devices.role" => {
+            only_keys(args, &["id", "role"])?;
+            let id = device_id(args.get("id"))?;
+            args.get("role")
+                .and_then(Value::as_str)
+                .and_then(Role::parse)
+                .map(|role| Verb::DevicesRole(id, role))
+                .ok_or_else(|| "role must be remote or owner".to_owned())
+        }
+        "pair.complete" => {
+            only_keys(args, &["code", "name"])?;
+            let code = match args.get("code").and_then(Value::as_str) {
+                Some(c) if c.len() == 6 && c.bytes().all(|b| b.is_ascii_digit()) => c.to_owned(),
+                _ => return Err("code must be six digits".to_owned()),
+            };
+            let name = check_text("name", args.get("name"), MAX_DEVICE_NAME)?;
+            Ok(Verb::PairComplete { code, name })
+        }
+        "device.auth" => none(Verb::DeviceAuth),
         _ => unreachable!("check_args is only called for a known verb"),
     }
 }
 
 /// protocol.ts's `parseRequest`: every field typed and in range, checked in
-/// the same order.
-pub fn parse_request(line: &[u8]) -> Result<Request, Refused> {
+/// the same order. On the web link a request may carry `token`, and takes
+/// `lumen-remote`'s two verbs instead of the PC's five.
+pub fn parse_request(line: &[u8], link: Link) -> Result<Request, Refused> {
     use ErrorCode::*;
     if line.len() > MAX_LINE_BYTES {
         return Err(refuse(
@@ -484,15 +643,26 @@ pub fn parse_request(line: &[u8]) -> Result<Request, Refused> {
         ));
     };
     let id = id as u32;
-    if let Err(extra) = only_keys(&obj, &["id", "verb", "args"]) {
+    let fields: &[&str] = match link {
+        Link::Ssh => &["id", "verb", "args"],
+        Link::Web => &["id", "verb", "args", "token"],
+    };
+    if let Err(extra) = only_keys(&obj, fields) {
         return Err(refuse(
             Some(id),
             BadLine,
             extra.replacen("argument", "field", 1),
         ));
     }
+    let token = match obj.get("token") {
+        None => None,
+        Some(Value::String(t)) if crate::devices::is_hex(t, crate::devices::TOKEN_HEX) => {
+            Some(t.clone())
+        }
+        Some(_) => return Err(refuse(Some(id), BadLine, "token must be 64 hex digits")),
+    };
     let verb = match obj.get("verb") {
-        Some(Value::String(v)) if VERBS.contains(&v.as_str()) => v.as_str(),
+        Some(Value::String(v)) if takes(link, v) => v.as_str(),
         other => {
             return Err(refuse(
                 Some(id),
@@ -509,7 +679,7 @@ pub fn parse_request(line: &[u8]) -> Result<Request, Refused> {
         Some(_) => return Err(refuse(Some(id), BadArgs, "args must be an object")),
     };
     let verb = check_args(verb, args).map_err(|problem| refuse(Some(id), BadArgs, problem))?;
-    Ok(Request { id, verb })
+    Ok(Request { id, verb, token })
 }
 
 /// `{"id": …, "ok": true, "result": …}`.
@@ -544,7 +714,7 @@ mod tests {
     }
 
     /// protocol.test.ts's GOOD: one good set of arguments per verb.
-    const GOOD: [(&str, &str); 19] = [
+    const GOOD: [(&str, &str); 24] = [
         ("power.off", "{}"),
         ("screen.off", "{}"),
         ("screen.on", "{}"),
@@ -564,6 +734,11 @@ mod tests {
         ("settings.get", r#"{"keys":["picture.mode"]}"#),
         ("settings.set", r#"{"key":"picture.oledLight","value":80}"#),
         ("toast", r#"{"text":"Volume 20"}"#),
+        ("pair.open", "{}"),
+        ("pair.close", "{}"),
+        ("devices.list", "{}"),
+        ("devices.revoke", r#"{"id":"0a1b2c3d"}"#),
+        ("devices.role", r#"{"id":"0a1b2c3d","role":"owner"}"#),
     ];
 
     /// protocol.test.ts's BAD, with the TypeScript's own cases for strings
@@ -608,6 +783,18 @@ mod tests {
         ("settings.set", r#"{"key":"backlight","value":1}"#),
         ("settings.set", r#"{"key":"picture.mode"}"#),
         ("toast", r#"{"text":""}"#),
+        ("pair.open", r#"{"code":"123456"}"#),
+        ("devices.revoke", "{}"),
+        ("devices.revoke", r#"{"id":"0A1B2C3D"}"#),
+        ("devices.revoke", r#"{"id":"0a1b2c3"}"#),
+        ("devices.role", r#"{"id":"0a1b2c3d","role":"admin"}"#),
+        ("devices.role", r#"{"id":"0a1b2c3d"}"#),
+        ("pair.complete", r#"{"code":"12345","name":"Pixel"}"#),
+        ("pair.complete", r#"{"code":"12345a","name":"Pixel"}"#),
+        ("pair.complete", r#"{"code":123456,"name":"Pixel"}"#),
+        ("pair.complete", r#"{"code":"123456","name":""}"#),
+        ("pair.complete", r#"{"code":"123456"}"#),
+        ("device.auth", r#"{"token":"x"}"#),
     ];
 
     fn parse(s: &str) -> Value {
@@ -638,6 +825,11 @@ mod tests {
             "settings.get",
             "settings.set",
             "toast",
+            "pair.open",
+            "pair.close",
+            "devices.list",
+            "devices.revoke",
+            "devices.role",
         ];
         want.sort_unstable();
         assert_eq!(verbs, want);
@@ -809,40 +1001,46 @@ mod tests {
     }
 
     fn refused(line: &str) -> Refused {
-        parse_request(line.as_bytes()).unwrap_err()
+        parse_request(line.as_bytes(), Link::Ssh).unwrap_err()
     }
 
     #[test]
     fn reads_a_request_with_or_without_args() {
         assert_eq!(
-            parse_request(br#"{"id":1,"verb":"volume.set","args":{"level":7}}"#),
+            parse_request(
+                br#"{"id":1,"verb":"volume.set","args":{"level":7}}"#,
+                Link::Ssh
+            ),
             Ok(Request {
                 id: 1,
-                verb: Verb::VolumeSet(7)
+                verb: Verb::VolumeSet(7),
+                token: None
             })
         );
         assert_eq!(
-            parse_request(br#"{"id":2,"verb":"volume.up"}"#),
+            parse_request(br#"{"id":2,"verb":"volume.up"}"#, Link::Ssh),
             Ok(Request {
                 id: 2,
-                verb: Verb::VolumeUp
+                verb: Verb::VolumeUp,
+                token: None
             })
         );
         // `args ?? {}`: null is no arguments.
         assert_eq!(
-            parse_request(br#"{"id":3,"verb":"volume.up","args":null}"#),
+            parse_request(br#"{"id":3,"verb":"volume.up","args":null}"#, Link::Ssh),
             Ok(Request {
                 id: 3,
-                verb: Verb::VolumeUp
+                verb: Verb::VolumeUp,
+                token: None
             })
         );
         // The largest id, and one written as a float.
         assert_eq!(
-            parse_request(br#"{"id":2147483647,"verb":"apps.list"}"#).map(|r| r.id),
+            parse_request(br#"{"id":2147483647,"verb":"apps.list"}"#, Link::Ssh).map(|r| r.id),
             Ok(MAX_REQUEST_ID)
         );
         assert_eq!(
-            parse_request(br#"{"id":4.0,"verb":"apps.list"}"#).map(|r| r.id),
+            parse_request(br#"{"id":4.0,"verb":"apps.list"}"#, Link::Ssh).map(|r| r.id),
             Ok(4)
         );
     }
@@ -950,10 +1148,13 @@ mod tests {
         assert_eq!(r.refusal.code, ErrorCode::BadLine);
         // Invalid UTF-8 likewise.
         assert_eq!(
-            parse_request(b"{\"id\":1,\"verb\":\"toast\",\"args\":{\"text\":\"\xff\"}}")
-                .unwrap_err()
-                .refusal
-                .code,
+            parse_request(
+                b"{\"id\":1,\"verb\":\"toast\",\"args\":{\"text\":\"\xff\"}}",
+                Link::Ssh
+            )
+            .unwrap_err()
+            .refusal
+            .code,
             ErrorCode::BadLine
         );
     }
@@ -1018,5 +1219,93 @@ mod tests {
             Verb::SettingsSet(&SETTINGS[0], SettingValue::Name("cinema")).log_args(),
             r#"{"key":"picture.mode","value":"cinema"}"#
         );
+    }
+
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn the_web_link_takes_a_token_and_lumen_remotes_verbs() {
+        let line = format!(r#"{{"id":1,"verb":"volume.up","token":"{TOKEN}"}}"#);
+        assert_eq!(
+            parse_request(line.as_bytes(), Link::Web),
+            Ok(Request {
+                id: 1,
+                verb: Verb::VolumeUp,
+                token: Some(TOKEN.to_owned())
+            })
+        );
+        // The PC's session takes no token field.
+        let r = parse_request(line.as_bytes(), Link::Ssh).unwrap_err();
+        assert_eq!(r.refusal.message, r#"unexpected field "token""#);
+        // A token is 64 lower-case hex digits.
+        for bad in [
+            "\"short\"",
+            "1",
+            "null",
+            &format!("\"{}\"", TOKEN.to_uppercase()),
+        ] {
+            let line = format!(r#"{{"id":1,"verb":"volume.up","token":{bad}}}"#);
+            let r = parse_request(line.as_bytes(), Link::Web).unwrap_err();
+            assert_eq!(r.refusal.message, "token must be 64 hex digits", "{bad}");
+        }
+        // Pairing and the devices' rights are the PC's; pair.complete and
+        // device.auth are lumen-remote's.
+        for verb in SSH_ONLY {
+            let line = format!(r#"{{"id":2,"verb":"{verb}"}}"#);
+            assert!(
+                parse_request(line.as_bytes(), Link::Ssh).is_ok() || verb.starts_with("devices.")
+            );
+            let r = parse_request(line.as_bytes(), Link::Web).unwrap_err();
+            assert_eq!(r.refusal.code, ErrorCode::UnknownVerb, "{verb}");
+        }
+        for verb in WEB_ONLY {
+            let line = format!(r#"{{"id":3,"verb":"{verb}"}}"#);
+            let r = parse_request(line.as_bytes(), Link::Ssh).unwrap_err();
+            assert_eq!(r.refusal.code, ErrorCode::UnknownVerb, "{verb}");
+        }
+        assert_eq!(
+            parse_request(
+                br#"{"id":4,"verb":"pair.complete","args":{"code":"012345","name":"Pixel 9"}}"#,
+                Link::Web
+            )
+            .map(|r| r.verb),
+            Ok(Verb::PairComplete {
+                code: "012345".to_owned(),
+                name: "Pixel 9".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn remote_only_devices_get_decision_12s_verbs() {
+        let remote = role_verbs(Role::Remote);
+        let owner = role_verbs(Role::Owner);
+        for verb in [
+            "power.off",
+            "volume.set",
+            "launch",
+            "key",
+            "text.insert",
+            "settings.set",
+        ] {
+            assert!(remote.contains(&verb), "{verb}");
+        }
+        for verb in ["privacy.state", "toast"] {
+            assert!(!remote.contains(&verb) && owner.contains(&verb), "{verb}");
+        }
+        for verb in SSH_ONLY.iter().chain(WEB_ONLY.iter()) {
+            assert!(!owner.contains(verb), "{verb}");
+        }
+        let set = |key: &str, value: Value| {
+            check_setting(Some(&json!(key)), Some(&value))
+                .map(|(s, v)| Verb::SettingsSet(s, v))
+                .unwrap()
+        };
+        assert!(!set("picture.mode", json!("cinema")).owner_only());
+        assert!(!set("sound.mode", json!("music")).owner_only());
+        assert!(set("picture.oledLight", json!(40)).owner_only());
+        assert!(set("picture.energySaving", json!("off")).owner_only());
+        assert!(Verb::PrivacyState.owner_only() && Verb::PairOpen.owner_only());
+        assert!(!Verb::VolumeUp.owner_only() && !Verb::DeviceAuth.owner_only());
     }
 }
