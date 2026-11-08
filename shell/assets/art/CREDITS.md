@@ -16,14 +16,15 @@ tools/studio.sh python3 -I tools/art/heroes.py --all
 tools/studio.sh python3 -I tools/art/pictograms.py
 ```
 
-## Top Shelf heroes
+## Heroes
 
-1920 x 640 sRGB PNGs, each with a 960 x 320 copy (`-half.png`), drawn by
-`tools/art/heroes.py`.
+The art behind the home: 1280 x 720 sRGB PNGs (the shell scales them to
+the screen), drawn by `tools/art/heroes.py` with the home's scrim in them, so
+the title, the clock and the inputs read over any of them.
 
 | Hero | Scene | Seed | What it shows |
 |---|---|---|---|
-| `hero-ambient` | `ambient`: a still of `studio/aurora.py` | 2026 (the loop's own), frame 0 of the 30 s loop at 24 fps | The aurora over the mountain lake, the screensaver's first frame, toned as the studio's previews are. Also as layers for parallax, straight alpha: `-bg` the sky and stars, `-mid` the curtains' light, `-fg` the ridge and the lake |
+| `hero-ambient` | `ambient`: a still of `studio/aurora.py` | 2026 (the loop's own), frame 160 of the 30 s loop at 24 fps | The aurora over the mountain lake, a frame of the screensaver's loop, toned as the studio's previews are. Also as layers for parallax, straight alpha: `-bg` the sky and stars, `-mid` the curtains' light, `-fg` the ridge and the lake |
 | `hero-palette-0` | `palette`, shape `ember`, tile colour 0 | 4101 | A glow below the right edge, smoke curling up through it |
 | `hero-palette-1` | `palette`, shape `dunes`, tile colour 1 | 4102 | Dunes in layers against a low light |
 | `hero-palette-2` | `palette`, shape `rings`, tile colour 2 | 4103 | Ripples spreading from beyond the top right |

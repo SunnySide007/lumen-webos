@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use lumen_core::apps::{Launcher, MockLauncher};
+use lumen_core::apps::{AppId, Launcher, MockLauncher};
 use lumen_core::art::Look;
 use lumen_core::script::Script;
 
@@ -18,6 +18,7 @@ use crate::gl::{self, Gl};
 use crate::heroes::{Folders, Heroes};
 use crate::home_loop::{self, Events, Start, SystemClock, WallClock};
 use crate::info;
+use crate::local_time::TimeOfDay;
 use crate::luna::{self, Ls2, LunaLauncher};
 use crate::platform::launch::{Launch, Params, window_type};
 use crate::platform::lifecycle::Method;
@@ -82,14 +83,22 @@ pub struct Options {
     /// Lines about the launch argument for the log: what was left out, and
     /// SAM's reason for a version 2 launch.
     pub launch_lines: Vec<String>,
+    /// The clock in the corner, fixed (`--clock HH:MM`), for screenshots. A
+    /// fixed clock (`--fixed-dt`) shows none without it, so its frames stay
+    /// the same; otherwise it is the local time.
+    pub clock: Option<TimeOfDay>,
+    /// What the home says was playing at the start (`--playing <app id>`),
+    /// for the simulator, which has no luna watch to say it.
+    pub playing: Option<AppId>,
 }
 
 impl Options {
     /// Reads `--exit-after <seconds>`, `--windowed`, `--gles`,
     /// `--screenshot <path>`, `--screenshot-at <seconds>`, `--keys <list>`,
     /// `--fixed-dt <seconds>`, `--screenshot-when-settled <path>`,
-    /// `--platform <sdl|wayland>`, `--gles3`, `--probe`, `--hidden` and
-    /// `--window <type>`, and the launch argument webOS passes as JSON
+    /// `--platform <sdl|wayland>`, `--gles3`, `--probe`, `--hidden`,
+    /// `--window <type>`, `--clock <HH:MM>` and `--playing <app id>`, and
+    /// the launch argument webOS passes as JSON
     /// (`read_launch`). Anything else is ignored. A bad flag is an error,
     /// since only automation and the owner's trials use them; a bad launch
     /// parameter is not, since it must never keep the TV's Home from
@@ -153,6 +162,16 @@ impl Options {
                 "--screenshot-when-settled" => {
                     let path = it.next().ok_or("--screenshot-when-settled needs a path")?;
                     opts.screenshot_when_settled = Some(PathBuf::from(path));
+                }
+                "--clock" => {
+                    let time = it.next().and_then(|t| TimeOfDay::parse(t));
+                    opts.clock = Some(time.ok_or("--clock needs a time of day, such as 9:41")?);
+                }
+                "--playing" => {
+                    let id = it
+                        .next()
+                        .filter(|id| !id.is_empty() && !id.starts_with('-'));
+                    opts.playing = Some(AppId::new(id.ok_or("--playing needs an app id")?));
                 }
                 json if json.starts_with('{') => opts.read_launch(json),
                 _ => {}
@@ -667,8 +686,14 @@ mod tests {
             "/tmp/settled.png",
             "--screenshot-at",
             "0.62",
+            "--clock",
+            "9:41",
+            "--playing",
+            "com.webos.app.hdmi2",
         ]);
         assert_eq!(opts.screenshot_at, Some(Duration::from_millis(620)));
+        assert_eq!(opts.clock, TimeOfDay::parse("09:41"));
+        assert_eq!(opts.playing, Some(AppId::new("com.webos.app.hdmi2")));
         assert_eq!(opts.keys, Some(Script::parse("R,R,D,OK").unwrap()));
         assert_eq!(opts.fixed_dt, Some(Duration::from_millis(20)));
         assert_eq!(
@@ -781,6 +806,10 @@ mod tests {
             &["--screenshot-when-settled"],
             &["--screenshot-at", "-1"],
             &["--screenshot-at"],
+            &["--clock", "25:00"],
+            &["--clock"],
+            &["--playing"],
+            &["--playing", "--clock"],
         ] {
             assert!(Options::from_args(&args(bad)).is_err(), "{bad:?}");
         }

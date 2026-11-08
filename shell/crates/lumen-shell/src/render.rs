@@ -13,10 +13,15 @@
 //! Colours blend premultiplied, which keeps the edges of scaled icons and
 //! glyphs free of dark fringes.
 //!
-//! The batch is drawn in runs, one for each change of texture: the heroes'
+//! The batch is drawn in runs, one for each change of texture: the art's
 //! quads come first, under everything, so a frame has one run per hero layer
 //! on screen and one for the atlas. The shader keeps its one sampler, and the
 //! vertices go to GL in one upload.
+//!
+//! The art behind everything covers every pixel of the screen, so it is
+//! drawn by a program of its own (`Batch::art`): a texture times a colour,
+//! with two varyings and no branch, where the main program would carry its
+//! shape, kind and dither for every pixel. The main program draws the rest.
 
 use std::ffi::c_void;
 
@@ -158,8 +163,11 @@ pub struct Run {
     pub first: usize,
     pub count: usize,
     /// Whether any of its quads samples the texture; flat and shape quads
-    /// draw the same with any texture bound, so they join any run.
+    /// draw the same with any texture bound, so they join any run but the
+    /// art's.
     sampled: bool,
+    /// Drawn by the art's program (`Batch::art`).
+    pub art: bool,
 }
 
 /// A quad's corners, and what they carry besides position.
@@ -175,6 +183,8 @@ struct Quad {
     kind: f32,
     /// What an image quad samples; `None` for flat and shape quads.
     texture: Option<Texture>,
+    /// Drawn by the art's program.
+    art: bool,
 }
 
 #[derive(Default)]
@@ -205,10 +215,17 @@ impl Batch {
 
     /// Counts a quad's six vertices into a run: the last one if it can take
     /// them, else a new one. `texture` is what the quad samples, `None` for
-    /// a flat or shape quad.
-    fn add_to_run(&mut self, texture: Option<Texture>) {
+    /// a flat or shape quad; `art`, whether the art's program draws it.
+    fn add_to_run(&mut self, texture: Option<Texture>, art: bool) {
         let first = self.vertex_count() - VERTICES_PER_QUAD;
         match (self.runs.last_mut(), texture) {
+            (Some(run), _) if run.art != art => self.runs.push(Run {
+                texture: texture.unwrap_or(Texture::Atlas),
+                first,
+                count: VERTICES_PER_QUAD,
+                sampled: texture.is_some(),
+                art,
+            }),
             (Some(run), None) => run.count += VERTICES_PER_QUAD,
             (Some(run), Some(t)) if run.texture == t || !run.sampled => {
                 run.texture = t;
@@ -220,6 +237,7 @@ impl Batch {
                 first,
                 count: VERTICES_PER_QUAD,
                 sampled: texture.is_some(),
+                art,
             }),
         }
     }
@@ -320,7 +338,7 @@ impl Batch {
                 w,
             ]);
         }
-        self.add_to_run(q.texture);
+        self.add_to_run(q.texture, q.art);
     }
 
     /// A rectangle shaded from `top` to `bottom`.
@@ -335,6 +353,48 @@ impl Batch {
             shape: NO_SHAPE,
             kind: FLAT,
             texture: None,
+            art: false,
+        });
+    }
+
+    /// A rounded rectangle like `rounded_rect`, each corner its own colour:
+    /// top left, top right, bottom left, bottom right, blended across it.
+    /// The focused tile's sheen is its top left corner, at no cost.
+    // The rectangle, its radius and the four colours.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rounded_rect4(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, colors: [Rgba; 4]) {
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+        let margin = 1.0;
+        // The colours carried out to the grown edges, so the blend stays
+        // where it was.
+        let at = |u: f32, v: f32| {
+            let top = colors[0].lerp(colors[1], u);
+            let bottom = colors[2].lerp(colors[3], u);
+            top.lerp(bottom, v)
+        };
+        let (u0, u1) = (-margin / w, 1.0 + margin / w);
+        let (v0, v1) = (-margin / h, 1.0 + margin / h);
+        self.push(&Quad {
+            x: x - margin,
+            y: y - margin,
+            w: w + 2.0 * margin,
+            h: h + 2.0 * margin,
+            uv: NO_UV,
+            colors: [at(u0, v0), at(u1, v0), at(u0, v1), at(u1, v1)],
+            shape: Shape {
+                cx: x + w / 2.0,
+                cy: y + h / 2.0,
+                half_w: w / 2.0,
+                half_h: h / 2.0,
+                radius: r,
+                soft: 0.5,
+            },
+            kind: SHAPE,
+            texture: None,
+            art: false,
         });
     }
 
@@ -409,6 +469,7 @@ impl Batch {
             },
             kind: SHAPE,
             texture: None,
+            art: false,
         });
     }
 
@@ -438,6 +499,7 @@ impl Batch {
             },
             kind: SHAPE,
             texture: None,
+            art: false,
         });
     }
 
@@ -460,6 +522,30 @@ impl Batch {
         uv: Uv,
         tint: Rgba,
     ) {
+        self.image_quad(texture, x, y, w, h, uv, tint, false);
+    }
+
+    /// Art behind everything: like `image_from`, drawn by the art's
+    /// program, in a run of its own.
+    // `image_from`'s arguments.
+    #[allow(clippy::too_many_arguments)]
+    pub fn art(&mut self, texture: Texture, x: f32, y: f32, w: f32, h: f32, uv: Uv, tint: Rgba) {
+        self.image_quad(texture, x, y, w, h, uv, tint, true);
+    }
+
+    // `image_from`'s arguments, and whether it is art.
+    #[allow(clippy::too_many_arguments)]
+    fn image_quad(
+        &mut self,
+        texture: Texture,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        uv: Uv,
+        tint: Rgba,
+        art: bool,
+    ) {
         if w <= 0.0 || h <= 0.0 || tint.3 <= 0.0 {
             return;
         }
@@ -473,6 +559,7 @@ impl Batch {
             shape: NO_SHAPE,
             kind: IMAGE,
             texture: Some(texture),
+            art,
         });
     }
 }
@@ -591,6 +678,44 @@ void main() {
 }
 ";
 
+// The art's program: a texture times a colour, nothing else. Highp for the
+// texture place where the GPU has it, as above: 16-bit floats step 0.6 of a
+// texel across a 1280 px texture.
+const ART_VERTEX_SHADER: &str = "
+attribute vec2 a_pos;
+attribute vec2 a_uv;
+attribute vec4 a_color;
+attribute float a_w;
+uniform vec2 u_screen;
+varying vec2 v_uv;
+varying vec4 v_color;
+void main() {
+    vec2 ndc = vec2(a_pos.x / u_screen.x * 2.0 - 1.0, 1.0 - a_pos.y / u_screen.y * 2.0);
+    gl_Position = vec4(ndc * a_w, 0.0, a_w);
+    v_uv = a_uv;
+    v_color = vec4(a_color.rgb * a_color.a, a_color.a);
+}
+";
+
+const ART_FRAGMENT_SHADER: &str = "
+#ifdef GL_ES
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+#endif
+uniform sampler2D u_atlas;
+varying vec2 v_uv;
+varying vec4 v_color;
+void main() {
+    gl_FragColor = texture2D(u_atlas, v_uv) * v_color;
+}
+";
+
+/// The attributes the art's program reads.
+const ART_ATTRIBUTES: [&std::ffi::CStr; 4] = [c"a_pos", c"a_uv", c"a_color", c"a_w"];
+
 /// Each attribute: its name and how many floats it takes, in vertex order.
 const ATTRIBUTES: [(&std::ffi::CStr, i32); 7] = [
     (c"a_pos", 2),
@@ -602,29 +727,79 @@ const ATTRIBUTES: [(&std::ffi::CStr, i32); 7] = [
     (c"a_w", 1),
 ];
 
+/// One attribute of a program: where it is, and its floats' offset and
+/// count in a vertex.
+#[derive(Debug, Clone, Copy)]
+struct Attribute {
+    at: u32,
+    offset: usize,
+    floats: i32,
+}
+
 /// A linked program and where its inputs are.
 struct Program {
     id: u32,
-    attributes: [u32; ATTRIBUTES.len()],
+    attributes: Vec<Attribute>,
     u_screen: i32,
     /// The dither's strength; only the dithered program has it.
     u_dither: Option<i32>,
 }
 
+/// Where each of `names` is in a linked program, with its place in a vertex.
+fn attributes_of(gl: &Gl, id: u32, names: &[&std::ffi::CStr]) -> Result<Vec<Attribute>, String> {
+    let mut offset = 0;
+    let mut found = Vec::with_capacity(names.len());
+    for (name, floats) in ATTRIBUTES {
+        if names.contains(&name) {
+            // SAFETY: the program linked and the name is a NUL-terminated literal.
+            let at = unsafe { (gl.get_attrib_location)(id, name.as_ptr()) };
+            let at = u32::try_from(at)
+                .map_err(|_| format!("shader is missing {}", name.to_string_lossy()))?;
+            found.push(Attribute { at, offset, floats });
+        }
+        offset += floats as usize;
+    }
+    Ok(found)
+}
+
 impl Program {
+    /// The art's program (`ART_VERTEX_SHADER`).
+    fn build_art(gl: &Gl) -> Result<Self, String> {
+        let vs = gl.compile_shader(gl::VERTEX_SHADER, ART_VERTEX_SHADER)?;
+        let fs = gl.compile_shader(gl::FRAGMENT_SHADER, ART_FRAGMENT_SHADER)?;
+        let id = gl.link_program(vs, fs)?;
+        let attributes = attributes_of(gl, id, &ART_ATTRIBUTES)?;
+        // SAFETY: the program linked and the names are NUL-terminated literals.
+        let (u_screen, u_atlas) = unsafe {
+            (
+                (gl.get_uniform_location)(id, c"u_screen".as_ptr()),
+                (gl.get_uniform_location)(id, c"u_atlas".as_ptr()),
+            )
+        };
+        if u_screen < 0 || u_atlas < 0 {
+            return Err("the art's shader is missing u_screen or u_atlas".to_owned());
+        }
+        // SAFETY: the program linked above; its sampler reads texture unit 0.
+        unsafe {
+            (gl.use_program)(id);
+            (gl.uniform1i)(u_atlas, 0);
+        }
+        Ok(Self {
+            id,
+            attributes,
+            u_screen,
+            u_dither: None,
+        })
+    }
+
     /// The shaders, with the dither built in if `dither`.
     fn build(gl: &Gl, dither: bool) -> Result<Self, String> {
         let define = if dither { "#define DITHER\n" } else { "" };
         let vs = gl.compile_shader(gl::VERTEX_SHADER, &format!("{define}{VERTEX_SHADER}"))?;
         let fs = gl.compile_shader(gl::FRAGMENT_SHADER, &format!("{define}{FRAGMENT_SHADER}"))?;
         let id = gl.link_program(vs, fs)?;
-        let mut attributes = [0; ATTRIBUTES.len()];
-        for (slot, (name, _)) in attributes.iter_mut().zip(ATTRIBUTES) {
-            // SAFETY: the program linked and the name is a NUL-terminated literal.
-            let at = unsafe { (gl.get_attrib_location)(id, name.as_ptr()) };
-            *slot = u32::try_from(at)
-                .map_err(|_| format!("shader is missing {}", name.to_string_lossy()))?;
-        }
+        let names = ATTRIBUTES.map(|(name, _)| name);
+        let attributes = attributes_of(gl, id, &names)?;
         // SAFETY: as above.
         let (u_screen, u_atlas, u_dither) = unsafe {
             (
@@ -656,6 +831,9 @@ pub struct Renderer {
     /// first needed.
     plain: Option<Program>,
     dithered: Option<Program>,
+    /// The art's program; without it (the GPU refused it) the main program
+    /// draws the art.
+    art: Option<Program>,
     vbo: u32,
     texture: u32,
     /// The dither's peak to peak, 0 for none.
@@ -697,6 +875,7 @@ impl Renderer {
             gl,
             plain: None,
             dithered: None,
+            art: None,
             vbo,
             texture,
             dither: 0.0,
@@ -706,6 +885,10 @@ impl Renderer {
         }
         if renderer.program().is_none() {
             renderer.plain = Some(Program::build(&renderer.gl, false)?);
+        }
+        match Program::build_art(&renderer.gl) {
+            Ok(p) => renderer.art = Some(p),
+            Err(e) => crate::info!("the art's program: {e}; the main one draws the art"),
         }
         Ok(renderer)
     }
@@ -779,29 +962,20 @@ impl Renderer {
     pub fn draw(&self, batch: &Batch, drawable: (i32, i32)) {
         let gl = &self.gl;
         // `new` and `set_dither` leave a program for the mode they set.
-        let Some(program) = self.program() else {
+        let Some(main) = self.program() else {
             return;
         };
         let (x, y, w, h) = fit_viewport(drawable.0, drawable.1);
-        let stride = (FLOATS_PER_VERTEX * size_of::<f32>()) as i32;
         let bytes = (batch.verts.len() * size_of::<f32>()) as isize;
-        // SAFETY: the program and its attribute locations were made by
-        // `Program::build`, the buffer and texture by `new`, all on this
-        // context; the upload reads exactly `bytes`
-        // from the batch, which outlives the call; every attribute's offset
-        // and size stay inside one vertex (they sum to FLOATS_PER_VERTEX).
+        // SAFETY: the buffer and texture were made by `new` on this
+        // context; the upload reads exactly `bytes` from the batch, which
+        // outlives the call.
         unsafe {
             (gl.viewport)(0, 0, drawable.0, drawable.1);
             (gl.clear_color)(0.0, 0.0, 0.0, 1.0);
             (gl.clear)(gl::COLOR_BUFFER_BIT);
             (gl.viewport)(x, y, w, h);
-            (gl.use_program)(program.id);
-            (gl.uniform2f)(program.u_screen, SCREEN_W, SCREEN_H);
-            if let Some(u_dither) = program.u_dither {
-                (gl.uniform1f)(u_dither, self.dither);
-            }
             (gl.active_texture)(gl::TEXTURE0);
-            (gl.bind_texture)(gl::TEXTURE_2D, self.texture);
             (gl.bind_buffer)(gl::ARRAY_BUFFER, self.vbo);
             (gl.buffer_data)(
                 gl::ARRAY_BUFFER,
@@ -809,26 +983,56 @@ impl Renderer {
                 batch.verts.as_ptr().cast(),
                 gl::STREAM_DRAW,
             );
-            let mut offset = 0;
-            for (&at, (_, floats)) in program.attributes.iter().zip(ATTRIBUTES) {
-                (gl.enable_vertex_attrib_array)(at);
+        }
+        let mut current: Option<u32> = None;
+        for run in batch.runs() {
+            let program = match (&self.art, run.art) {
+                (Some(art), true) => art,
+                _ => main,
+            };
+            if current != Some(program.id) {
+                current = Some(program.id);
+                self.use_program(program);
+            }
+            let name = match run.texture {
+                Texture::Atlas => self.texture,
+                Texture::Own(name) => name,
+            };
+            // SAFETY: the texture is the atlas or one `create_texture` made,
+            // and the run's vertices lie inside the buffer uploaded above.
+            unsafe {
+                (gl.bind_texture)(gl::TEXTURE_2D, name);
+                (gl.draw_arrays)(gl::TRIANGLES, run.first as i32, run.count as i32);
+            }
+        }
+    }
+
+    /// Makes `program` current, with its uniforms and its attributes'
+    /// places in the bound buffer.
+    fn use_program(&self, program: &Program) {
+        let gl = &self.gl;
+        let stride = (FLOATS_PER_VERTEX * size_of::<f32>()) as i32;
+        // SAFETY: the program and its attribute locations were made by
+        // `Program::build` or `build_art` on this context, and the vertex
+        // buffer is bound; every attribute's offset and size stay inside one
+        // vertex (`attributes_of` takes them from ATTRIBUTES, which sum to
+        // FLOATS_PER_VERTEX).
+        unsafe {
+            (gl.use_program)(program.id);
+            (gl.uniform2f)(program.u_screen, SCREEN_W, SCREEN_H);
+            if let Some(u_dither) = program.u_dither {
+                (gl.uniform1f)(u_dither, self.dither);
+            }
+            for a in &program.attributes {
+                (gl.enable_vertex_attrib_array)(a.at);
                 (gl.vertex_attrib_pointer)(
-                    at,
-                    floats,
+                    a.at,
+                    a.floats,
                     gl::FLOAT,
                     gl::FALSE,
                     stride,
-                    (offset * size_of::<f32>()) as *const c_void,
+                    (a.offset * size_of::<f32>()) as *const c_void,
                 );
-                offset += floats as usize;
-            }
-            for run in batch.runs() {
-                let name = match run.texture {
-                    Texture::Atlas => self.texture,
-                    Texture::Own(name) => name,
-                };
-                (gl.bind_texture)(gl::TEXTURE_2D, name);
-                (gl.draw_arrays)(gl::TRIANGLES, run.first as i32, run.count as i32);
             }
         }
     }

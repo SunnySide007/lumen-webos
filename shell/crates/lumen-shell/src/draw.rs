@@ -1,14 +1,21 @@
-//! Draws the home screen from `lumen_core::home::View` into a `Batch`: tiles
-//! in their app's colour with its icon (or the first letter of its title), the
-//! focused app's title below its tile, the Top Shelf (its hero, or the
-//! placeholder until one is in) and the status pill, with all text in Inter.
+//! Draws the home screen from `lumen_core::home::View` into a `Batch`
+//! (docs/specs/look-and-feel.md, "The home"): the art full screen behind
+//! everything (its hero, or the gradient until one is in), the clock and
+//! what is playing at the top right, the focused app's name over the row,
+//! the row's wide tiles in their app's colour with its icon (or its name),
+//! the input chips under them, the "Other apps" page when it turns in, and
+//! the status pill, with all text in Inter.
+//!
+//! The order keeps the main shader off most of the screen: the art is drawn
+//! by a program of its own (`Batch::art`), and what the main program draws
+//! over it (tiles, chips, text, shadows) covers about a fifth of the pixels.
 
 use std::collections::HashMap;
 
 use lumen_core::apps::App;
 use lumen_core::art::Hero;
 use lumen_core::focus::Dir;
-use lumen_core::home::{SweepView, TileView, View};
+use lumen_core::home::{ChipView, SweepView, TileView, View, page_fades};
 use lumen_core::layout::{self, Rect, SAFE, SCREEN_H, SCREEN_W};
 use lumen_core::style::{self, Color};
 
@@ -22,17 +29,31 @@ pub mod warm;
 // The look's values live in `lumen_core::style`.
 const BG_TOP: Rgba = Rgba::of(style::BACKGROUND.top);
 const BG_BOTTOM: Rgba = Rgba::of(style::BACKGROUND.bottom);
-const SHELF_TOP: Rgba = Rgba::of(style::SHELF.top);
-const SHELF_BOTTOM: Rgba = Rgba::of(style::SHELF.bottom);
 const TEXT: Rgba = Rgba::of(style::TEXT);
 const TEXT_DIM: Rgba = Rgba::of(style::TEXT_DIM);
 const SHADOW: Rgba = Rgba::of(style::SHADOW);
 const PILL: Rgba = Rgba::of(style::PILL);
 const ON_TILE: Rgba = Rgba::of(style::ON_TILE);
+const ON_LIGHT_TILE: Rgba = Rgba::of(style::CHIP_TEXT_FOCUS);
 const WHITE: Rgba = Rgba::of(style::WHITE);
+const CHIP: Rgba = Rgba::of(style::CHIP);
+const CHIP_FOCUS: Rgba = Rgba::of(style::CHIP_FOCUS);
+const CHIP_TEXT_FOCUS: Rgba = Rgba::of(style::CHIP_TEXT_FOCUS);
+const LIVE: Rgba = Rgba::of(style::LIVE);
+const OTHERS_DIM: Rgba = Rgba::of(style::OTHERS_DIM);
+const OWNER_SCRIM: Rgba = Rgba::of(style::OWNER_SCRIM);
 const REST_SHADE: f32 = style::TILE_REST_SHADE;
 const TILE_SHEEN: f32 = style::TILE_SHEEN;
 const PALETTE: [Color; 8] = style::TILE_PALETTE;
+/// A whole texture, edge to edge.
+const WHOLE: Uv = Uv {
+    u0: 0.0,
+    v0: 0.0,
+    u1: 1.0,
+    v1: 1.0,
+};
+/// The whole screen.
+const SCREEN: Rect = Rect::new(0.0, 0.0, SCREEN_W, SCREEN_H);
 
 pub fn tile_color(index: usize) -> Rgba {
     Rgba::of(PALETTE[index % PALETTE.len()])
@@ -46,8 +67,19 @@ fn app_color(app: &App, index: usize) -> Rgba {
     }
 }
 
-/// A hero's layer in its texture: which texture, and the rows of the shelf
-/// it covers, top and bottom, as fractions of the shelf's height.
+/// What reads on a tile of colour `c`: white, or dark on a light tile (LG
+/// gives Netflix and YouTube white).
+fn on_color(c: Rgba) -> Rgba {
+    let luminance = 0.2126 * c.0 + 0.7152 * c.1 + 0.0722 * c.2;
+    if luminance > 0.6 {
+        ON_LIGHT_TILE
+    } else {
+        ON_TILE
+    }
+}
+
+/// A hero's layer in its texture: which texture, and the rows of the screen
+/// it covers, top and bottom, as fractions of its height.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeroLayer {
     pub texture: Texture,
@@ -101,21 +133,16 @@ pub fn home(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
 
 fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     batch.clear();
-    // A hero is opaque: the background is drawn only below it.
-    let hidden = match view.shelf_art.base {
-        Some(hero) if assets.heroes.contains_key(hero) => view.shelf.bottom().clamp(0.0, SCREEN_H),
-        _ => 0.0,
-    };
-    if hidden < SCREEN_H {
-        let top = BG_TOP.lerp(BG_BOTTOM, hidden / SCREEN_H);
-        batch.gradient_rect(0.0, hidden, SCREEN_W, SCREEN_H - hidden, top, BG_BOTTOM);
+    art(batch, view, assets);
+    if view.page > 0.0 {
+        let dim = OTHERS_DIM.alpha(OTHERS_DIM.3 * view.page);
+        batch.gradient_rect(0.0, 0.0, SCREEN_W, SCREEN_H, dim, dim);
     }
-    shelf(batch, view, assets);
     if view.empty {
         let px = layout::EMPTY_PX;
         let text = "No apps";
         let w = assets.text.width(text, px);
-        let baseline = layout::ROW0_Y + (layout::TILE_H + assets.text.cap_height(px)) / 2.0;
+        let baseline = layout::ROW_Y + (layout::TILE_H + assets.text.cap_height(px)) / 2.0;
         let x = (SCREEN_W - w) / 2.0;
         assets.text.draw(
             batch,
@@ -128,114 +155,91 @@ fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
             TEXT_DIM,
         );
     }
+    corner(batch, view, assets);
+    headings(batch, view, assets);
     // Every shadow goes under every tile, so a lifted tile's shadow never
-    // darkens the edge of its neighbour; titles go over everything.
+    // darkens the edge of its neighbour; names go over everything.
     for tile in &view.tiles {
-        shadow(batch, tile);
+        shadow(batch, tile, view.look.shadow);
     }
-    // A tile leans as one piece, its icon or letter and its light with it;
-    // its shadow and title stay level.
+    // A tile leans as one piece, its icon or name and its light with it;
+    // its shadow stays level.
     for tile in &view.tiles {
         if tile.tilt != [0.0; 2] {
             let r = tile.rect;
             let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
             batch.set_tilt(Some(Tilt::new(cx, cy, tile.tilt, style::TILT_DISTANCE)));
         }
-        draw_tile(batch, tile, assets);
+        draw_tile(batch, tile, view.look.sheen, assets);
         if let Some(sweep) = tile.sweep {
             light(batch, tile, sweep);
         }
         batch.set_tilt(None);
     }
-    for tile in &view.tiles {
-        title(batch, tile, assets);
+    for tile in view.tiles.iter().filter(|t| t.named) {
+        grid_title(batch, tile, assets);
+    }
+    for chip in &view.chips {
+        draw_chip(batch, chip, assets);
     }
     if let Some(text) = view.status {
         status(batch, text, assets);
     }
 }
 
-/// The Top Shelf: its art (a hero, the placeholder gradient, or a crossfade
-/// between them), then the focused row-0 app's title over the dark band at
-/// its bottom left. The "TOP SHELF" caption labels the placeholder, so it
-/// fades out with it.
-fn shelf(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
-    let r = view.shelf;
-    if r.bottom() <= 0.0 {
-        return;
-    }
-    let art = view.shelf_art;
-    shelf_art(batch, r, art.base, 1.0, view.shelf_drift, assets);
+/// The art behind everything: a hero, the gradient, or a crossfade between
+/// them, full screen. The owner's art, which has no fade of its own, gets
+/// one over it.
+fn art(batch: &mut Batch, view: &View<'_>, assets: &Assets) {
+    let art = view.art;
+    picture(batch, art.base, 1.0, view.drift, assets);
     if let Some((over, alpha)) = art.over {
-        shelf_art(batch, r, over, alpha, view.shelf_drift, assets);
+        picture(batch, over, alpha, view.drift, assets);
     }
-    let Some(title) = view.shelf_title else {
-        return;
+    let scrim =
+        |hero: Option<&Hero>| hero.is_some_and(|h| !h.has_scrim() && assets.heroes.contains_key(h));
+    let alpha = match art.over {
+        Some((over, a)) => {
+            let base = if scrim(art.base) { 1.0 - a } else { 0.0 };
+            base + if scrim(over) { a } else { 0.0 }
+        }
+        None => f32::from(u8::from(scrim(art.base))),
     };
-    let px = layout::SHELF_TITLE_PX;
-    let baseline = r.bottom() - layout::SHELF_TITLE_GAP;
-    let caption = layout::SHELF_CAPTION_PX;
-    let caption_baseline = baseline - assets.text.cap_height(px) - caption;
-    let text = &mut assets.text;
-    let atlas = &mut assets.atlas;
-    if art.placeholder > 0.0 {
-        text.draw(
-            batch,
-            atlas,
-            SAFE.x,
-            caption_baseline,
-            caption,
-            1.0,
-            "TOP SHELF",
-            TEXT_DIM.alpha(art.placeholder),
-        );
+    if alpha > 0.0 {
+        let top = SCREEN_H * style::OWNER_SCRIM_FROM;
+        let dark = OWNER_SCRIM.alpha(OWNER_SCRIM.3 * alpha);
+        batch.gradient_rect(0.0, top, SCREEN_W, SCREEN_H - top, dark.alpha(0.0), dark);
     }
-    let title = text.fit(title, px, SAFE.w);
-    text.draw(batch, atlas, SAFE.x, baseline, px, 1.0, &title, TEXT);
 }
 
-/// One of the shelf's pictures at `alpha`: `hero`'s layers, back to front,
-/// or the placeholder gradient for `None` (and for a hero with no textures,
-/// which the home loop never shows). A layered hero's layers drift by
-/// `drift` (`View::shelf_drift`).
-fn shelf_art(
-    batch: &mut Batch,
-    r: Rect,
-    hero: Option<&Hero>,
-    alpha: f32,
-    drift: [f32; 2],
-    assets: &Assets,
-) {
+/// One picture at `alpha`: `hero`'s layers, back to front, or the gradient
+/// for `None` (and for a hero with no textures, which the home loop never
+/// shows). A layered hero's layers drift by `drift` (`View::drift`).
+fn picture(batch: &mut Batch, hero: Option<&Hero>, alpha: f32, drift: [f32; 2], assets: &Assets) {
     let Some(layers) = hero.and_then(|hero| assets.heroes.get(hero)) else {
         batch.gradient_rect(
-            r.x,
-            r.y,
-            r.w,
-            r.h,
-            SHELF_TOP.alpha(alpha),
-            SHELF_BOTTOM.alpha(alpha),
+            0.0,
+            0.0,
+            SCREEN_W,
+            SCREEN_H,
+            BG_TOP.alpha(alpha),
+            BG_BOTTOM.alpha(alpha),
         );
         return;
     };
     if layers.len() > 1 {
-        drifting_layers(batch, r, layers, alpha, drift);
+        drifting_layers(batch, SCREEN, layers, alpha, drift);
         return;
     }
-    let whole = Uv {
-        u0: 0.0,
-        v0: 0.0,
-        u1: 1.0,
-        v1: 1.0,
-    };
     for layer in layers {
-        let (top, bottom) = (r.y + layer.rows.0 * r.h, r.y + layer.rows.1 * r.h);
-        batch.image_from(
+        let (top, bottom) = (layer.rows.0 * SCREEN_H, layer.rows.1 * SCREEN_H);
+        batch.art(
             layer.texture,
-            r.x,
+            0.0,
             top,
-            r.w,
+            SCREEN_W,
             bottom - top,
-            whole,
+            WHOLE,
             WHITE.alpha(alpha),
         );
     }
@@ -243,14 +247,14 @@ fn shelf_art(
 
 /// A layered hero's layers, each moved `drift` times its own
 /// `style::PARALLAX_PX` against the last move. All are drawn alike a little
-/// larger than the shelf, about its middle, so the layers still line up at
+/// larger than the screen, about its middle, so the layers still line up at
 /// rest and none drifts far enough to show its edge: art at a fraction `a`
-/// of the shelf shows at `0.5 + (a - 0.5) k`, plus the layer's drift. Each
-/// quad is cut to the shelf, its texture window cut with it.
+/// of the screen shows at `0.5 + (a - 0.5) k`, plus the layer's drift. Each
+/// quad is cut to the screen, its texture window cut with it.
 fn drifting_layers(batch: &mut Batch, r: Rect, layers: &[HeroLayer], alpha: f32, drift: [f32; 2]) {
     let most = style::PARALLAX_PX.iter().copied().fold(0.0, f32::max);
     let k = r.h / (r.h - 2.0 * most);
-    // Along one side of the shelf (from `at`, `len` long): where art at a
+    // Along one side of the screen (from `at`, `len` long): where art at a
     // fraction shows, and which fraction shows at a place.
     let place = |a: f32, at: f32, len: f32, off: f32| at + len * (0.5 + (a - 0.5) * k) + off;
     let fraction = |p: f32, at: f32, len: f32, off: f32| 0.5 + ((p - at - off) / len - 0.5) / k;
@@ -264,14 +268,16 @@ fn drifting_layers(batch: &mut Batch, r: Rect, layers: &[HeroLayer], alpha: f32,
         if x1 <= x0 || y1 <= y0 {
             continue;
         }
-        let v = |y: f32| (fraction(y, r.y, r.h, oy) - rows0) / (rows1 - rows0);
+        // Clamped: a layer's own edge, mapped there and back, may come out a
+        // rounding error outside its texture.
+        let v = |y: f32| ((fraction(y, r.y, r.h, oy) - rows0) / (rows1 - rows0)).clamp(0.0, 1.0);
         let uv = Uv {
             u0: fraction(x0, r.x, r.w, ox),
             v0: v(y0),
             u1: fraction(x1, r.x, r.w, ox),
             v1: v(y1),
         };
-        batch.image_from(
+        batch.art(
             layer.texture,
             x0,
             y0,
@@ -283,27 +289,141 @@ fn drifting_layers(batch: &mut Batch, r: Rect, layers: &[HeroLayer], alpha: f32,
     }
 }
 
-/// A lifted tile's soft shadow, dropped below it, as dark as its lift.
-fn shadow(batch: &mut Batch, tile: &TileView<'_>) {
-    if tile.lift <= 0.0 {
-        return;
+/// The top right corner: the clock, and under it what is playing, with its
+/// dot. It stays on both pages.
+fn corner(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
+    let right = SAFE.right();
+    let text = &mut assets.text;
+    if let Some(clock) = &view.clock {
+        let px = style::CLOCK_PX;
+        let w = text.width(clock, px);
+        let baseline = layout::CLOCK_BASELINE;
+        text.draw(
+            batch,
+            &mut assets.atlas,
+            right - w,
+            baseline,
+            px,
+            1.0,
+            clock,
+            TEXT,
+        );
     }
-    let r = tile.rect;
-    let radius = layout::TILE_RADIUS * r.w / layout::TILE_W;
-    let lift = tile.lift.min(1.0);
-    let s = r.offset(0.0, layout::SHADOW_OFFSET * lift);
-    let color = SHADOW.alpha(layout::SHADOW_OPACITY * lift);
-    batch.shadow(s.x, s.y, s.w, s.h, radius, layout::SHADOW_BLUR, color);
+    if let Some(playing) = view.playing {
+        let px = style::PLAYING_PX;
+        let name = text.fit(playing, px, SAFE.w / 3.0);
+        let w = text.width(&name, px);
+        let baseline = layout::PLAYING_BASELINE;
+        let x = right - w;
+        text.draw(
+            batch,
+            &mut assets.atlas,
+            x,
+            baseline,
+            px,
+            1.0,
+            &name,
+            TEXT_DIM,
+        );
+        let d = style::LIVE_DOT;
+        let cy = baseline - text.cap_height(px) / 2.0;
+        let dx = x - style::LIVE_GAP - d;
+        batch.rounded_rect(dx, cy - d / 2.0, d, d, d / 2.0, LIVE, LIVE);
+    }
 }
 
-fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
+/// The focused item's name and the line under it, on the home; the
+/// "Other apps" heading on its page. Each fades with its page.
+fn headings(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
+    let (home, others) = page_fades(view.page);
+    let text = &mut assets.text;
+    let atlas = &mut assets.atlas;
+    let slide = -style::PAGE_SLIDE * view.page;
+    if home > 0.0 {
+        if let Some(title) = view.title {
+            let px = layout::TITLE_PX;
+            let title = text.fit(title, px, SAFE.w * 0.62);
+            let y = layout::TITLE_BASELINE + slide;
+            text.draw(batch, atlas, SAFE.x, y, px, 1.0, &title, TEXT.alpha(home));
+        }
+        if let Some(line) = &view.subtitle {
+            let px = layout::SUBTITLE_PX;
+            let line = text.fit(line, px, SAFE.w * 0.62);
+            let y = layout::SUBTITLE_BASELINE + slide;
+            text.draw(
+                batch,
+                atlas,
+                SAFE.x,
+                y,
+                px,
+                1.0,
+                &line,
+                TEXT_DIM.alpha(home),
+            );
+        }
+    }
+    if others > 0.0 && view.heading_y > 0.0 {
+        let px = style::HEADING_PX;
+        let color = TEXT.alpha(others);
+        let heading = lumen_core::arrange::OTHERS_TITLE;
+        text.draw(
+            batch,
+            atlas,
+            SAFE.x,
+            view.heading_y,
+            px,
+            1.0,
+            heading,
+            color,
+        );
+    }
+}
+
+/// A tile's soft shadow, dropped below it: the lifted one's deep, and if
+/// `resting` the others' close and light. Each fades with its page.
+fn shadow(batch: &mut Batch, tile: &TileView<'_>, resting: bool) {
+    let lift = tile.lift.clamp(0.0, 1.0);
+    if lift <= 0.0 && !resting {
+        return;
+    }
+    let mix = |rest: f32, lifted: f32| {
+        let rest = if resting { rest } else { 0.0 };
+        rest + (lifted - rest) * lift
+    };
+    let blur = mix(style::REST_SHADOW_BLUR, layout::SHADOW_BLUR);
+    let offset = mix(style::REST_SHADOW_OFFSET, layout::SHADOW_OFFSET);
+    let opacity = mix(style::REST_SHADOW_OPACITY, layout::SHADOW_OPACITY);
+    let r = tile.rect;
+    let radius = layout::TILE_RADIUS * r.w / layout::TILE_W;
+    let s = r.offset(0.0, offset);
+    let color = SHADOW.alpha(opacity * tile.alpha);
+    batch.shadow(s.x, s.y, s.w, s.h, radius, blur.max(1.0), color);
+}
+
+fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, sheen: bool, assets: &mut Assets) {
     let r = tile.rect;
     let zoom = r.w / layout::TILE_W;
     let radius = layout::TILE_RADIUS * zoom;
-    let shade = REST_SHADE + (1.0 - REST_SHADE) * tile.lift.clamp(0.0, 1.0);
-    let base = app_color(tile.app, tile.index).shade(shade);
+    let lift = tile.lift.clamp(0.0, 1.0);
+    let shade = REST_SHADE + (1.0 - REST_SHADE) * lift;
+    let own = app_color(tile.app, tile.index);
+    let base = own.shade(shade);
     let top = base.lerp(WHITE, TILE_SHEEN);
-    batch.rounded_rect(r.x, r.y, r.w, r.h, radius, top, base);
+    let a = tile.alpha;
+    if sheen && lift > 0.0 {
+        // The sheen: the top left corner lit, fading across to the bottom
+        // right, as the lift comes.
+        let s = style::FOCUS_SHEEN * lift;
+        let colors = [
+            top.lerp(WHITE, s),
+            top.lerp(WHITE, s * 0.35),
+            base.lerp(WHITE, s * 0.35),
+            base,
+        ];
+        batch.rounded_rect4(r.x, r.y, r.w, r.h, radius, colors.map(|c| c.alpha(a)));
+    } else {
+        batch.rounded_rect(r.x, r.y, r.w, r.h, radius, top.alpha(a), base.alpha(a));
+    }
 
     let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
     let icon = tile
@@ -314,10 +434,10 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
     if let Some((uv, w, h)) = icon {
         let side = layout::ICON_SIZE * zoom / w.max(h) as f32;
         let (iw, ih) = (w as f32 * side, h as f32 * side);
-        batch.image(cx - iw / 2.0, cy - ih / 2.0, iw, ih, uv, ON_TILE);
+        batch.image(cx - iw / 2.0, cy - ih / 2.0, iw, ih, uv, ON_TILE.alpha(a));
         return;
     }
-    // Still loading: the plain tile, so its letter does not flash up first.
+    // Still loading: the plain tile, so its name does not flash up first.
     if tile
         .app
         .icon
@@ -326,17 +446,16 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
     {
         return;
     }
-    // No icon: the title's first letter, rasterised once at its lifted size
-    // and scaled, so the animation does not fill the atlas with sizes.
-    let Some(first) = tile.app.title.chars().find(|c| !c.is_whitespace()) else {
-        return;
-    };
-    let letter: String = first.to_uppercase().collect();
-    let px = (layout::LETTER_PX * layout::FOCUS_SCALE).round();
-    let scale = layout::LETTER_PX * zoom / px;
+    // No icon: the app's name across the tile, rasterised once at its
+    // lifted size and scaled, so the lift does not fill the atlas with sizes.
+    let px = (style::TILE_LABEL_PX * layout::FOCUS_SCALE).round();
+    let scale = style::TILE_LABEL_PX * zoom / px;
     let text = &mut assets.text;
-    let w = text.width(&letter, px) * scale;
+    let room = (layout::TILE_W - 48.0) * layout::FOCUS_SCALE;
+    let name = text.fit(&tile.app.title, px, room);
+    let w = text.width(&name, px) * scale;
     let baseline = cy + text.cap_height(px) * scale / 2.0;
+    let color = on_color(own).alpha(a);
     text.draw(
         batch,
         &mut assets.atlas,
@@ -344,8 +463,8 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
         baseline,
         px,
         scale,
-        &letter,
-        ON_TILE,
+        &name,
+        color,
     );
 }
 
@@ -363,7 +482,7 @@ fn light(batch: &mut Batch, tile: &TileView<'_>, sweep: SweepView) {
     let across = matches!(sweep.dir, Dir::Left | Dir::Right);
     let glow = |at: f32| {
         let a = style::SWEEP_STRENGTH * (1.0 - (at - sweep.at).abs() / half).max(0.0);
-        WHITE.alpha(a)
+        WHITE.alpha(a * tile.alpha)
     };
     for (from, to) in [(sweep.at - half, sweep.at), (sweep.at, sweep.at + half)] {
         let (from, to) = (from.clamp(0.0, 1.0), to.clamp(0.0, 1.0));
@@ -395,43 +514,79 @@ fn light(batch: &mut Batch, tile: &TileView<'_>, sweep: SweepView) {
     }
 }
 
-/// The focused app's name below its tile, fading in as the tile lifts.
-fn title(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
+/// On the "Other apps" page, the focused tile's name below it, fading in as
+/// it lifts.
+fn grid_title(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
     let lift = tile.lift.min(1.0);
     if lift <= 0.01 {
         return;
     }
-    let px = layout::TITLE_PX;
+    let px = layout::GRID_TITLE_PX;
     let r = tile.rect;
     let text = &mut assets.text;
     let name = text.fit(&tile.app.title, px, layout::TILE_W * layout::FOCUS_SCALE);
     let w = text.width(&name, px);
     let baseline = r.bottom() + layout::TITLE_GAP + text.cap_height(px);
     let x = r.x + (r.w - w) / 2.0;
+    let color = TEXT.alpha(lift * tile.alpha);
+    text.draw(batch, &mut assets.atlas, x, baseline, px, 1.0, &name, color);
+}
+
+/// An input chip: frosted at rest, nearly white and lifted when focused,
+/// its name centred, with a dot before it if it is what was playing.
+fn draw_chip(batch: &mut Batch, chip: &ChipView<'_>, assets: &mut Assets) {
+    let r = chip.rect;
+    let lift = chip.lift.clamp(0.0, 1.0);
+    let a = chip.alpha;
+    let fill = CHIP.lerp(CHIP_FOCUS, lift);
+    let fill = fill.alpha(fill.3 * a);
+    batch.rounded_rect(r.x, r.y, r.w, r.h, r.h / 2.0, fill, fill);
+    let zoom = r.w / layout::CHIP_W;
+    let px = (style::CHIP_PX * layout::CHIP_FOCUS_SCALE).round();
+    let scale = style::CHIP_PX * zoom / px;
+    let dot = if chip.playing {
+        style::LIVE_DOT + style::LIVE_GAP
+    } else {
+        0.0
+    };
+    let text = &mut assets.text;
+    let room = (layout::CHIP_W - 2.0 * style::CHIP_PAD_X - dot) * layout::CHIP_FOCUS_SCALE;
+    let name = text.fit(&chip.app.title, px, room);
+    let w = text.width(&name, px) * scale;
+    let whole = w + dot * zoom;
+    let x = r.x + (r.w - whole) / 2.0;
+    let cap = text.cap_height(px) * scale;
+    let baseline = r.y + (r.h + cap) / 2.0;
+    if chip.playing {
+        let d = style::LIVE_DOT * zoom;
+        let live = LIVE.alpha(a);
+        batch.rounded_rect(x, baseline - cap / 2.0 - d / 2.0, d, d, d / 2.0, live, live);
+    }
+    let color = TEXT.lerp(CHIP_TEXT_FOCUS, lift).alpha(a);
     text.draw(
         batch,
         &mut assets.atlas,
-        x,
+        x + dot * zoom,
         baseline,
         px,
-        1.0,
+        scale,
         &name,
-        TEXT.alpha(lift),
+        color,
     );
 }
 
-/// The status line: a dark pill at the top right of the safe area, over the
-/// Top Shelf when focus is on row 0, where launches usually happen.
+/// The status line: a dark pill at the top left of the safe area, clear of
+/// the clock.
 fn status(batch: &mut Batch, text: &str, assets: &mut Assets) {
     let px = layout::STATUS_PX;
     let (pad_x, pad_y) = (style::PILL_PAD_X, style::PILL_PAD_Y);
     let t = &mut assets.text;
-    // A long error (from luna, say) must not run off the screen.
-    let text = t.fit(text, px, SAFE.w - 2.0 * pad_x);
+    // A long error (from luna, say) must not run into the clock.
+    let text = t.fit(text, px, SAFE.w * 0.6 - 2.0 * pad_x);
     let cap = t.cap_height(px);
     let w = t.width(&text, px) + 2.0 * pad_x;
     let h = cap + 2.0 * pad_y;
-    let (x, y) = (SAFE.right() - w, SAFE.y);
+    let (x, y) = (SAFE.x, SAFE.y);
     batch.rounded_rect(x, y, w, h, h / 2.0, PILL, PILL);
     t.draw(
         batch,
@@ -446,316 +601,4 @@ fn status(batch: &mut Batch, text: &str, assets: &mut Assets) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    use lumen_core::apps::{App, AppKind, Launcher, MockLauncher};
-    use lumen_core::art::Look;
-    use lumen_core::focus::Dir;
-    use lumen_core::home::{BackAtTop, Home};
-    use lumen_core::input::{Action, Press};
-
-    /// A guard against regressions, not a measured limit: B1 drew 856 to 1,631
-    /// quads at 60 fps on the B9, and B2 draws far fewer. What limits a B2
-    /// frame, quads or shaded pixels, is for the TV run to measure.
-    const QUAD_BUDGET: usize = 600;
-
-    fn mock_home() -> Home {
-        Home::new(MockLauncher::default().list().unwrap(), BackAtTop::Exit)
-    }
-
-    fn assets() -> Assets {
-        Assets::new().expect("the built-in font parses")
-    }
-
-    fn quads(home: &Home, assets: &mut Assets) -> usize {
-        let mut batch = Batch::default();
-        super::home(&mut batch, &home.view(), assets);
-        batch.quad_count()
-    }
-
-    fn down() -> Press {
-        Press {
-            action: Action::Move(Dir::Down),
-            repeat: false,
-        }
-    }
-
-    #[test]
-    fn the_start_screen_fits_the_quad_budget() {
-        let n = quads(&mock_home(), &mut assets());
-        assert!(n > 30, "{n} quads: nothing drawn?");
-        assert!(n <= QUAD_BUDGET, "{n} quads");
-    }
-
-    #[test]
-    fn a_scrolled_screen_with_a_status_line_fits_the_quad_budget() {
-        let mut home = mock_home();
-        assert_eq!(home.handle(down(), Duration::ZERO), None);
-        home.settle_now();
-        home.show_status("Could not open Web Browser".to_owned(), Duration::ZERO);
-        let n = quads(&home, &mut assets());
-        assert!(n <= QUAD_BUDGET, "{n} quads");
-    }
-
-    #[test]
-    fn a_long_list_scrolled_deep_fits_the_quad_budget() {
-        let apps = MockLauncher::default()
-            .list()
-            .unwrap()
-            .into_iter()
-            .cycle()
-            .take(40)
-            .collect();
-        let mut home = Home::new(apps, BackAtTop::Exit);
-        let mut assets = assets();
-        for row in 1..=5 {
-            assert_eq!(home.handle(down(), Duration::ZERO), None);
-            home.settle_now();
-            let n = quads(&home, &mut assets);
-            assert!(n <= QUAD_BUDGET, "row {row}: {n} quads");
-        }
-    }
-
-    #[test]
-    fn a_newly_focused_tile_leans_whole_with_its_light_and_fits_the_budget() {
-        let right = Press {
-            action: Action::Move(Dir::Right),
-            repeat: false,
-        };
-        let mut assets = assets();
-        let mut home = mock_home().with_look(Look::FULL);
-        assert_eq!(home.handle(right, Duration::ZERO), None);
-        // Halfway through the light, the lean on its way back.
-        home.advance_to(style::SWEEP_TIME / 2);
-        let tile = *home.view().tiles.last().unwrap();
-        assert!(tile.tilt[0] > 0.0 && tile.sweep.is_some());
-        let mut batch = Batch::default();
-        super::home(&mut batch, &home.view(), &mut assets);
-        // Prime Video's tile, its letter and the light's two quads lean;
-        // its shadow, title and every other tile stay level.
-        assert_eq!(batch.leaning_quads(), 4);
-        let mut plain = mock_home();
-        assert_eq!(plain.handle(right, Duration::ZERO), None);
-        plain.advance_to(style::SWEEP_TIME / 2);
-        let n = batch.quad_count();
-        assert_eq!(n, quads(&plain, &mut assets) + 2);
-        assert!(n <= QUAD_BUDGET, "{n} quads");
-        // Settled, it is the plain frame again.
-        home.settle_now();
-        plain.settle_now();
-        super::home(&mut batch, &home.view(), &mut assets);
-        assert_eq!(batch.leaning_quads(), 0);
-        assert_eq!(batch.quad_count(), quads(&plain, &mut assets));
-    }
-
-    #[test]
-    fn the_ambient_heros_layers_drift_each_its_own_way_and_never_show_an_edge() {
-        let mut assets = assets();
-        let mut home = mock_home().with_look(Look::FULL);
-        let layers = [(0.0, 1.0), (0.0, 0.66), (0.71, 1.0)];
-        let textures = layers.map(|rows| HeroLayer {
-            texture: Texture::Own(7),
-            rows,
-        });
-        assets.heroes.insert(Hero::Ambient, textures.into());
-        home.show_hero(Some(Hero::Ambient));
-        home.settle_now();
-        let windows = |home: &Home, assets: &mut Assets| {
-            let mut batch = Batch::default();
-            super::home(&mut batch, &home.view(), assets);
-            batch.image_uvs()[..3].to_vec()
-        };
-        // At rest the three line up: one window, a little inside the art.
-        let rest = windows(&home, &mut assets);
-        assert!(rest.iter().all(|w| (w.0, w.2) == (rest[0].0, rest[0].2)));
-        assert!(rest[0].0 > 0.0 && rest[0].2 < 1.0, "{rest:?}");
-        // Mid drift, after Right, each window has moved right (the art left)
-        // by its layer's share, still inside the art.
-        let right = Press {
-            action: Action::Move(Dir::Right),
-            repeat: false,
-        };
-        assert_eq!(home.handle(right, Duration::ZERO), None);
-        home.advance_to(Duration::from_millis(70));
-        let moved = windows(&home, &mut assets);
-        let shift: Vec<f32> = moved.iter().zip(&rest).map(|(m, r)| m.0 - r.0).collect();
-        assert!(shift[0] > 0.0, "{shift:?}");
-        for (i, px) in style::PARALLAX_PX.iter().enumerate() {
-            let share = shift[i] / shift[0];
-            assert!(
-                (share - px / style::PARALLAX_PX[0]).abs() < 0.01,
-                "{shift:?}"
-            );
-        }
-        for w in &moved {
-            assert!(
-                w.0 >= 0.0 && w.1 >= 0.0 && w.2 <= 1.0 && w.3 <= 1.0,
-                "{moved:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn under_a_hero_the_background_starts_below_the_shelf() {
-        let mut home = mock_home().with_look(Look::FULL);
-        let mut assets = assets();
-        let plain = quads(&home, &mut assets);
-        // Netflix's ambient hero, its three layers in textures as the loop
-        // leaves them.
-        let hero = home.wanted_hero().cloned().expect("a hero");
-        let layers = [(0.0, 1.0), (0.0, 0.66), (0.71, 1.0)].map(|rows| HeroLayer {
-            texture: Texture::Own(7),
-            rows,
-        });
-        assets.heroes.insert(hero.clone(), layers.into());
-        home.show_hero(Some(hero));
-        // Mid crossfade the layered hero is drawn whole under the fading
-        // placeholder, caption and all, so the background already starts
-        // at the shelf's bottom, where the hero ends.
-        home.advance_to(Duration::from_millis(50));
-        let mut batch = Batch::default();
-        super::home(&mut batch, &home.view(), &mut assets);
-        assert!(batch.quad_count() <= QUAD_BUDGET);
-        assert_eq!(batch.quad_count(), plain + 3);
-        let shelf = home.view().shelf;
-        assert_eq!(batch.quad_bounds(0).1, shelf.bottom());
-        assert_eq!(batch.quad_bounds(1).1, shelf.y);
-        // Settled, the caption is gone too.
-        home.settle_now();
-        super::home(&mut batch, &home.view(), &mut assets);
-        assert_eq!(batch.quad_bounds(0).1, shelf.bottom());
-        // Three layers for the gradient, and a quad a letter less.
-        assert_eq!(batch.quad_count(), plain + 2 - "TOPSHELF".len());
-        // One run for the hero's texture, then the atlas's.
-        let textures: Vec<_> = batch.runs().iter().map(|r| r.texture).collect();
-        assert_eq!(textures, [Texture::Own(7), Texture::Atlas]);
-    }
-
-    #[test]
-    fn the_empty_state_draws() {
-        let home = Home::new(Vec::new(), BackAtTop::Exit);
-        assert!(quads(&home, &mut assets()) > 2);
-    }
-
-    #[test]
-    fn only_the_focused_tile_shows_its_title() {
-        let mut assets = assets();
-        // The first tile is focused; `rename` lengthens one app's title,
-        // keeping its first letter (and so its letter tile) the same.
-        let settled = |rename: Option<usize>| {
-            let mut apps = MockLauncher::default().list().unwrap();
-            if let Some(i) = rename {
-                apps[i].title.push_str(" Long");
-            }
-            let mut home = Home::new(apps, BackAtTop::Exit);
-            home.settle_now();
-            home
-        };
-        let plain = quads(&settled(None), &mut assets);
-        assert_eq!(
-            quads(&settled(Some(1)), &mut assets),
-            plain,
-            "an unfocused tile draws no title"
-        );
-        // The focused title is drawn twice, under its tile and on the Top
-        // Shelf; "Netflix Long" fits both, one quad a letter.
-        let longer = quads(&settled(Some(0)), &mut assets);
-        assert_eq!(longer - plain, 2 * "Long".len());
-    }
-
-    #[test]
-    fn a_tile_takes_its_apps_colour_or_the_palettes() {
-        let app = App::new("a", "A", AppKind::App);
-        assert_eq!(app_color(&app, 3), tile_color(3));
-        let app = app.with_color([1, 2, 3]);
-        assert_eq!(app_color(&app, 3), Rgba::rgb8(1, 2, 3));
-    }
-
-    #[test]
-    fn a_missing_icon_falls_back_to_the_letter() {
-        let mut assets = assets();
-        let app = App::new("a", "plex", AppKind::App).with_icon("/no/such/icon.png");
-        let mut home = Home::new(vec![app], BackAtTop::Exit);
-        home.settle_now();
-        let with_missing = quads(&home, &mut assets);
-        let mut plain = Home::new(vec![App::new("a", "plex", AppKind::App)], BackAtTop::Exit);
-        plain.settle_now();
-        assert_eq!(with_missing, quads(&plain, &mut assets));
-    }
-
-    #[test]
-    fn a_frame_that_fills_the_atlas_never_points_at_stale_pixels() {
-        // Canonical, as the TV's launcher gives them.
-        let icons = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../assets/mock-icons")
-            .canonicalize()
-            .unwrap();
-        let apps = MockLauncher::default()
-            .with_icons_in(&icons)
-            .list()
-            .unwrap();
-        let mut home = Home::new(apps, BackAtTop::Exit);
-        home.settle_now();
-        home.show_status("Opening Netflix".to_owned(), Duration::ZERO);
-        let clean = quads(&home, &mut assets());
-
-        // Leave R rows of the atlas free, so the frame fills it at a
-        // different point each time: early, in the middle, or not at all.
-        let mut emptied = 0;
-        for free in (8..=320).step_by(8) {
-            let mut assets = assets();
-            let (w, h) = (2046, 1022 - free);
-            assets
-                .atlas
-                .insert(w, h, &vec![0; (w * h * 4) as usize])
-                .unwrap();
-            let before = assets.atlas.generation();
-            let mut batch = Batch::default();
-            super::home(&mut batch, &home.view(), &mut assets);
-            if assets.atlas.generation() != before {
-                emptied += 1;
-            }
-            assert_eq!(batch.quad_count(), clean, "{free} rows free");
-            // Every image must sample pixels placed in the current atlas.
-            let live: Vec<_> = assets.atlas.take_uploads().iter().map(content_uv).collect();
-            for uv in batch.image_uvs() {
-                let inside = live.iter().any(|r| {
-                    uv.0 >= r.0 - 1e-6
-                        && uv.1 >= r.1 - 1e-6
-                        && uv.2 <= r.2 + 1e-6
-                        && uv.3 <= r.3 + 1e-6
-                });
-                assert!(inside, "{free} rows free: {uv:?} is stale");
-            }
-        }
-        assert!(
-            emptied > 10,
-            "the sweep must empty the atlas mid-frame: {emptied}"
-        );
-    }
-
-    /// The texture coordinates of an upload's pixels, inside its padding.
-    fn content_uv(up: &crate::atlas::Upload) -> (f32, f32, f32, f32) {
-        use crate::atlas::{ATLAS_H, ATLAS_W};
-        let (aw, ah) = (ATLAS_W as f32, ATLAS_H as f32);
-        (
-            (up.x + 1) as f32 / aw,
-            (up.y + 1) as f32 / ah,
-            (up.x + up.w - 1) as f32 / aw,
-            (up.y + up.h - 1) as f32 / ah,
-        )
-    }
-
-    #[test]
-    fn no_tile_shares_a_colour_with_its_neighbours() {
-        let cols = layout::COLUMNS;
-        for i in 0..40 {
-            if (i + 1) % cols != 0 {
-                assert_ne!(tile_color(i), tile_color(i + 1), "tiles {i} and the next");
-            }
-            assert_ne!(tile_color(i), tile_color(i + cols), "tile {i} and below");
-        }
-    }
-}
+mod tests;

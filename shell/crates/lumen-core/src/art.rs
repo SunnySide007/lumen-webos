@@ -1,11 +1,11 @@
-//! The Top Shelf's art and the look's switches (docs/specs/look-and-feel.md,
-//! "Phase 4 features").
+//! The art behind the home and the look's switches
+//! (docs/specs/look-and-feel.md, "The home" and "Phase 4 features").
 //!
-//! `hero_for` says which hero the shelf shows for an app, in the owner's
+//! `hero_for` says which hero the home shows for an app, in the owner's
 //! order (decision 5, "both"): the owner's own art first, then a hero drawn
 //! for that app, then the palette hero nearest its colour, and the ambient
-//! hero for everything else. `Look` says which of the Phase 4 features are
-//! on, so the TV can measure each one on and off with one build.
+//! hero for everything else. `Look` says which of the look's effects are
+//! on, so the bench can measure each one on and off with one build.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -13,7 +13,8 @@ use std::fmt;
 use crate::apps::{App, AppId};
 use crate::style;
 
-/// A Top Shelf hero: full-bleed art for the row-0 tile the shelf shows.
+/// A hero: full-screen art behind the home for the focused tile (until
+/// Stage 3 it was the Top Shelf's, over the first row only).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Hero {
     /// The owner's own art for this app, `art-owner/<app id>.png`.
@@ -51,18 +52,22 @@ impl Hero {
     /// The files it is drawn from, back to front, without the `.png`: in
     /// Lumen's art folder, or the owner's for `Owner`. The ambient hero
     /// comes as its layers with parallax, else as the flat picture they make.
-    /// `half` picks the 960 x 320 copies; the owner's art has one size,
-    /// whichever it is.
     pub fn files(&self, look: &Look) -> Vec<String> {
-        let suffix = if look.half { "-half" } else { "" };
         match self {
             Self::Owner(id) => vec![id.to_string()],
             Self::Ambient if look.parallax => AMBIENT_LAYERS
                 .iter()
-                .map(|layer| format!("{layer}{suffix}"))
+                .map(|&layer| layer.to_owned())
                 .collect(),
-            _ => vec![format!("{}{suffix}", self.name())],
+            _ => vec![self.name()],
         }
+    }
+
+    /// Whether its files have the home's fade drawn in. Lumen's do
+    /// (tools/art), so the shell draws nothing over them; the owner's art
+    /// gets `style::OWNER_SCRIM` over it.
+    pub fn has_scrim(&self) -> bool {
+        !matches!(self, Self::Owner(_))
     }
 }
 
@@ -81,7 +86,7 @@ pub const NAMED: [(&str, &str); 9] = [
     ("com.palm.app.settings", "hero-settings"),
 ];
 
-/// The hero the Top Shelf shows for `app`, given which apps the owner made
+/// The hero the home shows for `app`, given which apps the owner made
 /// art for: the owner's art, then a hero named for the app, then the
 /// palette hero nearest its colour by hue, then the ambient hero. A colour
 /// with no hue to speak of (black, white, greys, and colours too near them)
@@ -140,12 +145,12 @@ fn hue([r, g, b]: [f32; 3]) -> Option<f32> {
     Some((sector * 60.0).rem_euclid(360.0))
 }
 
-/// Which Phase 4 features are on. Every one is, unless the launch
-/// parameters' `"look"` turns it off (`Look::parse`), so the TV can be
-/// measured with a feature on and off in one build.
+/// Which of the look's effects are on. Every one is, unless the launch
+/// parameters' `"look"` turns it off (`Look::parse`), so the bench can
+/// measure each one on and off with one build.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Look {
-    /// The Top Shelf hero; without it the shelf keeps its placeholder.
+    /// The art behind everything; without it the home shows its gradient.
     pub hero: bool,
     /// The ordered dither on gradients and shapes.
     pub dither: bool,
@@ -156,36 +161,41 @@ pub struct Look {
     /// The ambient hero's layers shifting with the tilt; without it, the
     /// ambient hero is drawn flat.
     pub parallax: bool,
-    /// The heroes from their 960 x 320 files, scaled up: the hero's
-    /// fallback. Off unless asked for.
-    pub half: bool,
+    /// Soft shadows under the resting tiles; the focused tile's shadow is
+    /// there either way.
+    pub shadow: bool,
+    /// The focused tile's sheen, its top left corner lit.
+    pub sheen: bool,
 }
 
 impl Look {
-    /// Every feature on, at full size: the default.
+    /// Every effect on: the default.
     pub const FULL: Self = Self {
         hero: true,
         dither: true,
         tilt: true,
         light: true,
         parallax: true,
-        half: false,
+        shadow: true,
+        sheen: true,
     };
 
-    /// Every feature off: the home screen as it was before Phase 4.
+    /// Every effect off: the home's layout and tiles on the gradient, with
+    /// only the focused tile's lift and shadow.
     pub const PLAIN: Self = Self {
         hero: false,
         dither: false,
         tilt: false,
         light: false,
         parallax: false,
-        half: false,
+        shadow: false,
+        sheen: false,
     };
 
     /// Reads a look such as `plain`, `-dither,-tilt` or `plain,+hero`, from
     /// the full look: words split by commas or spaces, applied in order.
-    /// `plain` turns every feature off and `full` every one on (at full
-    /// size); a feature's name turns it on, or off after a `-`, and a `+`
+    /// `plain` turns every effect off and `full` every one on; an effect's
+    /// name turns it on, or off after a `-`, and a `+`
     /// before it changes nothing. Also returns the words that name nothing,
     /// which change nothing either: a typo must not keep the TV's Home from
     /// starting.
@@ -219,7 +229,8 @@ impl Look {
             "tilt" => &mut self.tilt,
             "light" => &mut self.light,
             "parallax" => &mut self.parallax,
-            "half" => &mut self.half,
+            "shadow" => &mut self.shadow,
+            "sheen" => &mut self.sheen,
             _ => return None,
         })
     }
@@ -232,19 +243,20 @@ impl Default for Look {
 }
 
 /// As the start-up log gives it: `hero on, dither off, tilt on, light on,
-/// parallax on; art full size`.
+/// parallax on, shadow on, sheen on`.
 impl fmt::Display for Look {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let on = |b: bool| if b { "on" } else { "off" };
         write!(
             f,
-            "hero {}, dither {}, tilt {}, light {}, parallax {}; art {} size",
+            "hero {}, dither {}, tilt {}, light {}, parallax {}, shadow {}, sheen {}",
             on(self.hero),
             on(self.dither),
             on(self.tilt),
             on(self.light),
             on(self.parallax),
-            if self.half { "half" } else { "full" }
+            on(self.shadow),
+            on(self.sheen)
         )
     }
 }
@@ -426,24 +438,20 @@ mod tests {
     #[test]
     fn heroes_name_their_files() {
         let full = Look::FULL;
-        let half = Look { half: true, ..full };
         let flat = Look {
             parallax: false,
             ..full
         };
         assert_eq!(Hero::Ambient.files(&full), AMBIENT_LAYERS.map(String::from));
-        assert_eq!(
-            Hero::Ambient.files(&half),
-            AMBIENT_LAYERS.map(|l| format!("{l}-half"))
-        );
         assert_eq!(Hero::Ambient.files(&flat), ["hero-ambient"]);
         assert!(Hero::Ambient.is_layered(&full) && !Hero::Ambient.is_layered(&flat));
-        assert_eq!(Hero::Palette(3).files(&half), ["hero-palette-3-half"]);
+        assert_eq!(Hero::Palette(3).files(&full), ["hero-palette-3"]);
         assert_eq!(Hero::Named("hero-plex").files(&full), ["hero-plex"]);
         let owner = Hero::Owner(AppId::new("netflix"));
-        assert_eq!(owner.files(&half), ["netflix"], "one size, whichever");
+        assert_eq!(owner.files(&full), ["netflix"]);
         assert_eq!(owner.name(), "art-owner/netflix");
         assert!(!owner.is_layered(&full));
+        assert!(!owner.has_scrim() && Hero::Ambient.has_scrim());
     }
 
     #[test]
@@ -462,13 +470,16 @@ mod tests {
             }
         );
         assert_eq!(
-            Look::parse("plain, +hero half").0,
+            Look::parse("plain, +hero sheen").0,
             Look {
                 hero: true,
-                half: true,
+                sheen: true,
                 ..Look::PLAIN
             }
         );
+        let (look, unknown) = Look::parse("-shadow half");
+        assert!(!look.shadow && look.sheen);
+        assert_eq!(unknown, ["half"], "the half-size art is gone");
         assert_eq!(Look::parse("plain,full").0, Look::FULL);
         assert_eq!(Look::parse("-light,light").0, Look::FULL, "in order");
     }
@@ -490,11 +501,11 @@ mod tests {
     fn a_look_reads_back_as_the_log_gives_it() {
         assert_eq!(
             Look::parse("-dither").0.to_string(),
-            "hero on, dither off, tilt on, light on, parallax on; art full size"
+            "hero on, dither off, tilt on, light on, parallax on, shadow on, sheen on"
         );
         assert_eq!(
             Look::PLAIN.to_string(),
-            "hero off, dither off, tilt off, light off, parallax off; art full size"
+            "hero off, dither off, tilt off, light off, parallax off, shadow off, sheen off"
         );
     }
 }

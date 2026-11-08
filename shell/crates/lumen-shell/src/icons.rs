@@ -472,7 +472,7 @@ mod tests {
                 named += 1;
             }
         }
-        assert_eq!(named, 10);
+        assert_eq!(named, 12);
     }
 
     #[test]

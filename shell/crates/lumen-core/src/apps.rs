@@ -119,8 +119,9 @@ pub fn clean_title(title: &str) -> String {
 }
 
 /// The simulator's launcher: a fixed list modelled on the B9's apps and HDMI
-/// inputs (12 entries, so rows of 5, 5 and 2). The IDs are illustrative;
-/// the TV's launcher reports the real ones. Launches are only recorded.
+/// inputs (14 entries: the contract's four apps, five others, four HDMI
+/// inputs and Settings). The IDs are illustrative; the TV's launcher
+/// reports the real ones. Launches are only recorded.
 #[derive(Debug, Clone)]
 pub struct MockLauncher {
     apps: Vec<App>,
@@ -142,6 +143,8 @@ impl Default for MockLauncher {
             ("com.webos.app.livetv", "Live TV", A),
             ("com.webos.app.hdmi1", "HDMI 1", I),
             ("com.webos.app.hdmi2", "HDMI 2", I),
+            ("com.webos.app.hdmi3", "HDMI 3", I),
+            ("com.webos.app.hdmi4", "HDMI 4", I),
             ("com.webos.app.browser", "Web Browser", A),
             ("com.palm.app.settings", "Settings", A),
         ];
@@ -182,7 +185,7 @@ impl MockLauncher {
     }
 
     /// Adds LG's Home last among the apps, as the TV's launcher does, unless
-    /// the list has it. The simulator shows it; tests keep the twelve.
+    /// the list has it. The simulator shows it; tests keep the fourteen.
     pub fn with_lg_home(mut self) -> Self {
         if !self.apps.iter().any(|app| app.id.as_str() == LG_HOME) {
             let at = self
@@ -230,12 +233,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_mock_lists_twelve_apps_and_two_inputs() {
+    fn the_mock_lists_fourteen_apps_and_four_inputs() {
         let apps = MockLauncher::default().list().expect("mock never fails");
-        assert_eq!(apps.len(), 12);
+        assert_eq!(apps.len(), 14);
         assert_eq!(apps[0].title, "Netflix");
         let inputs = apps.iter().filter(|a| a.kind == AppKind::Input).count();
-        assert_eq!(inputs, 2);
+        assert_eq!(inputs, 4);
     }
 
     #[test]
@@ -255,7 +258,7 @@ mod tests {
         assert_eq!(icon("com.palm.app.settings"), Some(dir.join("gear.png")));
         assert_eq!(icon("com.beb.plxnative"), None, "a letter tile");
         assert_eq!(icon("com.disney.disneyplus-prod"), None, "a letter tile");
-        assert_eq!(apps.iter().filter(|a| a.icon.is_some()).count(), 10);
+        assert_eq!(apps.iter().filter(|a| a.icon.is_some()).count(), 12);
     }
 
     #[test]
@@ -295,7 +298,7 @@ mod tests {
     fn lg_home_comes_last_among_the_apps_once() {
         let mut mock = MockLauncher::default().with_lg_home().with_lg_home();
         let apps = mock.list().unwrap();
-        assert_eq!(apps.len(), 13);
+        assert_eq!(apps.len(), 15);
         // The mock's last entry is an app, Settings, so LG Home follows it.
         let last = apps.last().unwrap();
         assert_eq!(
@@ -326,7 +329,7 @@ mod tests {
     #[test]
     fn a_boxed_launcher_is_a_launcher() {
         let mut boxed: Box<dyn Launcher> = Box::new(MockLauncher::default());
-        assert_eq!(boxed.list().unwrap().len(), 12);
+        assert_eq!(boxed.list().unwrap().len(), 14);
         assert!(boxed.launch(&AppId::new("netflix")).is_ok());
     }
 

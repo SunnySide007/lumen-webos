@@ -4,7 +4,7 @@
     tools/studio.sh python3 -I tools/art/contact_sheet.py
     tools/studio.sh python3 -I tools/art/contact_sheet.py --art tools/out/art/try --out tools/out/art/try.png
 
-Each hero at 480 x 160 with its name under it, the ambient hero's layers over
+Each hero at 320 x 180 with its name under it, the ambient hero's layers over
 a grey check so their transparency shows, and the pictograms in a row at
 120 px, the size a tile shows them at. Reads the PNGs in --art (by default
 shell/assets/art) and writes --out (by default tools/out/art/contact-sheet.png,
@@ -31,7 +31,7 @@ OUT = os.path.join(ROOT, 'tools', 'out', 'art', 'contact-sheet.png')
 FONT = os.path.join(ROOT, 'shell', 'assets', 'fonts', 'Inter-SemiBold.ttf')
 
 COLUMNS = 4
-CELL_W, CELL_H = 480, 160
+CELL_W, CELL_H = 320, 180
 ICON = 120
 GAP = 24
 LABEL = 40
@@ -56,8 +56,7 @@ def shrink(pixels, factor):
 
 
 def hero_names(art):
-    names = sorted(f[:-4] for f in os.listdir(art) if f.startswith('hero-') and f.endswith('.png')
-                   and not f.endswith('-half.png'))
+    names = sorted(f[:-4] for f in os.listdir(art) if f.startswith('hero-') and f.endswith('.png'))
 
     def order(name):
         group = ('ambient', 'palette', 'hdmi', 'live-tv', 'plex', 'homebrew', 'settings')

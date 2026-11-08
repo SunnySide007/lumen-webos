@@ -79,7 +79,10 @@ impl<L: Launcher> Shell<L> {
             Ok(apps) => (apps, None),
             Err(e) => (Vec::new(), Some(e)),
         };
-        let mut home = Home::new(apps, BackAtTop::Exit).with_look(look);
+        // The shell is the TV's Home (Phase 3): Back on the row goes back to
+        // what was playing, and with nothing playing it does nothing, as
+        // Back on a Home does. It no longer closes the shell.
+        let mut home = Home::new(apps, BackAtTop::Stay).with_look(look);
         if let Some(e) = failed {
             home.show_status(format!("Could not list apps: {e}"), now);
         }
@@ -431,6 +434,11 @@ impl<L: Launcher> Shell<L> {
             self.visible = true;
             self.home.mark_dirty();
             self.foreground.came_back(at);
+            // What was in front meanwhile, as the luna watch saw it: the
+            // corner says it, and Back on the row goes back to it.
+            if let Some(id) = self.shared.playing() {
+                self.home.set_playing(Some(AppId::new(id)));
+            }
         }
     }
 
@@ -600,16 +608,37 @@ mod tests {
     }
 
     #[test]
-    fn back_on_the_top_row_quits() {
+    fn back_on_the_top_row_with_nothing_playing_does_nothing() {
         let mut shell = shell();
         key(&mut shell, scancode::WEBOS_BACK, 0);
-        assert!(shell.quit);
+        assert!(!shell.quit);
+        assert_eq!(shell.launch_due_at(), None);
     }
 
     #[test]
-    fn back_on_the_top_row_settles_the_press_as_leaving() {
+    fn back_after_an_app_was_in_front_goes_back_to_it() {
         let mut shell = shell();
-        key(&mut shell, scancode::WEBOS_BACK, 0);
+        send(&mut shell, Event::Background, 0);
+        shell.shared.set_playing("com.webos.app.hdmi2".to_owned());
+        send(&mut shell, Event::Foreground, 100);
+        assert_eq!(
+            shell.home.playing(),
+            Some(&AppId::new("com.webos.app.hdmi2"))
+        );
+        assert_eq!(shell.home.view().playing, Some("HDMI 2"));
+        key(&mut shell, scancode::WEBOS_BACK, 200);
+        assert!(!shell.quit, "Back resumes, it does not leave");
+        assert!(shell.launch_if_due(ms(300), &SystemClock, || ms(300)));
+        assert_eq!(
+            shell.launcher.launched(),
+            [AppId::new("com.webos.app.hdmi2")]
+        );
+    }
+
+    #[test]
+    fn a_press_waiting_as_the_shell_leaves_is_settled() {
+        let mut shell = shell();
+        key(&mut shell, scancode::RIGHT, 0);
         assert!(shell.keys.is_waiting());
         shell.leaving(at(3));
         assert!(!shell.keys.is_waiting());
@@ -1217,14 +1246,13 @@ mod tests {
     fn a_launch_asked_for_just_before_leaving_is_dropped_with_a_line() {
         let mut shell = shell();
         key(&mut shell, scancode::RETURN, 0);
-        key(&mut shell, scancode::WEBOS_BACK, 1);
-        assert!(shell.quit, "BACK on the top row");
+        send(&mut shell, Event::Quit, 1);
+        assert!(shell.quit);
         let lines = said(|| shell.leaving(at(2)));
         assert_eq!(
             lines,
             [
                 "key 40: not shown after 2 ms: the shell is leaving",
-                "key 482: not shown after 1 ms: the shell is leaving",
                 "launch netflix: dropped: the shell is leaving",
             ]
         );

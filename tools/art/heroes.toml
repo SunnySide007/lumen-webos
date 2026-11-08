@@ -6,6 +6,8 @@
 # Ambient (the screensaver): a still of the studio's aurora loop, as the 30 s
 # loop at 24 fps has it at `frame`, with the scene's own seed, toned as the
 # studio's previews are (peak_nits maps to white: the 1080p loop's MaxCLL).
+# Frame 160 has every curtain's lower edge running the whole width; at frame
+# 0 one faded out part way across and read as a seam (lane J's J2).
 
 [hero-ambient]
 scene = "ambient"
@@ -13,7 +15,7 @@ source = "aurora"
 seed = 2026
 seconds = 30
 fps = 24
-frame = 0
+frame = 160
 peak_nits = 725.0
 
 # Palette: one per colour of style.rs's TILE_PALETTE, by index.

@@ -152,7 +152,9 @@ BACK did nothing on the TV: it read the state byte as the scancode.
 * **Back on row 0 leaves the shell.** Until the takeover makes the shell the
   Home, it is an ordinary webOS app, and BACK at the top is how those close.
   This is a policy flag in the core (`BackAtTop::Exit` now, `Stay` once the
-  shell owns Home), so the change later is one line.
+  shell owns Home), so the change later is one line. Made on 2026-11-08
+  with the new home: the shell passes `Stay`, and Back on the row goes back
+  to what was playing, or does nothing (look-and-feel.md, "The home").
 
 ## Layout
 

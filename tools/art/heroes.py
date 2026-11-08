@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Draws the Top Shelf heroes: full-bleed 1920 x 640 art above the app row.
+"""Draws the heroes: full-screen art behind the home, drawn at 1280 x 720.
 
     tools/studio.sh python3 -I tools/art/heroes.py --all
     tools/studio.sh python3 -I tools/art/heroes.py hero-hdmi2 --out tools/out/art/try
 
 Each hero is a scene drawn by code from a seed in heroes.toml, written as an
-8-bit sRGB PNG and a 960 x 320 half-size copy (-half.png) into --out (by
-default shell/assets/art). They are made for an OLED in a dark room: a
-near-black base, a few small highlights, nothing pure white, and the bottom
-200 px darkened so the shell's 72 px title reads over them. The ambient hero,
-a still of the studio's aurora loop, also comes as three layers for
-parallax (-bg, -mid, -fg). Prints each file's light levels and banding.
+8-bit sRGB PNG into --out (by default shell/assets/art); the shell scales it
+up to the screen. They are made for an OLED in a dark room: a near-black
+base, a few small highlights, nothing pure white, and darkened where the
+home's name, row and chips sit (artkit.home_scrim), so the shell draws no
+fade of its own. The ambient hero, a still of the studio's aurora loop,
+also comes as three layers for parallax (-bg, -mid, -fg). Prints each
+file's light levels and banding.
 """
 
 import argparse
@@ -235,7 +236,12 @@ def arrival(spec, width, height):
     angle = math.radians(spec['angle'])
     face = aspect * rng.uniform(0.70, 0.80)
     lean = math.tan(math.radians(rng.uniform(-5.0, 5.0)))
-    inside = 1.0 - smoothstep(-0.0015, 0.0015, x - face - (y - 0.5) * lean)
+    # Air and glass meet over a few pixels for the lines' cores, and over a
+    # wide band for their halos: the halos are brighter in the glass, and a
+    # cut at the face drew it as a seam (J2).
+    across = x - face - (y - 0.5) * lean
+    inside = 1.0 - smoothstep(-0.008, 0.008, across)
+    inside_halo = 1.0 - smoothstep(-0.05, 0.05, across)
     sigma = 0.9 / artkit.HEIGHT  # a line's core, in picture heights
     middle = rng.uniform(0.22, 0.4)
     lines = np.zeros((height, width))
@@ -249,8 +255,8 @@ def arrival(spec, width, height):
         # Outside, in air: crisp, the same brightness all the way in.
         ox, oy = x - fx, y - fy
         d_out = np.abs(ox * math.sin(a) + oy * math.cos(a))
-        lines += (1.0 - inside) * bright * (np.exp(-0.5 * (d_out / sigma) ** 2)
-                                            + 0.05 * np.exp(-0.5 * (d_out / (6.0 * sigma)) ** 2))
+        lines += bright * ((1.0 - inside) * np.exp(-0.5 * (d_out / sigma) ** 2)
+                           + (1.0 - inside_halo) * 0.05 * np.exp(-0.5 * (d_out / (6.0 * sigma)) ** 2))
         # Inside, the line bends toward the face's normal (glass, n = 1.5),
         # dims as the glass absorbs it and spreads as it scatters.
         b = math.asin(math.sin(a) / 1.5)
@@ -258,25 +264,31 @@ def arrival(spec, width, height):
         d_in = np.abs(ox * math.sin(b) + oy * math.cos(b))
         spread = sigma + 0.011 * s
         fade = np.exp(-s / rng.uniform(0.7, 1.4)) * sigma / spread
-        glow = fade * bright * (np.exp(-0.5 * (d_in / spread) ** 2)
-                                + 0.06 * np.exp(-0.5 * (d_in / (7.0 * spread)) ** 2))
-        lines += inside * glow
-        within += inside * glow
+        glow = fade * bright * (inside * np.exp(-0.5 * (d_in / spread) ** 2)
+                                + inside_halo * 0.06 * np.exp(-0.5 * (d_in / (7.0 * spread)) ** 2))
+        lines += glow
+        within += glow
         glints.append((fx * height, fy * height, bright))
     haze = 0.3 * artkit.blur(within, 0.025 * height) + 0.15 * artkit.blur(within, 0.12 * height)
-    # Where each line meets the face, light runs a little way along it.
+    # Where each line meets the face, a short tick of light along it. (It
+    # ran 3.5% of the height each way once, then 1%, and the ticks of
+    # neighbouring lines joined into a line down the face: a seam.)
     edge = np.zeros((height, width))
     along = np.exp(-0.5 * ((x - face - (y - 0.5) * lean) / (0.8 / artkit.HEIGHT)) ** 2)
     for gx, gy, bright in glints:
-        edge += 0.07 * bright * along * np.exp(-np.abs(y - gy / height) / 0.035)
+        edge += 0.05 * bright * along * np.exp(-((y - gy / height) / 0.004) ** 2)
     smoke = 0.85 + 0.15 * Waves(rng, 1.4)(x, y)
-    sheen = 0.004 * inside * np.exp(-(((x - 0.45 * face) * 0.8 + (y - 0.25) * 0.6) / 0.35) ** 2)
+    # The glass's faint sheen fades out across the face instead of stopping
+    # at it, which also drew a line.
+    within_glass = 1.0 - smoothstep(-0.06, 0.02, x - face - (y - 0.5) * lean)
+    sheen = 0.004 * within_glass * np.exp(-(((x - 0.45 * face) * 0.8 + (y - 0.25) * 0.6) / 0.35) ** 2)
     total = (lines + haze + edge) * smoke + sheen
     image = total[:, :, None] * light * spec.get('peak', 0.55)
     pale = artkit.normalized(light ** 0.35)
     for gx, gy, bright in glints:
         artkit.splat(image, [(gx, gy)], 0.4 * bright, pale, 1.1 * height / artkit.HEIGHT)
-        artkit.splat(image, [(gx, gy)], 0.025 * bright, light, 12.0 * height / artkit.HEIGHT)
+        # Small: at 12 px the glows of neighbouring lines joined down the face.
+        artkit.splat(image, [(gx, gy)], 0.012 * bright, light, 4.0 * height / artkit.HEIGHT)
     return image
 
 
@@ -669,7 +681,7 @@ def ambient(spec, width, height):
                      (lit - (1.0 - alpha[:, :, None]) * under) / np.maximum(alpha[:, :, None], 1e-4), 0.0)
     cover = np.clip(parts['cover'].astype(np.float64), 0.0, 1.0)
     front = np.where(cover[:, :, None] > 0.0, tone(parts['front'] / np.maximum(cover, 1e-6)[:, :, None]), 0.0)
-    scrim = artkit.title_scrim(height, width)[:, :, None]
+    scrim = artkit.home_scrim(height, width)[:, :, None]
     back, light, front = back * scrim, np.clip(light, 0.0, 1.0) * scrim, front * scrim
     picture = over(front, cover, over(light, alpha, back))
     return {'': picture,
@@ -697,39 +709,14 @@ def render(name, spec, width=artkit.WIDTH, height=artkit.HEIGHT):
     return {'': artkit.finish(rng, linear, spec.get('grain', 0.06))}
 
 
-def half(encoded):
-    """The half-size copy of one image: averaged in linear light, or for a
-    layer with alpha, averaged premultiplied on the encoded signal, as the
-    shell blends it."""
-    if encoded.shape[2] == 3:
-        return artkit.srgb_encode(artkit.downsample(artkit.srgb_decode(encoded)))
-    alpha = encoded[:, :, 3:]
-    small = artkit.downsample(np.concatenate([encoded[:, :, :3] * alpha, alpha], axis=2))
-    a = small[:, :, 3:]
-    return np.concatenate([np.where(a > 0.0, small[:, :, :3] / np.maximum(a, 1e-9), 0.0), a], axis=2)
-
-
-def halves(images):
-    """The half-size copies of a hero's images. A layered hero's picture is
-    its half-size layers laid over each other, as at full size, so the flat
-    copy and the layers agree at either size."""
-    small = {suffix: half(encoded) for suffix, encoded in images.items()}
-    if '-bg' in small:
-        bg, mid, fg = small['-bg'], small['-mid'], small['-fg']
-        small[''] = over(fg[:, :, :3], fg[:, :, 3], over(mid[:, :, :3], mid[:, :, 3], bg[:, :, :3]))
-    return small
-
-
 def write(name, images, out):
     """Writes the files of one hero; returns [(file, pixels, encoded)]."""
     written = []
-    small = halves(images)
-    for suffix, encoded in images.items():
-        for tail, picture in (('', encoded), ('-half', small[suffix])):
-            pixels = artkit.quantize(picture)
-            path = os.path.join(out, f'{name}{suffix}{tail}.png')
-            artkit.write_png(path, pixels)
-            written.append((path, pixels, picture))
+    for suffix, picture in images.items():
+        pixels = artkit.quantize(picture)
+        path = os.path.join(out, f'{name}{suffix}.png')
+        artkit.write_png(path, pixels)
+        written.append((path, pixels, picture))
     return written
 
 
@@ -763,8 +750,7 @@ def main(argv=None):
         started = time.monotonic()
         files = write(name, render(name, table[name]), args.out)
         for path, pixels, encoded in files:
-            if '-half' not in path:
-                print(report(path, pixels, encoded))
+            print(report(path, pixels, encoded))
         print(f'  {name}: {time.monotonic() - started:.1f} s', file=sys.stderr)
 
 

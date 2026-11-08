@@ -20,8 +20,9 @@ tools/studio.sh python3 -I tools/art/contact_sheet.py --crop hero-palette-1
 ## The scripts
 
 * `heroes.py` draws each hero in `heroes.toml` (scene, seed and the scene's
-  settings) as a 1920 x 640 PNG and a 960 x 320 `-half.png`, and prints each
-  file's light levels and banding. `hero-ambient` is a still of the studio's
+  settings) as a 1280 x 720 PNG with the home's scrim in it
+  (`artkit.home_scrim`), and prints each file's light levels, the title's
+  contrast and banding. `hero-ambient` is a still of the studio's
   aurora loop (`studio/aurora.py`, through its `layers_at()`), also as three
   layers for parallax: `-bg` (the sky), `-mid` (the curtains' light), `-fg`
   (the ridge and lake), RGBA with straight alpha, worked out on the encoded
@@ -32,7 +33,7 @@ tools/studio.sh python3 -I tools/art/contact_sheet.py --crop hero-palette-1
   `#EBEEF5`, a 2-unit round stroke on a 24-unit grid), refuses anything
   outside those rules (`check()`), and draws each to a 240 x 240 PNG with
   transparency.
-* `contact_sheet.py` lays every hero (480 x 160) and pictogram (120 px) on one
+* `contact_sheet.py` lays every hero (320 x 180) and pictogram (120 px) on one
   sheet in `tools/out/art/`, outside git. `--ambient-choice` draws the ambient
   hero from each studio scene at four frames; `--crop HERO` shows, at 400%,
   where HERO bands worst without dither, rounded beside dithered.

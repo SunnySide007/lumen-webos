@@ -52,10 +52,10 @@ def png_header(path):
 
 
 def files(name):
-    """The PNGs a hero is written as: itself and its half-size copy, and
-    the same for each layer of a layered hero."""
+    """The PNGs a hero is written as: itself, and each layer of a layered
+    hero."""
     layers = ('', '-bg', '-mid', '-fg') if TABLE[name]['scene'] == 'ambient' else ('',)
-    return [f'{name}{layer}{size}.png' for layer in layers for size in ('', '-half')]
+    return [f'{name}{layer}.png' for layer in layers]
 
 
 def read(name):
@@ -112,13 +112,13 @@ class TableTest(unittest.TestCase):
 class FilesTest(unittest.TestCase):
     """The files: their sizes, their credits, nothing else in the folder."""
 
-    def test_heroes_are_full_and_half_size_and_small(self):
+    def test_heroes_are_1280_by_720_and_small(self):
         for name in HEROES:
             for file in files(name):
                 with self.subTest(file=file):
                     path = os.path.join(ART, file)
                     width, height, colour = png_header(path)
-                    self.assertEqual((width, height), (960, 320) if '-half' in file else (1920, 640))
+                    self.assertEqual((width, height), (1280, 720))
                     layer = any(f'-{layer}' in file for layer in ('bg', 'mid', 'fg'))
                     self.assertEqual(colour, 6 if layer else 2, 'layers are RGBA, pictures RGB')
                     self.assertLess(os.path.getsize(path), 1.5e6)
@@ -234,10 +234,10 @@ class ArtkitTest(unittest.TestCase):
         self.assertTrue(np.array_equal(np.frombuffer(out, np.uint8).reshape(pixels.shape), pixels))
 
     def test_dither_breaks_the_bands_of_a_dark_gradient(self):
-        # The darkest gradient the heroes have: code 0 to 8 over the 640 px
-        # height, the slope of a title band. Rounded, it is nine flat bands;
-        # dithered, no run of one code lasts.
-        ramp = np.repeat(np.linspace(0.0, 8.0 / 255, 640)[:, None, None], 1920, axis=1).repeat(3, axis=2)
+        # The darkest gradient the heroes have: code 0 to 8 over the 720 px
+        # height, the slope of the home's scrim. Rounded, it is nine flat
+        # bands; dithered, no run of one code lasts.
+        ramp = np.repeat(np.linspace(0.0, 8.0 / 255, 720)[:, None, None], 1280, axis=1).repeat(3, axis=2)
         before = artkit.longest_band(ramp[:, :, 1] * 255, artkit.quantize(ramp, dither=False)[:, :, 1])
         after = artkit.longest_band(ramp[:, :, 1] * 255, artkit.quantize(ramp)[:, :, 1])
         self.assertGreater(before, 70)
@@ -264,33 +264,31 @@ class HeroTest(unittest.TestCase):
 
     def test_light_levels(self):
         for name in HEROES:
-            for file in (f'{name}.png', f'{name}-half.png'):
-                with self.subTest(file=file):
-                    s = artkit.light_stats(read(file))
-                    self.assertLess(s['mean'], 0.20, 'mean luma under 20%')
-                    self.assertLess(s['median'], 0.10, 'most pixels far lower')
-                    self.assertLess(s['p99'], 0.60, 'no large bright areas')
-                    self.assertLess(s['max'], 0.95, 'nothing near white')
-                    self.assertEqual(s['white'], 0, 'no pure white')
+            with self.subTest(hero=name):
+                s = artkit.light_stats(read(f'{name}.png'))
+                self.assertLess(s['mean'], 0.20, 'mean luma under 20%')
+                self.assertLess(s['median'], 0.10, 'most pixels far lower')
+                self.assertLess(s['p99'], 0.60, 'no large bright areas')
+                self.assertLess(s['max'], 0.95, 'nothing near white')
+                self.assertEqual(s['white'], 0, 'no pure white')
 
-    def test_the_title_band_darkens_toward_black(self):
+    def test_the_home_reads_over_the_art(self):
+        # The home's scrim is in the art: the title box is dark, the chips'
+        # band darker still, and the title reads at 7:1 over 99% of its box.
         for name in HEROES:
             with self.subTest(hero=name):
                 s = artkit.light_stats(read(f'{name}.png'))
-                self.assertLess(s['band_mean'], 0.06)
-                self.assertLess(s['band_end'], 0.02)
+                self.assertLess(s['band_mean'], 0.08)
+                self.assertLess(s['band_end'], 0.03)
                 self.assertLess(s['band_end'], s['band_mean'] + 1e-9)
                 self.assertGreater(s['contrast'], 7.0, 'the title at 7:1 or more over 99% of the band')
 
     def test_drawn_again_from_the_seed_byte_for_byte(self):
         for name in HEROES:
-            images = self.render(name)
-            small = heroes.halves(images)
-            for suffix, encoded in images.items():
-                for size, picture in (('', encoded), ('-half', small[suffix])):
-                    with self.subTest(file=f'{name}{suffix}{size}.png'):
-                        with open(os.path.join(ART, f'{name}{suffix}{size}.png'), 'rb') as f:
-                            self.assertEqual(artkit.png_bytes(artkit.quantize(picture)), f.read())
+            for suffix, picture in self.render(name).items():
+                with self.subTest(file=f'{name}{suffix}.png'):
+                    with open(os.path.join(ART, f'{name}{suffix}.png'), 'rb') as f:
+                        self.assertEqual(artkit.png_bytes(artkit.quantize(picture)), f.read())
 
     def test_dither_breaks_every_heros_bands(self):
         for name in HEROES:
@@ -303,9 +301,11 @@ class HeroTest(unittest.TestCase):
                 self.assertLessEqual(after, before)
 
     def test_palette_heroes_differ_in_shape(self):
+        # Compared without the home's scrim, which all of them share.
+        scrim = artkit.downsample(artkit.home_scrim(artkit.HEIGHT, artkit.WIDTH), 16)
         small = {}
         for i in range(8):
-            luma = artkit.downsample(read(f'hero-palette-{i}-half.png') / 255.0, 8) @ artkit.LUMA
+            luma = artkit.downsample(read(f'hero-palette-{i}.png') / 255.0, 16) @ artkit.LUMA / scrim
             small[i] = (luma - luma.mean()) / luma.std()
         for i in range(8):
             for j in range(i + 1, 8):
@@ -313,20 +313,18 @@ class HeroTest(unittest.TestCase):
                     self.assertLess(abs((small[i] * small[j]).mean()), 0.6)
 
     def test_ambient_layers_make_the_picture(self):
-        for size in ('', '-half'):
-            with self.subTest(size=size or 'full'):
-                bg, mid, fg = (read(f'hero-ambient-{layer}{size}.png') / 255.0 for layer in ('bg', 'mid', 'fg'))
-                self.assertTrue(np.all(bg[:, :, 3] == 1.0), 'the sky is opaque')
-                self.assertEqual(fg[: fg.shape[0] // 4, :, 3].max(), 0.0, 'nothing in front of the high sky')
-                self.assertTrue(np.all(fg[-10:, :, 3] == 1.0), 'the lake is opaque')
-                self.assertLess(mid[:, :, 3].mean(), 0.2)
-                self.assertLess((mid[:, :, 3] == 1.0).mean(), 0.01, 'light is seldom opaque')
-                under = heroes.over(mid[:, :, :3], mid[:, :, 3], bg[:, :, :3])
-                composed = heroes.over(fg[:, :, :3], fg[:, :, 3], under)
-                flat = read(f'hero-ambient{size}.png') / 255.0
-                diff = np.abs(composed - flat) * 255.0
-                self.assertLess(diff.mean(), 0.6)
-                self.assertLess(np.percentile(diff, 99.9), 4.0)
+        bg, mid, fg = (read(f'hero-ambient-{layer}.png') / 255.0 for layer in ('bg', 'mid', 'fg'))
+        self.assertTrue(np.all(bg[:, :, 3] == 1.0), 'the sky is opaque')
+        self.assertEqual(fg[: fg.shape[0] // 4, :, 3].max(), 0.0, 'nothing in front of the high sky')
+        self.assertTrue(np.all(fg[-10:, :, 3] == 1.0), 'the lake is opaque')
+        self.assertLess(mid[:, :, 3].mean(), 0.2)
+        self.assertLess((mid[:, :, 3] == 1.0).mean(), 0.01, 'light is seldom opaque')
+        under = heroes.over(mid[:, :, :3], mid[:, :, 3], bg[:, :, :3])
+        composed = heroes.over(fg[:, :, :3], fg[:, :, 3], under)
+        flat = read('hero-ambient.png') / 255.0
+        diff = np.abs(composed - flat) * 255.0
+        self.assertLess(diff.mean(), 0.6)
+        self.assertLess(np.percentile(diff, 99.9), 4.0)
 
     def test_the_same_seed_draws_the_same(self):
         spec = TABLE['hero-palette-4']

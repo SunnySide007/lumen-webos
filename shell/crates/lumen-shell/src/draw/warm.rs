@@ -11,7 +11,8 @@
 use std::time::Duration;
 
 use lumen_core::apps::App;
-use lumen_core::home::{TileView, View};
+use lumen_core::art::Look;
+use lumen_core::home::{ChipView, TileView, View};
 use lumen_core::layout;
 use lumen_core::shelf::ShelfView;
 
@@ -20,13 +21,28 @@ use crate::render::Batch;
 
 use super::{Assets, paint};
 
-/// Makes every glyph the apps' titles will need, as the screen draws them:
-/// under the tile, on the Top Shelf, as a letter tile, and in the status
-/// lines `Home::launched` writes. Each app is painted once per status line,
-/// focused and without its icon, into a batch that is thrown away. The
-/// glyphs' pixels wait in `assets.atlas` for the caller to upload. If the
-/// atlas fills and is emptied part way, the glyphs made before are gone, so
-/// it paints everything once more, as `draw::home` does.
+/// The lines under a name the home can write, besides an app's own status
+/// lines: their glyphs, digits included, are made once.
+const SUBTITLES: [&str; 8] = [
+    "Playing now",
+    "Opened just now",
+    "Opened a minute ago",
+    "Opened 0123456789 minutes ago",
+    "Opened an hour ago",
+    "Opened yesterday",
+    "Opened 2 days ago",
+    "1 more app, 2 more apps",
+];
+
+/// Makes every glyph the apps' names will need, as the screen draws them:
+/// above the row, across a tile, on a chip, under a tile on the "Other
+/// apps" page, by the clock, and in the status lines `Home::launched`
+/// writes; and the clock's digits, the subtitles and the page's heading.
+/// Each app is painted once per status line, focused and without its icon,
+/// into a batch that is thrown away. The glyphs' pixels wait in
+/// `assets.atlas` for the caller to upload. If the atlas fills and is
+/// emptied part way, the glyphs made before are gone, so it paints
+/// everything once more, as `draw::home` does.
 pub fn warm(apps: &[App], assets: &mut Assets) {
     let generation = assets.atlas.generation();
     paint_all(apps, assets);
@@ -37,38 +53,63 @@ pub fn warm(apps: &[App], assets: &mut Assets) {
 
 fn paint_all(apps: &[App], assets: &mut Assets) {
     let mut scratch = Batch::default();
+    let subtitles = SUBTITLES.iter().map(|s| (*s).to_owned());
     for (index, app) in apps.iter().enumerate() {
         let plain = App {
             icon: None,
             ..app.clone()
         };
-        for status in [
+        let statuses = [
             format!("Opening {}", app.title),
             format!("Could not open {}", app.title),
-        ] {
+        ];
+        // The first app carries the subtitles and the clock's digits too.
+        let extra: Vec<String> = if index == 0 {
+            subtitles.clone().collect()
+        } else {
+            Vec::new()
+        };
+        for (n, status) in statuses.iter().chain(extra.iter()).enumerate() {
             let view = View {
-                shelf: layout::TOP_SHELF,
-                shelf_title: Some(&app.title),
-                shelf_art: ShelfView::PLACEHOLDER,
-                shelf_drift: [0.0; 2],
+                art: ShelfView::PLACEHOLDER,
+                drift: [0.0; 2],
+                // Half turned, so the name above the row and the page's
+                // heading both draw.
+                page: 0.5,
+                title: Some(&app.title),
+                subtitle: Some(status.clone()),
+                heading_y: layout::HEADING_BASELINE,
+                clock: (n == 0).then(|| "0123456789:".to_owned()),
+                playing: Some(&app.title),
                 tiles: vec![TileView {
                     app: &plain,
-                    rect: layout::lifted(layout::tile_rect(0), 1.0),
+                    rect: layout::lifted(layout::row_tile(0), 1.0),
                     lift: 1.0,
                     focused: true,
                     index,
                     tilt: [0.0; 2],
                     sweep: None,
+                    alpha: 1.0,
+                    named: true,
                 }],
-                status: Some(&status),
+                chips: vec![ChipView {
+                    app: &plain,
+                    rect: layout::chip_lifted(layout::chip_rect(0), 1.0),
+                    lift: 1.0,
+                    focused: true,
+                    playing: true,
+                    alpha: 1.0,
+                }],
+                status: (n < statuses.len()).then_some(status.as_str()),
                 empty: false,
+                look: Look::PLAIN,
             };
             paint(&mut scratch, &view, assets);
         }
     }
 }
 
-/// `warm: 106 glyphs, 103 uploads, 525 KB in 0.7 ms` (the simulator's 12
+/// `warm: 106 glyphs, 103 uploads, 525 KB in 0.7 ms` (the simulator's
 /// mock apps, on the PC): what `warm` made and how long it and the uploads
 /// took.
 pub fn line(glyphs: u32, uploads: &[Upload], took: Duration) -> String {
