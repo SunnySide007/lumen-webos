@@ -51,6 +51,13 @@ pub struct Options {
     pub fixed_dt: Option<Duration>,
     /// Once the keys are played and the screen settles, save it here and quit.
     pub screenshot_when_settled: Option<PathBuf>,
+    /// The launch parameter `"shots"`: at each time on the loop's clock, the
+    /// first settled frame from then on is saved as
+    /// `lumen-shot-<ms>.png` beside the log, and the shell goes on.
+    pub shots: Vec<Duration>,
+    /// The launch parameter `"saver": "hold"`: the luna watch answers LG's
+    /// screensaver requests `ack: false` (a bench run's lab mode).
+    pub hold_saver: bool,
     /// The look's features: all on unless the launch parameters say.
     pub look: Look,
     /// What the launch parameters' `"look"` said that names no feature:
@@ -181,6 +188,10 @@ impl Options {
         self.window_type = params.window_type.or(self.window_type.take());
         self.exit_after = params.exit_after.or(self.exit_after);
         self.hidden |= params.hidden || launch.preloaded();
+        self.hold_saver |= params.hold_saver;
+        if !params.shots.is_empty() {
+            self.shots = params.shots;
+        }
         self.lifecycle = launch.method;
         self.launch_lines.extend(params.refused);
         if let Some(reason) = launch.reason {
@@ -412,8 +423,7 @@ fn run_home<W: Window, E: Events>(
         if vsync { "on" } else { "refused" }
     );
 
-    let mut renderer = Renderer::new(gl)?;
-    renderer.set_dither(opts.look.dither);
+    let mut renderer = Renderer::new(gl, opts.look.dither)?;
     start.mark(Phase::Renderer, Instant::now());
     // The GPU plan's gate: measured, logged, and nothing else.
     if opts.probe {
@@ -453,7 +463,7 @@ fn run_home<W: Window, E: Events>(
     // starts, and to the same again by the home loop's `Shell::new`.
     let _watch = (on_tv() && opts.fixed_dt.is_none()).then(|| {
         shared.set_last_input(listing.saturating_duration_since(zero));
-        watch::start(Arc::clone(&shared), luna::SELF_ID, zero)
+        watch::start(Arc::clone(&shared), luna::SELF_ID, zero, opts.hold_saver)
     });
     // Under a fixed clock heroes load at once, like its icons.
     let folders = art_folders();

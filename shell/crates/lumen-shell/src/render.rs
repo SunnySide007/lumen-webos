@@ -497,7 +497,9 @@ attribute vec4 a_shape;
 attribute float a_kind;
 attribute float a_w;
 uniform vec2 u_screen;
+#ifdef DITHER
 varying vec3 v_pos;
+#endif
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec2 v_local;
@@ -506,7 +508,9 @@ varying float v_kind;
 void main() {
     vec2 ndc = vec2(a_pos.x / u_screen.x * 2.0 - 1.0, 1.0 - a_pos.y / u_screen.y * 2.0);
     gl_Position = vec4(ndc * a_w, 0.0, a_w);
+#ifdef DITHER
     v_pos = vec3(a_pos * a_w, a_w);
+#endif
     v_uv = a_uv;
     v_color = a_color;
     v_local = a_local;
@@ -532,6 +536,14 @@ void main() {
 // holds only even pixel centres, which would leave 8 levels in x and bias
 // the pattern in y; `tests` work the arithmetic both ways. Mod 4 is
 // p - 4 floor(p / 4), exact for whole numbers either way.
+//
+// The dither is built in only where `DITHER` is defined (`Program::build`):
+// a separate program, made when the dither is turned on. Without it the
+// shaders are the ones from before the dither, with no `v_pos` and no
+// branch on `u_dither`. Built in always, that varying and that branch ran
+// for every pixel even at `u_dither` 0, and they are the suspect for the
+// plain look's 21.6 ms a frame on the B9's Mali-T820 MP2 against 17 ms
+// before lane J (2026-11-07; look-and-feel.md, "Measured on the B9").
 const FRAGMENT_SHADER: &str = "
 #ifdef GL_ES
 #ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -541,22 +553,28 @@ precision mediump float;
 #endif
 #endif
 uniform sampler2D u_atlas;
+#ifdef DITHER
 uniform float u_dither;
 varying vec3 v_pos;
+#endif
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec2 v_local;
 varying vec4 v_shape;
 varying float v_kind;
+#ifdef DITHER
 float bayer2(vec2 a) {
     a = floor(a);
     return fract(dot(a, vec2(0.5, a.y * 0.75)));
 }
+#endif
 void main() {
     vec4 c = vec4(v_color.rgb * v_color.a, v_color.a);
     if (v_kind > 1.5) {
         gl_FragColor = texture2D(u_atlas, v_uv) * c;
+#ifdef DITHER
         return;
+#endif
     } else if (v_kind > 0.5) {
         vec2 q = abs(v_local) - v_shape.xy + v_shape.z;
         float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - v_shape.z;
@@ -564,12 +582,12 @@ void main() {
     } else {
         gl_FragColor = c;
     }
-    if (u_dither > 0.0) {
-        vec2 p = floor(v_pos.xy / v_pos.z);
-        p -= 4.0 * floor(p * 0.25);
-        float t = bayer2(p * 0.5) * 0.25 + bayer2(p);
-        gl_FragColor.rgb += (t - 15.0 / 32.0) * u_dither * gl_FragColor.a;
-    }
+#ifdef DITHER
+    vec2 p = floor(v_pos.xy / v_pos.z);
+    p -= 4.0 * floor(p * 0.25);
+    float t = bayer2(p * 0.5) * 0.25 + bayer2(p);
+    gl_FragColor.rgb += (t - 15.0 / 32.0) * u_dither * gl_FragColor.a;
+#endif
 }
 ";
 
@@ -584,45 +602,74 @@ const ATTRIBUTES: [(&std::ffi::CStr, i32); 7] = [
     (c"a_w", 1),
 ];
 
-pub struct Renderer {
-    gl: Gl,
-    program: u32,
-    vbo: u32,
-    texture: u32,
+/// A linked program and where its inputs are.
+struct Program {
+    id: u32,
     attributes: [u32; ATTRIBUTES.len()],
     u_screen: i32,
-    u_dither: i32,
-    /// The dither's peak to peak, 0 for none.
-    dither: f32,
+    /// The dither's strength; only the dithered program has it.
+    u_dither: Option<i32>,
 }
 
-impl Renderer {
-    pub fn new(gl: Gl) -> Result<Self, String> {
-        let vs = gl.compile_shader(gl::VERTEX_SHADER, VERTEX_SHADER)?;
-        let fs = gl.compile_shader(gl::FRAGMENT_SHADER, FRAGMENT_SHADER)?;
-        let program = gl.link_program(vs, fs)?;
+impl Program {
+    /// The shaders, with the dither built in if `dither`.
+    fn build(gl: &Gl, dither: bool) -> Result<Self, String> {
+        let define = if dither { "#define DITHER\n" } else { "" };
+        let vs = gl.compile_shader(gl::VERTEX_SHADER, &format!("{define}{VERTEX_SHADER}"))?;
+        let fs = gl.compile_shader(gl::FRAGMENT_SHADER, &format!("{define}{FRAGMENT_SHADER}"))?;
+        let id = gl.link_program(vs, fs)?;
         let mut attributes = [0; ATTRIBUTES.len()];
         for (slot, (name, _)) in attributes.iter_mut().zip(ATTRIBUTES) {
             // SAFETY: the program linked and the name is a NUL-terminated literal.
-            let at = unsafe { (gl.get_attrib_location)(program, name.as_ptr()) };
+            let at = unsafe { (gl.get_attrib_location)(id, name.as_ptr()) };
             *slot = u32::try_from(at)
                 .map_err(|_| format!("shader is missing {}", name.to_string_lossy()))?;
         }
         // SAFETY: as above.
         let (u_screen, u_atlas, u_dither) = unsafe {
             (
-                (gl.get_uniform_location)(program, c"u_screen".as_ptr()),
-                (gl.get_uniform_location)(program, c"u_atlas".as_ptr()),
-                (gl.get_uniform_location)(program, c"u_dither".as_ptr()),
+                (gl.get_uniform_location)(id, c"u_screen".as_ptr()),
+                (gl.get_uniform_location)(id, c"u_atlas".as_ptr()),
+                (gl.get_uniform_location)(id, c"u_dither".as_ptr()),
             )
         };
-        if u_screen < 0 || u_atlas < 0 || u_dither < 0 {
+        if u_screen < 0 || u_atlas < 0 || (dither && u_dither < 0) {
             return Err("shader is missing u_screen, u_atlas or u_dither".to_owned());
         }
+        // SAFETY: the program linked above; the atlas is texture unit 0.
+        unsafe {
+            (gl.use_program)(id);
+            (gl.uniform1i)(u_atlas, 0);
+        }
+        Ok(Self {
+            id,
+            attributes,
+            u_screen,
+            u_dither: dither.then_some(u_dither),
+        })
+    }
+}
+
+pub struct Renderer {
+    gl: Gl,
+    /// The program without the dither and the one with it, each built when
+    /// first needed.
+    plain: Option<Program>,
+    dithered: Option<Program>,
+    vbo: u32,
+    texture: u32,
+    /// The dither's peak to peak, 0 for none.
+    dither: f32,
+}
+
+impl Renderer {
+    /// The renderer, with the dither on if `dither`. Only the program that
+    /// takes is built; a dithered one the GPU refuses is logged, and the
+    /// renderer goes on without the dither.
+    pub fn new(gl: Gl, dither: bool) -> Result<Self, String> {
         let (mut vbo, mut texture) = (0, 0);
         // SAFETY: `vbo` and `texture` are valid out-pointers for one name each;
-        // the texture is allocated with no data (null), which GL allows; the
-        // program is the one linked above.
+        // the texture is allocated with no data (null), which GL allows.
         unsafe {
             (gl.gen_buffers)(1, &mut vbo);
             (gl.gen_textures)(1, &mut texture);
@@ -643,30 +690,60 @@ impl Renderer {
                 gl::UNSIGNED_BYTE,
                 std::ptr::null(),
             );
-            (gl.use_program)(program);
-            (gl.uniform1i)(u_atlas, 0);
             (gl.enable)(gl::BLEND);
             (gl.blend_func)(gl::ONE, gl::ONE_MINUS_SRC_ALPHA);
         }
-        Ok(Self {
+        let mut renderer = Self {
             gl,
-            program,
+            plain: None,
+            dithered: None,
             vbo,
             texture,
-            attributes,
-            u_screen,
-            u_dither,
             dither: 0.0,
-        })
+        };
+        if dither {
+            renderer.set_dither(true);
+        }
+        if renderer.program().is_none() {
+            renderer.plain = Some(Program::build(&renderer.gl, false)?);
+        }
+        Ok(renderer)
     }
 
     pub fn gl(&self) -> &Gl {
         &self.gl
     }
 
-    /// Dithers flat and shape quads by `style::DITHER` if `on`.
+    /// Dithers flat and shape quads by `style::DITHER` if `on`, building
+    /// the program for it if it isn't yet. A dithered program the GPU
+    /// refuses is logged, and the dither stays off.
     pub fn set_dither(&mut self, on: bool) {
-        self.dither = if on { style::DITHER } else { 0.0 };
+        if on && self.dithered.is_none() {
+            match Program::build(&self.gl, true) {
+                Ok(p) => self.dithered = Some(p),
+                Err(e) => crate::info!("dither: {e}; drawn without it"),
+            }
+        }
+        self.dither = if on && self.dithered.is_some() {
+            style::DITHER
+        } else {
+            0.0
+        };
+        if self.dither == 0.0 && self.plain.is_none() {
+            match Program::build(&self.gl, false) {
+                Ok(p) => self.plain = Some(p),
+                Err(e) => crate::info!("the plain program: {e}"),
+            }
+        }
+    }
+
+    /// The program the next frame draws with.
+    fn program(&self) -> Option<&Program> {
+        if self.dither > 0.0 {
+            self.dithered.as_ref()
+        } else {
+            self.plain.as_ref()
+        }
     }
 
     /// Copies newly placed atlas pixels into the texture.
@@ -701,11 +778,16 @@ impl Renderer {
     /// Clears the whole drawable to black, then draws `batch` letterboxed into it.
     pub fn draw(&self, batch: &Batch, drawable: (i32, i32)) {
         let gl = &self.gl;
+        // `new` and `set_dither` leave a program for the mode they set.
+        let Some(program) = self.program() else {
+            return;
+        };
         let (x, y, w, h) = fit_viewport(drawable.0, drawable.1);
         let stride = (FLOATS_PER_VERTEX * size_of::<f32>()) as i32;
         let bytes = (batch.verts.len() * size_of::<f32>()) as isize;
-        // SAFETY: the program, buffer, texture and attribute locations were
-        // created by `new` on this context; the upload reads exactly `bytes`
+        // SAFETY: the program and its attribute locations were made by
+        // `Program::build`, the buffer and texture by `new`, all on this
+        // context; the upload reads exactly `bytes`
         // from the batch, which outlives the call; every attribute's offset
         // and size stay inside one vertex (they sum to FLOATS_PER_VERTEX).
         unsafe {
@@ -713,9 +795,11 @@ impl Renderer {
             (gl.clear_color)(0.0, 0.0, 0.0, 1.0);
             (gl.clear)(gl::COLOR_BUFFER_BIT);
             (gl.viewport)(x, y, w, h);
-            (gl.use_program)(self.program);
-            (gl.uniform2f)(self.u_screen, SCREEN_W, SCREEN_H);
-            (gl.uniform1f)(self.u_dither, self.dither);
+            (gl.use_program)(program.id);
+            (gl.uniform2f)(program.u_screen, SCREEN_W, SCREEN_H);
+            if let Some(u_dither) = program.u_dither {
+                (gl.uniform1f)(u_dither, self.dither);
+            }
             (gl.active_texture)(gl::TEXTURE0);
             (gl.bind_texture)(gl::TEXTURE_2D, self.texture);
             (gl.bind_buffer)(gl::ARRAY_BUFFER, self.vbo);
@@ -726,7 +810,7 @@ impl Renderer {
                 gl::STREAM_DRAW,
             );
             let mut offset = 0;
-            for (&at, (_, floats)) in self.attributes.iter().zip(ATTRIBUTES) {
+            for (&at, (_, floats)) in program.attributes.iter().zip(ATTRIBUTES) {
                 (gl.enable_vertex_attrib_array)(at);
                 (gl.vertex_attrib_pointer)(
                     at,
@@ -817,6 +901,96 @@ mod tests {
     /// Every vertex of the batch, as its 15 floats.
     fn vertices(batch: &Batch) -> Vec<&[f32]> {
         batch.verts.chunks(FLOATS_PER_VERTEX).collect()
+    }
+
+    /// `source` as GLSL's preprocessor leaves it for `DITHER` defined or
+    /// not: lines inside `#ifdef DITHER` kept or dropped, the directives
+    /// themselves gone, every other line (other `#` lines included) as it is.
+    fn with_dither(source: &str, dither: bool) -> String {
+        // One entry per open `#ifdef`: whether it is DITHER's.
+        let mut open: Vec<bool> = Vec::new();
+        let mut out = String::new();
+        for line in source.split_inclusive('\n') {
+            let t = line.trim();
+            if t.starts_with("#if") {
+                open.push(t == "#ifdef DITHER");
+                if t == "#ifdef DITHER" {
+                    continue;
+                }
+            } else if t == "#endif" && open.pop() == Some(true) {
+                continue;
+            }
+            assert!(
+                !(t == "#else" && open.last() == Some(&true)),
+                "no #else for DITHER"
+            );
+            if dither || !open.contains(&true) {
+                out.push_str(line);
+            }
+        }
+        assert!(open.is_empty(), "an #ifdef without its #endif");
+        out
+    }
+
+    /// The fragment shader before lane J's dither (838b5d8), 17 ms a frame
+    /// on the B9.
+    const FRAGMENT_SHADER_BEFORE_DITHER: &str = "
+#ifdef GL_ES
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+#endif
+uniform sampler2D u_atlas;
+varying vec2 v_uv;
+varying vec4 v_color;
+varying vec2 v_local;
+varying vec4 v_shape;
+varying float v_kind;
+void main() {
+    vec4 c = vec4(v_color.rgb * v_color.a, v_color.a);
+    if (v_kind > 1.5) {
+        gl_FragColor = texture2D(u_atlas, v_uv) * c;
+    } else if (v_kind > 0.5) {
+        vec2 q = abs(v_local) - v_shape.xy + v_shape.z;
+        float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - v_shape.z;
+        gl_FragColor = c * (1.0 - smoothstep(-v_shape.w, v_shape.w, d));
+    } else {
+        gl_FragColor = c;
+    }
+}
+";
+
+    #[test]
+    fn without_the_dither_the_fragment_shader_is_the_one_from_before_it() {
+        assert_eq!(
+            with_dither(FRAGMENT_SHADER, false),
+            FRAGMENT_SHADER_BEFORE_DITHER
+        );
+        // Nor does the vertex shader hand over the place the dither reads.
+        let vs = with_dither(VERTEX_SHADER, false);
+        assert!(!vs.contains("v_pos"), "{vs}");
+        assert!(vs.contains("gl_Position = vec4(ndc * a_w, 0.0, a_w);"));
+    }
+
+    #[test]
+    fn with_the_dither_both_shaders_carry_its_place_and_strength() {
+        let vs = with_dither(VERTEX_SHADER, true);
+        let fs = with_dither(FRAGMENT_SHADER, true);
+        for line in ["varying vec3 v_pos;", "v_pos = vec3(a_pos * a_w, a_w);"] {
+            assert!(vs.contains(line), "{line}");
+        }
+        for line in [
+            "uniform float u_dither;",
+            "varying vec3 v_pos;",
+            "vec2 p = floor(v_pos.xy / v_pos.z);",
+            // Images are not dithered: they leave before it.
+            "gl_FragColor = texture2D(u_atlas, v_uv) * c;\n        return;",
+        ] {
+            assert!(fs.contains(line), "{line}");
+        }
+        assert!(!fs.contains("DITHER") && !vs.contains("DITHER"));
     }
 
     #[test]

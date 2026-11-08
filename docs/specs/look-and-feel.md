@@ -394,6 +394,47 @@ These cost little or nothing per frame and do the most for the look:
    settled start screen (1280x720) the background's longest run of one
    colour fell from 22 px to 5 px. Its cost on the TV is not measured yet;
    the `-dither` look switch turns it off.
+
+   **Measured on the B9 (OLED55B9PUA, 05.50.00, 2026-11-07),** 45 s of
+   arrows held around the grid, the window from the log's first to last
+   key (`tools/out/tv-session-20261107/plan.md`, git-ignored):
+
+   | Build | Average frame | Vsyncs skipped per 10 s |
+   |---|---|---|
+   | 3a89955, before lane J | 16.88 ms | 4.7 |
+   | Lane J's build, `{"look":"plain"}` | 21.61 ms | 131.7 |
+   | main e57dc5b, `{"look":"plain"}` | 21.53 ms | 128.4 |
+   | main e57dc5b, the full look (short bursts only) | 27.95 ms | 231 |
+
+   Plain still paid: the dither's varying (`v_pos`) and its branch on
+   `u_dither` were in the one shader, run for every pixel at `u_dither` 0,
+   the only change to what plain draws. Since then the dither is built
+   only into a program of its own (`render.rs`, `DITHER`), made when it is
+   turned on, so plain's fragment shader is again the one from before lane
+   J byte for byte (a test holds it).
+
+   **Measured on the B9 (OLED55B9PUA, 05.50.00, 2026-11-08)** with the
+   bench (docs/device/bench.md): the robot's 45 s pattern, three runs a
+   build, the median shown; RSS after 5 min settled. Reports in
+   `tools/out/bench/` (git-ignored).
+
+   | Build | Average frame | Vsyncs skipped per 10 s | Start-up | RSS |
+   |---|---|---|---|---|
+   | 3a89955, before lane J | 16.89 ms | 4.82 | 541 ms | 42,848 kB |
+   | 86b3527, `{"look":"plain"}` | 16.94 ms | 7.53 | 514 ms | 42,144 kB |
+   | 86b3527, `{"look":"-dither"}` | 17.07 ms | 7.26 | 536 ms | |
+   | 86b3527, the full look | 29.62 ms | 256 | 528 ms | |
+
+   Plain is back to 3a89955's frame time, and the speed gate passes it on
+   every row, so the fix is merged. Hero, tilt, light and parallax
+   together cost about 0.1 ms. **The dither costs about 12.5 ms a frame on
+   its own**: with it on, the home draws every other vsync (about 34 fps).
+   Its program runs on every flat and shape quad, so its cost grows with
+   everything those quads cover; where the time goes is not measured yet.
+   Until it is made cheap (a small dither texture in place of the
+   arithmetic, or one pass over the finished frame), the default look
+   should leave it off; the home's branch owns the look switches and makes
+   that change.
 3. **Kerning.** Inter wasn't kerned: fontdue reads kerning only from a `kern`
    table, and Inter keeps it in GPOS. The 72 px shelf title shows it most.
    Done on 2026-10-23 (e823515): the pairs are pulled out of GPOS ahead of

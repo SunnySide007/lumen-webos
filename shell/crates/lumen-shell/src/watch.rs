@@ -8,7 +8,8 @@
 //!   what takes focus (LG's screensaver, LG's Home, another build).
 //! * `tvpower/power/registerScreenSaverRequest`: LG asks before its
 //!   screensaver starts. The shell answers `ack: true` (allowed, for the
-//!   OLED's sake) and logs the request.
+//!   OLED's sake) and logs the request; a bench run's launch parameter
+//!   `"saver": "hold"` makes it `ack: false` for that launch only.
 //!
 //! Each state line says how long ago the last input came, so a focus loss two
 //! minutes after the last key reads as LG's idle timer, not as a lost key
@@ -155,6 +156,8 @@ pub struct Watch {
     client_name: String,
     power: Option<String>,
     front_app: Option<String>,
+    /// The launch parameter `"saver": "hold"`: refuse LG's screensaver.
+    hold_saver: bool,
     /// Whether each subscription's last message failed and was warned about;
     /// a good message arms the warning again.
     warned: [bool; Which::ALL.len()],
@@ -163,11 +166,12 @@ pub struct Watch {
 impl Watch {
     /// `app_id` names the shell in its screensaver requests, as
     /// `<appId>.wakelock` (webosbrew's SDL does the same).
-    pub fn new(app_id: &str) -> Self {
+    pub fn new(app_id: &str, hold_saver: bool) -> Self {
         Self {
             client_name: format!("{app_id}.wakelock"),
             power: None,
             front_app: None,
+            hold_saver,
             warned: [false; Which::ALL.len()],
         }
     }
@@ -236,13 +240,18 @@ impl Watch {
             }
             Which::Screensaver => {
                 if let Some(timestamp) = screensaver_timestamp(&reply) {
+                    let said = if self.hold_saver {
+                        "held off (launch parameter)"
+                    } else {
+                        "allowed"
+                    };
                     actions.push(Action::Log(format!(
-                        "screensaver request: allowed; last input {} s ago",
+                        "screensaver request: {said}; last input {} s ago",
                         ago(since_input)
                     )));
                     actions.push(Action::Respond(json!({
                         "clientName": self.client_name,
-                        "ack": true,
+                        "ack": !self.hold_saver,
                         "timestamp": timestamp,
                     })));
                 }
@@ -361,12 +370,12 @@ pub struct Running {
 
 /// Starts the watch on its own thread. `zero` is when the loop's clock
 /// started, which `Shared`'s last-input times count from.
-pub fn start(shared: Arc<Shared>, app_id: &str, zero: Instant) -> Running {
+pub fn start(shared: Arc<Shared>, app_id: &str, zero: Instant, hold_saver: bool) -> Running {
     let app_id = app_id.to_owned();
     let on_thread = Arc::clone(&shared);
     let thread = std::thread::Builder::new()
         .name("luna-watch".to_owned())
-        .spawn(move || run(&on_thread, &app_id, zero));
+        .spawn(move || run(&on_thread, &app_id, zero, hold_saver));
     let thread = match thread {
         Ok(thread) => Some(thread),
         Err(e) => {
@@ -417,7 +426,7 @@ struct Ctx {
 /// The library stays loaded for the life of the process (`Box::leak`): the
 /// contexts the library holds point into it, and the launcher keeps the same
 /// libraries open anyway.
-fn run(shared: &Arc<Shared>, app_id: &str, zero: Instant) {
+fn run(shared: &Arc<Shared>, app_id: &str, zero: Instant, hold_saver: bool) {
     let api: &'static Api = match Api::load() {
         Ok(api) => Box::leak(Box::new(api)),
         Err(e) => {
@@ -432,7 +441,7 @@ fn run(shared: &Arc<Shared>, app_id: &str, zero: Instant) {
             return;
         }
     };
-    let watch = Rc::new(RefCell::new(Watch::new(app_id)));
+    let watch = Rc::new(RefCell::new(Watch::new(app_id, hold_saver)));
     let mut open = 0;
     for which in Which::ALL {
         let (Ok(uri), Ok(payload)) = (
@@ -595,7 +604,7 @@ mod tests {
     const APP: &str = "io.github.sunnyside007.lumen.shell";
 
     fn watch() -> Watch {
-        Watch::new(APP)
+        Watch::new(APP, false)
     }
 
     fn secs(n: f64) -> Duration {
@@ -686,6 +695,26 @@ mod tests {
             w.message(Which::FrontApp, br#"{"returnValue":true}"#, secs(132.0))
                 .is_empty(),
             "no appId at all says nothing"
+        );
+    }
+
+    #[test]
+    fn a_bench_run_holds_the_screensaver_off() {
+        let mut w = Watch::new(APP, true);
+        let request = br#"{"timestamp":"1792645126.9","returnValue":true}"#;
+        assert_eq!(
+            w.message(Which::Screensaver, request, secs(112.5)),
+            [
+                Action::Log(
+                    "screensaver request: held off (launch parameter); last input 112.5 s ago"
+                        .to_owned()
+                ),
+                Action::Respond(json!({
+                    "clientName": "io.github.sunnyside007.lumen.shell.wakelock",
+                    "ack": false,
+                    "timestamp": "1792645126.9",
+                })),
+            ]
         );
     }
 
@@ -860,7 +889,7 @@ mod tests {
         // Off the TV there is no libluna-service2: the thread logs once and
         // ends, and dropping the handle neither hangs nor panics.
         let shared = Shared::new();
-        let running = start(Arc::clone(&shared), APP, Instant::now());
+        let running = start(Arc::clone(&shared), APP, Instant::now(), false);
         drop(running);
         assert!(shared.stop.load(Ordering::SeqCst));
         assert!(shared.wake.lock().unwrap().is_none());
