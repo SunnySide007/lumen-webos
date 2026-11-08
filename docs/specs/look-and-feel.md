@@ -460,6 +460,18 @@ These cost little or nothing per frame and do the most for the look:
    leaves it off: `Look::DEFAULT`, on the home's branch since 2026-11-08.
    `{"look":"dither"}` or `full` turns it on, for a pair against the
    default.
+
+   **The cheap dither** (the home's branch, 2026-11-08, not yet measured).
+   The threshold is now one fetch from a 4x4 texture of the same 16 Bayer
+   levels on unit 1 (repeating, nearest texel), in place of two Bayer steps,
+   two floors and a divide for every pixel: the dithered program adds a
+   fetch and one multiply-add to the plain one. The pattern is the same
+   (a test checks every level against the old arithmetic). The dithered
+   program covers about 0.4 screens of the full look's pixels in the
+   simulator, so the 12.5 ms was likely the frame tipping past its vsync
+   (17.1 ms without the dither, already just over 16.7) more than the
+   arithmetic alone. The bench pairs the default against `dither` on it;
+   the aim is within 0.3 ms.
 3. **Kerning.** Inter wasn't kerned: fontdue reads kerning only from a `kern`
    table, and Inter keeps it in GPOS. The 72 px shelf title shows it most.
    Done on 2026-10-23 (e823515): the pairs are pulled out of GPOS ahead of

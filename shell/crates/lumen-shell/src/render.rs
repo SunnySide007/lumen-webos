@@ -585,7 +585,7 @@ attribute float a_kind;
 attribute float a_w;
 uniform vec2 u_screen;
 #ifdef DITHER
-varying vec3 v_pos;
+varying vec3 v_bayer;
 #endif
 varying vec2 v_uv;
 varying vec4 v_color;
@@ -596,7 +596,7 @@ void main() {
     vec2 ndc = vec2(a_pos.x / u_screen.x * 2.0 - 1.0, 1.0 - a_pos.y / u_screen.y * 2.0);
     gl_Position = vec4(ndc * a_w, 0.0, a_w);
 #ifdef DITHER
-    v_pos = vec3(a_pos * a_w, a_w);
+    v_bayer = vec3(a_pos * (0.25 * a_w), a_w);
 #endif
     v_uv = a_uv;
     v_color = a_color;
@@ -610,19 +610,24 @@ void main() {
 // distances across a 300 px pill or texels in a 2048 px atlas.
 //
 // Flat and shape quads are dithered when `u_dither` is above 0: a 4x4 Bayer
-// threshold from the pixel's place, centred, times `u_dither` (peak to
-// peak) and the pixel's alpha, so the 8-bit framebuffer's rounding breaks a
-// gradient's bands into a pattern finer than the eye resolves. Images, the
-// heroes and the atlas, are left as they are.
+// threshold from the pixel's place, centred, times `u_dither` and the
+// pixel's alpha, so the 8-bit framebuffer's rounding breaks a gradient's
+// bands into a pattern finer than the eye resolves. Images, the heroes and
+// the atlas, are left as they are.
 //
-// The place is `v_pos`, the design-space position, which on the TV is the
-// framebuffer's pixel: a varying takes the shader's highp, where GLSL ES
-// declares `gl_FragCoord` mediump. It goes as (x w, y w, w) and comes back
-// divided, which undoes the perspective interpolation a leaning quad gets,
-// so the pattern stays on the screen's pixels there too. In 16-bit floats a position past 1024
-// holds only even pixel centres, which would leave 8 levels in x and bias
-// the pattern in y; `tests` work the arithmetic both ways. Mod 4 is
-// p - 4 floor(p / 4), exact for whole numbers either way.
+// The threshold is one fetch from `BAYER`, a 4x4 texture on unit 1 that
+// repeats, nearest texel: no arithmetic but the fetch and one multiply-add.
+// Worked out in the shader (two Bayer steps, two floors and a divide for
+// every pixel), the dither put the B9's full look past its vsync
+// (2026-11-08: 29.6 ms a frame against 17.1 without it). Its place is
+// `v_bayer`, the design-space position in texels (a quarter of a pixel),
+// which on the TV is the framebuffer's pixel: a highp varying, where GLSL
+// ES declares `gl_FragCoord` mediump, whose 16-bit floats past 1024 hold
+// only even pixel centres. It goes as (x w, y w, w) and `texture2DProj`
+// divides it back, undoing the perspective interpolation a leaning quad
+// gets, so the pattern stays on the screen's pixels there too. A pixel's
+// centre lands half a texel from the texel's edges, so nearest filtering
+// picks the same texel on any GPU.
 //
 // The dither is built in only where `DITHER` is defined (`Program::build`):
 // a separate program, made when the dither is turned on. Without it the
@@ -641,20 +646,15 @@ precision mediump float;
 #endif
 uniform sampler2D u_atlas;
 #ifdef DITHER
+uniform sampler2D u_bayer;
 uniform float u_dither;
-varying vec3 v_pos;
+varying vec3 v_bayer;
 #endif
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec2 v_local;
 varying vec4 v_shape;
 varying float v_kind;
-#ifdef DITHER
-float bayer2(vec2 a) {
-    a = floor(a);
-    return fract(dot(a, vec2(0.5, a.y * 0.75)));
-}
-#endif
 void main() {
     vec4 c = vec4(v_color.rgb * v_color.a, v_color.a);
     if (v_kind > 1.5) {
@@ -670,10 +670,7 @@ void main() {
         gl_FragColor = c;
     }
 #ifdef DITHER
-    vec2 p = floor(v_pos.xy / v_pos.z);
-    p -= 4.0 * floor(p * 0.25);
-    float t = bayer2(p * 0.5) * 0.25 + bayer2(p);
-    gl_FragColor.rgb += (t - 15.0 / 32.0) * u_dither * gl_FragColor.a;
+    gl_FragColor.rgb += (texture2DProj(u_bayer, v_bayer).r - 0.5) * u_dither * gl_FragColor.a;
 #endif
 }
 ";
@@ -734,6 +731,29 @@ struct Attribute {
     at: u32,
     offset: usize,
     floats: i32,
+}
+
+/// The dither's 4x4 Bayer thresholds, row by row: each of the 16 levels
+/// once, as `level * 17`, so a fetch gives `level / 15`. The same pattern
+/// the shader worked out before (`tests`).
+const BAYER: [u8; 16] = {
+    let levels = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+    let mut bytes = [0; 16];
+    let mut i = 0;
+    while i < 16 {
+        bytes[i] = levels[i] * 17;
+        i += 1;
+    }
+    bytes
+};
+/// The texture unit `BAYER` is on; the atlas and the art use unit 0.
+const BAYER_UNIT: i32 = 1;
+
+/// `u_dither` for a dither of `peak` to peak: a fetch minus a half spans
+/// 15/16 of the 16 levels' range, so the levels step as they did when
+/// the shader worked out `level / 16 - 15 / 32`.
+fn dither_uniform(peak: f32) -> f32 {
+    peak * 15.0 / 16.0
 }
 
 /// A linked program and where its inputs are.
@@ -801,20 +821,25 @@ impl Program {
         let names = ATTRIBUTES.map(|(name, _)| name);
         let attributes = attributes_of(gl, id, &names)?;
         // SAFETY: as above.
-        let (u_screen, u_atlas, u_dither) = unsafe {
+        let (u_screen, u_atlas, u_dither, u_bayer) = unsafe {
             (
                 (gl.get_uniform_location)(id, c"u_screen".as_ptr()),
                 (gl.get_uniform_location)(id, c"u_atlas".as_ptr()),
                 (gl.get_uniform_location)(id, c"u_dither".as_ptr()),
+                (gl.get_uniform_location)(id, c"u_bayer".as_ptr()),
             )
         };
-        if u_screen < 0 || u_atlas < 0 || (dither && u_dither < 0) {
-            return Err("shader is missing u_screen, u_atlas or u_dither".to_owned());
+        if u_screen < 0 || u_atlas < 0 || (dither && (u_dither < 0 || u_bayer < 0)) {
+            return Err("shader is missing u_screen, u_atlas, u_dither or u_bayer".to_owned());
         }
-        // SAFETY: the program linked above; the atlas is texture unit 0.
+        // SAFETY: the program linked above; the atlas is texture unit 0 and
+        // the Bayer texture unit 1.
         unsafe {
             (gl.use_program)(id);
             (gl.uniform1i)(u_atlas, 0);
+            if dither {
+                (gl.uniform1i)(u_bayer, BAYER_UNIT);
+            }
         }
         Ok(Self {
             id,
@@ -836,6 +861,8 @@ pub struct Renderer {
     art: Option<Program>,
     vbo: u32,
     texture: u32,
+    /// The dither's thresholds (`BAYER`), on unit 1 once made; 0 before.
+    bayer: u32,
     /// The dither's peak to peak, 0 for none.
     dither: f32,
 }
@@ -878,6 +905,7 @@ impl Renderer {
             art: None,
             vbo,
             texture,
+            bayer: 0,
             dither: 0.0,
         };
         if dither {
@@ -901,7 +929,13 @@ impl Renderer {
     /// the program for it if it isn't yet. A dithered program the GPU
     /// refuses is logged, and the dither stays off.
     pub fn set_dither(&mut self, on: bool) {
-        if on && self.dithered.is_none() {
+        if on && self.bayer == 0 {
+            match self.make_bayer() {
+                Ok(name) => self.bayer = name,
+                Err(e) => crate::info!("dither: {e}; drawn without it"),
+            }
+        }
+        if on && self.bayer != 0 && self.dithered.is_none() {
             match Program::build(&self.gl, true) {
                 Ok(p) => self.dithered = Some(p),
                 Err(e) => crate::info!("dither: {e}; drawn without it"),
@@ -916,6 +950,51 @@ impl Renderer {
             match Program::build(&self.gl, false) {
                 Ok(p) => self.plain = Some(p),
                 Err(e) => crate::info!("the plain program: {e}"),
+            }
+        }
+    }
+
+    /// Makes the dither's texture: `BAYER`, 4x4 bytes of luminance on unit
+    /// 1, repeating, nearest texel. Unit 0 is left active. GL's error if it
+    /// would not take it (it is deleted then).
+    fn make_bayer(&self) -> Result<u32, String> {
+        let gl = &self.gl;
+        let before = gl.error();
+        if before != gl::NO_ERROR {
+            crate::info!("GL error {before:#x}");
+        }
+        let mut name = 0;
+        // SAFETY: `name` is a valid out-pointer for one name; `BAYER` holds
+        // the 4 x 4 one-byte pixels GL reads at an alignment of 1, and is a
+        // constant, so it outlives the call.
+        unsafe {
+            (gl.gen_textures)(1, &mut name);
+            (gl.active_texture)(gl::TEXTURE0 + BAYER_UNIT as u32);
+            (gl.bind_texture)(gl::TEXTURE_2D, name);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT);
+            (gl.pixel_storei)(gl::UNPACK_ALIGNMENT, 1);
+            (gl.tex_image_2d)(
+                gl::TEXTURE_2D,
+                0,
+                gl::LUMINANCE as i32,
+                4,
+                4,
+                0,
+                gl::LUMINANCE,
+                gl::UNSIGNED_BYTE,
+                BAYER.as_ptr().cast(),
+            );
+            (gl.active_texture)(gl::TEXTURE0);
+        }
+        match gl.error() {
+            gl::NO_ERROR => Ok(name),
+            e => {
+                // SAFETY: `name` was made just above on this context.
+                unsafe { (gl.delete_textures)(1, &name) };
+                Err(format!("its texture: GL error {e:#x}"))
             }
         }
     }
@@ -1021,7 +1100,7 @@ impl Renderer {
             (gl.use_program)(program.id);
             (gl.uniform2f)(program.u_screen, SCREEN_W, SCREEN_H);
             if let Some(u_dither) = program.u_dither {
-                (gl.uniform1f)(u_dither, self.dither);
+                (gl.uniform1f)(u_dither, dither_uniform(self.dither));
             }
             for a in &program.attributes {
                 (gl.enable_vertex_attrib_array)(a.at);
@@ -1174,7 +1253,7 @@ void main() {
         );
         // Nor does the vertex shader hand over the place the dither reads.
         let vs = with_dither(VERTEX_SHADER, false);
-        assert!(!vs.contains("v_pos"), "{vs}");
+        assert!(!vs.contains("v_bayer"), "{vs}");
         assert!(vs.contains("gl_Position = vec4(ndc * a_w, 0.0, a_w);"));
     }
 
@@ -1182,13 +1261,17 @@ void main() {
     fn with_the_dither_both_shaders_carry_its_place_and_strength() {
         let vs = with_dither(VERTEX_SHADER, true);
         let fs = with_dither(FRAGMENT_SHADER, true);
-        for line in ["varying vec3 v_pos;", "v_pos = vec3(a_pos * a_w, a_w);"] {
+        for line in [
+            "varying vec3 v_bayer;",
+            "v_bayer = vec3(a_pos * (0.25 * a_w), a_w);",
+        ] {
             assert!(vs.contains(line), "{line}");
         }
         for line in [
+            "uniform sampler2D u_bayer;",
             "uniform float u_dither;",
-            "varying vec3 v_pos;",
-            "vec2 p = floor(v_pos.xy / v_pos.z);",
+            "varying vec3 v_bayer;",
+            "texture2DProj(u_bayer, v_bayer).r - 0.5",
             // Images are not dithered: they leave before it.
             "gl_FragColor = texture2D(u_atlas, v_uv) * c;\n        return;",
         ] {
@@ -1403,8 +1486,9 @@ void main() {
         (v / ulp).round_ties_even() * ulp
     }
 
-    /// The fragment shader's dither threshold at pixel (x, y), each step
-    /// rounded by `r`: `half` for mediump, nothing for highp.
+    /// The dither threshold the shader worked out at pixel (x, y) before the
+    /// texture (2026-11-08), each step rounded by `r`: `half` for mediump,
+    /// nothing for highp.
     fn threshold(x: u32, y: u32, r: fn(f32) -> f32) -> f32 {
         let bayer2 = |ax: f32, ay: f32| {
             let (ax, ay) = (ax.floor(), ay.floor());
@@ -1419,18 +1503,35 @@ void main() {
         r(r(bayer2(r(px * 0.5), r(py * 0.5)) * 0.25) + bayer2(px, py))
     }
 
+    /// The texel `BAYER` gives pixel `x`'s centre, with its place rounded by
+    /// `r`: `(x + 0.5) / 4` texels, repeating every 4, nearest.
+    fn texel(x: u32, r: fn(f32) -> f32) -> u32 {
+        let u = r((x as f32 + 0.5) * 0.25);
+        ((u - u.floor()) * 4.0).floor() as u32
+    }
+
     #[test]
-    fn the_dither_is_a_4x4_bayer_pattern_at_highp_and_mediump() {
-        // The shader holds the arithmetic these tests work.
-        for line in [
-            "return fract(dot(a, vec2(0.5, a.y * 0.75)));",
-            "vec2 p = floor(v_pos.xy / v_pos.z);",
-            "p -= 4.0 * floor(p * 0.25);",
-            "float t = bayer2(p * 0.5) * 0.25 + bayer2(p);",
-            "gl_FragColor.rgb += (t - 15.0 / 32.0) * u_dither * gl_FragColor.a;",
-        ] {
-            assert!(FRAGMENT_SHADER.contains(line), "{line}");
+    fn the_texture_holds_the_pattern_the_shader_worked_out() {
+        let exact = |v: f32| v;
+        // At every pixel of the screen, the fetch less a half, times the
+        // uniform, is the offset the arithmetic gave.
+        for y in (0..1080).step_by(7) {
+            for x in (0..1920).step_by(5) {
+                let level = BAYER[(texel(y, exact) * 4 + texel(x, exact)) as usize];
+                let fetched = f32::from(level) / 255.0;
+                let now = (fetched - 0.5) * dither_uniform(1.0);
+                let before = threshold(x, y, exact) - 15.0 / 32.0;
+                assert!((now - before).abs() < 1e-6, "({x}, {y}): {now} {before}");
+            }
         }
+        // A highp place picks the right texel all the way across; a 16-bit
+        // one past 1024 px would not, which is why the varying is highp.
+        assert!((0..1920).all(|x| texel(x, exact) == x % 4));
+        assert!((1024..1920).any(|x| texel(x, half) != x % 4));
+    }
+
+    #[test]
+    fn the_old_arithmetic_was_a_4x4_bayer_pattern_at_highp_and_mediump() {
         let block = |x0: u32, y0: u32, r: fn(f32) -> f32| {
             let mut ts: Vec<f32> = (0..16)
                 .map(|i| threshold(x0 + i % 4, y0 + i / 4, r))
