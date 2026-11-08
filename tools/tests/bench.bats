@@ -9,6 +9,8 @@ setup() {
     TMP=$(mktemp -d)
     export LUMEN_TV_SH="$TMP/tv.sh"
     export FAKE_WINDOW="$TMP/window.txt"
+    export LUMEN_BENCH_LOCK="$TMP/tv.lock"
+    export LUMEN_BENCH_PERSON="$TMP/person-at"
     cat >"$LUMEN_TV_SH" <<'EOF'
 #!/bin/sh
 case $1 in
@@ -187,4 +189,28 @@ EOF
     run window_step
     [[ "$output" == *"last=1100"* ]]
     [[ "$output" == *"under=$APP"* ]]
+}
+
+@test "a person who stopped a run holds the window shut for 20 minutes" {
+    answer 10000 14 "$APP" Active 8800 "$APP"
+    echo 9500 >"$LUMEN_BENCH_PERSON"
+    run sh "$BENCH" window
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"a person stopped a run 500 s ago"* ]]
+    echo 8700 >"$LUMEN_BENCH_PERSON"
+    run sh "$BENCH" window
+    [ "$status" -eq 0 ]
+}
+
+@test "with-lock runs its command and passes on its status" {
+    run sh "$BENCH" with-lock sh -c 'cat "$LUMEN_BENCH_LOCK/pid" >/dev/null && exit 7'
+    [ "$status" -eq 7 ]
+}
+
+@test "a lock whose process has gone is taken over" {
+    mkdir "$LUMEN_BENCH_LOCK"
+    echo 999999 >"$LUMEN_BENCH_LOCK/pid"
+    run sh "$BENCH" with-lock true
+    [ "$status" -eq 0 ]
+    [ "$(cat "$LUMEN_BENCH_LOCK/pid")" != 999999 ]
 }

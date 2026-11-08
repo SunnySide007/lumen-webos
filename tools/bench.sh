@@ -44,6 +44,16 @@
 #   tools/bench.sh restore             put back the last good build
 #   tools/bench.sh gate DIR [BASE]     the speed gate: DIR/summary.json against
 #                                      BASE (default tools/out/bench/baseline.json)
+#   tools/bench.sh with-lock CMD ...   run CMD holding the TV lock (for TV jobs
+#                                      outside bench.sh, such as a Guard trial)
+#
+# One TV job at a time: run, apps, the lean commands, restore and with-lock
+# take tools/out/bench/tv.lock (LUMEN_BENCH_LOCK), waiting up to an hour
+# for a job that holds it. A lock whose process has gone is taken over.
+#
+# A yield's time goes to tools/out/bench/person-at (LUMEN_BENCH_PERSON):
+# the TV's own idle record leaves out the bench's time ranges, so without
+# it a person who stopped a run would not hold the window shut.
 #
 # Each run closes the shell, launches it with the parameters plus the
 # bench's own ("saver":"hold" so LG's screensaver stays off, "shots" for
@@ -73,6 +83,9 @@ PATTERN=$STAGE/bench-pattern.txt
 IDLE_S=1200
 FIRST_FRAME_S=10
 PY=${PYTHON:-python}
+LOCK=${LUMEN_BENCH_LOCK:-$OUTROOT/tv.lock}
+LOCK_WAIT_S=3600
+PERSON=${LUMEN_BENCH_PERSON:-$OUTROOT/person-at}
 command -v "$PY" >/dev/null 2>&1 || PY=python3
 
 usage() {
@@ -136,6 +149,13 @@ window_closed() {
         echo "the TV does not answer"
         return
     }
+    person=$(cat "$PERSON" 2>/dev/null || true)
+    person=${person%%.*}
+    case $person in '' | *[!0-9]*) person='' ;; esac
+    if [ -n "$person" ] && [ "$now" -ge "$person" ] && [ $((now - person)) -lt "$IDLE_S" ]; then
+        echo "a person stopped a run $((now - person)) s ago (idle needs ${IDLE_S})"
+        return
+    fi
     if [ "$night" = night ]; then
         case $hour in
             00 | 01 | 02 | 03 | 04 | 05) ;;
@@ -407,6 +427,7 @@ cmd_run() {
         set -e
         if [ "$played" = 3 ]; then
             say "YIELD: a person used the remote ($(grep yield "$OUT/run$i-play.jsonl" | head -n 1))"
+            note_person "$OUT/run$i-play.jsonl"
             exit 3
         fi
         [ "$played" = 0 ] || {
@@ -467,6 +488,7 @@ home_from() {
     set -e
     if [ "$rc" = 3 ]; then
         say "YIELD: a person used the remote"
+        note_person "$OUT/home-$app-$mode.jsonl"
         exit 3
     fi
     press=$(sed -n 's/.*"first":\([0-9.]*\).*/\1/p' "$OUT/home-$app-$mode.jsonl" | head -n 1)
@@ -662,19 +684,65 @@ cmd_gate() {
     "$PY" -I "$BENCH/gate.py" check "$1/summary.json" "${2:-$OUTROOT/baseline.json}"
 }
 
+# The TV lock: a directory holding the owner's pid, never removed on exit
+# (each command has its own EXIT trap); a dead pid frees it.
+take_lock() {
+    mkdir -p "$(dirname "$LOCK")"
+    lock_waited=0
+    while ! mkdir "$LOCK" 2>/dev/null; do
+        holder=$(cat "$LOCK/pid" 2>/dev/null || true)
+        if [ -z "$holder" ]; then
+            # Taken this instant and its pid not yet written, or left empty.
+            sleep 2
+            holder=$(cat "$LOCK/pid" 2>/dev/null || true)
+            [ -n "$holder" ] || {
+                rm -rf "$LOCK"
+                continue
+            }
+        fi
+        if [ "$holder" != $$ ] && kill -0 "$holder" 2>/dev/null; then
+            [ "$lock_waited" -lt "$LOCK_WAIT_S" ] ||
+                die "another TV job (pid $holder) has held the TV for an hour"
+            [ "$lock_waited" -gt 0 ] || say "waiting for another TV job (pid $holder)"
+            sleep 30
+            lock_waited=$((lock_waited + 30))
+        else
+            rm -rf "$LOCK"
+        fi
+    done
+    echo $$ >"$LOCK/pid"
+}
+
+# The yield's time on the TV's clock (the robot's own stamp), else now.
+note_person() {
+    at=$(sed -n 's/.*"yield":{"at":\([0-9]*\).*/\1/p' "$1" 2>/dev/null | head -n 1)
+    [ -n "$at" ] || at=$(tv run 'date +%s' </dev/null | tr -d '\r')
+    [ -z "$at" ] || echo "$at" >"$PERSON"
+}
+
+cmd_with_lock() {
+    [ $# -gt 0 ] || die "with-lock CMD [ARG ...]"
+    set +e
+    "$@"
+    rc=$?
+    set -e
+    exit "$rc"
+}
+
 cmd=${1:-}
 [ $# -eq 0 ] || shift
 case $cmd in
     window) cmd_window "$@" ;;
     wait-window) cmd_wait_window "$@" ;;
     last-good) cmd_last_good "$@" ;;
-    run) cmd_run "$@" ;;
-    apps) cmd_apps "$@" ;;
-    lean-survey) cmd_lean_survey "$@" ;;
+    run) take_lock; cmd_run "$@" ;;
+    apps) take_lock; cmd_apps "$@" ;;
+    lean-survey) take_lock; cmd_lean_survey "$@" ;;
     lean-plan) cmd_lean_plan "$@" ;;
-    lean-try) cmd_lean_try "$@" ;;
-    lean-undo) cmd_lean_undo "$@" ;;
-    restore) cmd_restore ;;
+    lean-try) take_lock; cmd_lean_try "$@" ;;
+    lean-undo) take_lock; cmd_lean_undo "$@" ;;
+    restore) take_lock; cmd_restore ;;
+    with-lock) take_lock; cmd_with_lock "$@" ;;
     gate) cmd_gate "$@" ;;
     -h | --help | help | '') usage ;;
     *) die "unknown command: $cmd (tools/bench.sh --help)" ;;

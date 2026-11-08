@@ -107,6 +107,21 @@ and 156 MB in swap with Lumen in front (b9.md, "Memory").
 A stop that helps becomes lasting only through a boot hook, tested like any
 other (safety rule 3).
 
+## One job at a time, and a person first
+
+* **The TV lock.** `run`, `apps`, the lean commands and `restore` take
+  `tools/out/bench/tv.lock`; a second job waits for it, up to an hour. TV
+  jobs outside the bench (a Guard trial night) run under
+  `tools/bench.sh with-lock CMD`. A lock whose process has gone is taken
+  over, so a stopped job never blocks the next.
+* **A yield shuts the window.** The TV's idle record leaves out the bench's
+  own time ranges, so the robot's keys don't count as a person. A
+  person's key during a run falls in such a range too, so a yield also
+  writes its time to `tools/out/bench/person-at`, and the window stays
+  shut for 20 minutes from it. On 2026-11-08 a run yielded to the Magic
+  Remote's pointer appearing (LG's code 1198: someone picked it up), and
+  the next run started 36 s later; that is the case this closes.
+
 ## The robot remote
 
 `lumen-ctl play FILE`, `lumen-ctl key NAME` and `lumen-ctl watch-remote
