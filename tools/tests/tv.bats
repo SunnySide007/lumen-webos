@@ -45,7 +45,7 @@ setup() {
 @test "launch refuses parameters that are not one plain JSON object, before connecting" {
     for bad in look '"look"' '{"look":"plain"' 'x{"look":"plain"}' \
         '{"a":"$(reboot)"}' "{\"a\":\"it's\"}" '{"a":"b\"}' '{"a":"`reboot`"}' \
-        '{"a":1};{}' '{"a":1} | reboot {}' '{"a":[1]}'; do
+        '{"a":1};{}' '{"a":1} | reboot {}' '{"a":[1,"$(reboot)"]}'; do
         run "$TV" launch netflix "$bad"
         [ "$status" -ne 0 ]
         [[ "$output" == *"launch parameters"* ]]

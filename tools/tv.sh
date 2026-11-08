@@ -170,7 +170,7 @@ EOF
 # backslash or anything else the TV's shell would read.
 check_params() {
     case $1 in
-        *[!A-Za-z0-9\ \{\}\":,._+-]*) die "launch parameters have unsupported characters: $1" ;;
+        *[!][A-Za-z0-9\ \{\}\":,._+-]*) die "launch parameters have unsupported characters: $1" ;;
         \{*\}) ;;
         *) die "launch parameters must be one JSON object, such as '{\"look\":\"plain\"}': $1" ;;
     esac

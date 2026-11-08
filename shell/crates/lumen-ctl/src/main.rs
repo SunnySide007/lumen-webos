@@ -22,6 +22,7 @@ mod log;
 mod privacy;
 mod probe;
 mod protocol;
+mod robot;
 mod serve;
 #[allow(unsafe_code)]
 mod sys;
@@ -54,6 +55,25 @@ fn main() -> ExitCode {
             probe::probe_keys(which, &mut io::stdout());
             ExitCode::SUCCESS
         }
+        Ok(Command::Play { file, settle }) => match robot::Pattern::load(&file) {
+            Ok(p) => robot::play(&p, settle, &mut io::stdout()),
+            Err(msg) => {
+                eprintln!("lumen-ctl: {msg}");
+                ExitCode::from(2)
+            }
+        },
+        Ok(Command::Key {
+            name,
+            hold_ms,
+            settle,
+        }) => match robot::one_key(&name, hold_ms) {
+            Ok(p) => robot::play(&p, settle, &mut io::stdout()),
+            Err(msg) => {
+                eprintln!("lumen-ctl: {msg}");
+                ExitCode::from(2)
+            }
+        },
+        Ok(Command::WatchRemote(secs)) => robot::watch_remote(secs, &mut io::stdout()),
         Ok(Command::Help) => {
             print!("{}", args::USAGE);
             ExitCode::SUCCESS

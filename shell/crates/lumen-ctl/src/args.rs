@@ -14,6 +14,9 @@ pub const USAGE: &str = "\
 usage: lumen-ctl serve [--bus library|command] [--keys none|keymanager] [--log FILE]
        lumen-ctl probe [--bus library|command]
        lumen-ctl probe-keys [--bus library|command]
+       lumen-ctl play FILE [--settle-ms N]
+       lumen-ctl key NAME [--hold-ms N] [--settle-ms N]
+       lumen-ctl watch-remote SECONDS
 
 serve speaks Lumen Remote's protocol (remote/ui/src/protocol.ts) on stdin and
 stdout, one JSON object per line, until stdin ends or SIGTERM or SIGHUP comes.
@@ -29,6 +32,15 @@ probe makes only read-only calls and says which of them this TV's bus allows,
 over library and then command (or the one --bus names). probe-keys calls
 createKeyEvent with no parameters, so LG's error names the ones it wants; no
 key is sent. It uses command unless --bus says otherwise.
+
+play, key and watch-remote are the bench's robot remote (docs/device/
+bench.md): play makes a virtual remote through /dev/uinput and plays a
+pattern file on it after --settle-ms (default 1500) for the compositor to
+find it; key plays one press (held --hold-ms, default 60) of up, down, left,
+right, ok, back, home, play, pause, stop, rewind or fastforward. Both watch
+every other input node meanwhile, never grabbing it, and stop at the first
+person's event (exit 3). watch-remote prints the people's events on those
+nodes for SECONDS, with the kernel's stamps. Each prints JSON lines.
 
 For tests and the PC: --bus fake (a TV in the process, no luna), --config
 FILE, --keys-file FILE and --alive-ms N.
@@ -97,7 +109,56 @@ pub enum Command {
     /// `None`: library, then command.
     Probe(Option<BusKind>),
     ProbeKeys(BusKind),
+    Play {
+        file: PathBuf,
+        settle: Duration,
+    },
+    Key {
+        name: String,
+        hold_ms: u64,
+        settle: Duration,
+    },
+    WatchRemote(u64),
     Help,
+}
+
+fn ms_in(flag: &str, value: &str, lo: u64, hi: u64) -> Result<u64, String> {
+    value
+        .parse()
+        .ok()
+        .filter(|ms| (lo..=hi).contains(ms))
+        .ok_or_else(|| format!("{flag} must be {lo} to {hi}, not {value}"))
+}
+
+/// The robot remote's commands: one word, then their own flags.
+fn parse_robot(sub: &str, rest: &[String]) -> Result<Command, String> {
+    let Some((word, flags)) = rest.split_first() else {
+        return Err(format!("{sub} needs an argument"));
+    };
+    let (mut settle, mut hold_ms) = (crate::robot::SETTLE, 60);
+    let mut it = flags.iter();
+    while let Some(flag) = it.next() {
+        let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
+        match (sub, flag.as_str()) {
+            ("play" | "key", "--settle-ms") => {
+                settle = Duration::from_millis(ms_in(flag, value, 0, 10_000)?)
+            }
+            ("key", "--hold-ms") => hold_ms = ms_in(flag, value, 10, 5_000)?,
+            _ => return Err(format!("unknown argument for {sub}: {flag}")),
+        }
+    }
+    match sub {
+        "play" => Ok(Command::Play {
+            file: PathBuf::from(word),
+            settle,
+        }),
+        "key" => Ok(Command::Key {
+            name: word.clone(),
+            hold_ms,
+            settle,
+        }),
+        _ => Ok(Command::WatchRemote(ms_in("SECONDS", word, 1, 3_600)?)),
+    }
 }
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
@@ -106,6 +167,9 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     };
     if matches!(sub.as_str(), "-h" | "--help" | "help") {
         return Ok(Command::Help);
+    }
+    if matches!(sub.as_str(), "play" | "key" | "watch-remote") {
+        return parse_robot(sub, rest);
     }
     let mut serve = ServeFlags {
         bus: None,
@@ -258,6 +322,46 @@ mod tests {
             &["sh"],
             &["serve", "-c", "id"],
             &[],
+        ] {
+            assert!(parse(&args(bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn parses_the_robot_remote() {
+        assert_eq!(
+            parse(&args(&["play", "/var/lib/lumen/bench/p.txt"])),
+            Ok(Command::Play {
+                file: PathBuf::from("/var/lib/lumen/bench/p.txt"),
+                settle: Duration::from_millis(1500)
+            })
+        );
+        assert_eq!(
+            parse(&args(&[
+                "key",
+                "home",
+                "--hold-ms",
+                "180",
+                "--settle-ms",
+                "0"
+            ])),
+            Ok(Command::Key {
+                name: "home".to_owned(),
+                hold_ms: 180,
+                settle: Duration::ZERO
+            })
+        );
+        assert_eq!(
+            parse(&args(&["watch-remote", "30"])),
+            Ok(Command::WatchRemote(30))
+        );
+        for bad in [
+            &["play"][..],
+            &["play", "p", "--hold-ms", "10"],
+            &["key", "up", "--settle-ms", "20000"],
+            &["key", "up", "--hold-ms"],
+            &["watch-remote", "0"],
+            &["watch-remote", "x"],
         ] {
             assert!(parse(&args(bad)).is_err(), "{bad:?}");
         }

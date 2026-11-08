@@ -1,0 +1,75 @@
+# The bench's moves over the home grid: about 45 s, the same every run
+# (docs/device/bench.md). `lumen-ctl play` reads it on the TV.
+#
+# No ok (it would open an app), no back (on the top row it closes the
+# shell), no home. Holds stay under 1.5 s: the shell counts a key released
+# after 1.5 s with no SDL repeat, and whether LG repeats a robot's held key
+# is for the first runs to show (the log's "SDL repeat" lines).
+#
+# One block is 9.08 s; five of them are 45.4 s.
+repeat off
+
+hold right 1300
+wait 400
+taps down 3 450
+wait 300
+hold left 1300
+wait 400
+taps up 3 450
+wait 300
+taps right 5 280
+wait 400
+taps left 5 280
+wait 400
+
+hold right 1300
+wait 400
+taps down 3 450
+wait 300
+hold left 1300
+wait 400
+taps up 3 450
+wait 300
+taps right 5 280
+wait 400
+taps left 5 280
+wait 400
+
+hold right 1300
+wait 400
+taps down 3 450
+wait 300
+hold left 1300
+wait 400
+taps up 3 450
+wait 300
+taps right 5 280
+wait 400
+taps left 5 280
+wait 400
+
+hold right 1300
+wait 400
+taps down 3 450
+wait 300
+hold left 1300
+wait 400
+taps up 3 450
+wait 300
+taps right 5 280
+wait 400
+taps left 5 280
+wait 400
+
+hold right 1300
+wait 400
+taps down 3 450
+wait 300
+hold left 1300
+wait 400
+taps up 3 450
+wait 300
+taps right 5 280
+wait 400
+taps left 5 280
+wait 400

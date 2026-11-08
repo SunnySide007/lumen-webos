@@ -1,5 +1,8 @@
 # Depth: how low Lumen can go on the B9, and what to build next (proposed)
 
+> **History from 2026-11-08.** The live status is [docs/status.md](../status.md);
+> this page keeps the reasoning and the record up to the plan of 2026-11-08.
+
 Written on 2026-10-30 for the owner's review, after a read of every branch,
 the uncommitted work and the upstream projects. It answers four questions:
 where the work stands, how deep the B9 lets Lumen reach, what already exists

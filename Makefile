@@ -124,7 +124,7 @@ lint:
 	cd shell && cargo fmt --all --check
 	cd shell && cargo clippy --workspace --all-targets -- -D warnings
 	cd shell && cargo clippy --workspace --release --target $(TARGET) --all-targets -- -D warnings
-	shellcheck tools/*.sh tools/recon/*.sh tools/backup/*.sh tools/capture/*.sh profiles/glasshouse/*.sh profiles/privacy/*.sh profiles/remote/*.sh profiles/lumend/*.sh profiles/lumend/lumend profiles/privacy/lumen-privacy profiles/privacy/lumen-guard takeover/*.sh takeover/lumen-home packaging/shell/*.sh .githooks/pre-push
+	shellcheck tools/*.sh tools/bench/*.sh tools/bench/tv/*.sh tools/recon/*.sh tools/backup/*.sh tools/capture/*.sh profiles/glasshouse/*.sh profiles/privacy/*.sh profiles/remote/*.sh profiles/lumend/*.sh profiles/lumend/lumend profiles/privacy/lumen-privacy profiles/privacy/lumen-guard takeover/*.sh takeover/lumen-home packaging/shell/*.sh .githooks/pre-push
 
 # Every crate in Cargo.lock under a license Lumen's GPL-3.0-or-later can meet,
 # and every direct dependency named in THIRD-PARTY.md (tools/licenses.py).
