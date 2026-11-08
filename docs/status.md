@@ -16,9 +16,9 @@ firmware 05.50.00, unless it says otherwise.
 | 0. Rules | **Done** (324de1a). The owner chose the lab window 00:00 to 06:00 and a dark screen at night, so runs that light the screen use daytime idle windows (20 minutes on Lumen or LG's screensaver). |
 | 1. Fix and measure | **Built, waiting for a lab window.** The robot remote (`lumen-ctl play`), TV screenshots (`"shots"`), `tools/bench.sh` with the speed gate, automatic undo and the screensaver held off (`"saver":"hold"`): [device/bench.md](device/bench.md). Not yet run on the TV. |
 | 2. Speed | Not started. |
-| 3. Design | Not started. |
-| 4. Privacy | Guard G1 logging since 2026-10-31. |
-| 5. Finish | Not started. |
+| 3. Design | **Started early, at the owner's ask** (2026-11-08): the new home in its own session and worktree (`home-design`, cut from `claude/dither-fix`). Builds come to the bench; no other session touches the TV. |
+| 4. Privacy | Guard G1 logging since 2026-10-31. **G2 (lane H) merged** (5180f96): default deny behind the owner's mode file, off. Trial steps 2 to 4 (backup, push, restart in log mode) run in the first night window; blocking for the family is the owner's tier C yes. |
+| 5. Finish | **R3, Lumen Remote for Windows, merged** (cfe8be4), tested against lumen-ctl's fake TV. Its TV checklist waits for the owner. |
 
 ## On the TV
 
