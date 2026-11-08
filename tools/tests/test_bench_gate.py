@@ -128,6 +128,16 @@ class Gate(unittest.TestCase):
         self.assertEqual(rows['average frame (ms)'], 17.2)
         self.assertEqual(rows['vsyncs skipped per 10 s'], 30.0)
 
+    def test_rss_only_for_a_settled_run(self):
+        moving = {'avg_frame_ms': 16.9, 'skipped_per_10s': 4.0, 'startup_ms': 500}
+        names = [name for name, *_ in gate.check(moving, self.BASE)]
+        self.assertNotIn('RSS after 5 min (kB)', names)
+        settled = dict(moving, idle_cpu_pct=0.3)
+        rows = {name: ok for name, _, _, ok in gate.check(settled, self.BASE)}
+        self.assertFalse(rows['RSS after 5 min (kB)'])
+        rows = {name: ok for name, _, _, ok in gate.check(dict(settled, rss_kb=61000), {})}
+        self.assertFalse(rows['RSS after 5 min (kB)'], 'no baseline RSS')
+
     def test_nothing_passes_unmeasured_and_a_yield_fails(self):
         rows = gate.check({'yielded': True}, self.BASE)
         self.assertFalse(any(ok for *_, ok in rows))

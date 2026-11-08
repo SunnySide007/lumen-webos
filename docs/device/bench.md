@@ -156,9 +156,30 @@ The limits are the plan's, to be tuned once the noise between runs is known:
 | RSS after 5 min settled | at most the baseline + 5 MB |
 | Home press to Lumen (target 5) | from the new method, once measured |
 
-A number that either side lacks fails, so nothing passes unmeasured.
-Nothing merges to `main` past a failing gate.
+A number that either side lacks fails, so nothing passes unmeasured. The
+RSS row is for `--settle` runs only, the ones that read memory; a settled
+run whose RSS read failed still fails it. Nothing merges to `main` past a
+failing gate.
 
 ## Measured
 
-None yet: the first runs are the next lab window's.
+B9 (OLED55B9PUA, webOS 4.10.2-31, firmware 05.50.00), 2026-11-08, 21:48 to
+22:30 UTC, in a window the owner cleared. The robot's 45 s pattern, three
+runs a build, the median of each; reports in `tools/out/bench/`.
+
+| Build | Look | Average frame | Skipped per 10 s | Start-up | RSS settled |
+|---|---|---|---|---|---|
+| 3a89955 (last good) | its only one | 16.89 ms | 4.82 | 541 ms | 42,848 kB |
+| 86b3527 (dither fix) | plain | 16.94 ms | 7.53 | 514 ms | 42,144 kB |
+| 86b3527 | -dither | 17.07 ms | 7.26 | 536 ms | |
+| 86b3527 | full | 29.62 ms | 256 | 528 ms | |
+| d7de95e (home design) | plain | 16.49 ms | 0.30 | 521 ms | |
+
+Between runs of one build the average moved by at most 0.12 ms and the
+skips by up to 4.6 per 10 s, so the skip limit's floor of 12 is not too
+tight. Every press was shown within 17 to 18 ms (36 ms once in 270).
+
+App switches (`apps`, with Lumen at 3a89955): a cold start in front after
+1,710 ms (Netflix), 1,990 ms (YouTube) and 2,280 ms (plxnative); warm,
+120 to 220 ms. Target 5, a Home press to Lumen in front: 216 to 229 ms in
+all six.

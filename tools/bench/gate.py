@@ -188,7 +188,9 @@ def check(summary, baseline):
         skip is not None and limit is not None and skip <= limit)
     start = summary.get('startup_ms')
     row('start-up (ms)', start, STARTUP_MS, start is not None and start <= STARTUP_MS)
-    if 'rss_kb' in summary or 'rss_kb' in baseline:
+    # Only a settled run (--settle) reads the shell's memory; its CPU line
+    # marks it, so a settled run whose RSS read failed still fails here.
+    if 'rss_kb' in summary or 'idle_cpu_pct' in summary:
         rss, base_rss = summary.get('rss_kb'), baseline.get('rss_kb')
         limit = None if base_rss is None else base_rss + RSS_OVER_BASE_KB
         row('RSS after 5 min (kB)', rss, limit,

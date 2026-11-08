@@ -14,7 +14,8 @@ shift 2
 [ -f "$IPK" ] || { echo "looks: no such IPK: $IPK" >&2; exit 1; }
 for look in "$@"; do
     case $look in *[!A-Za-z0-9,_-]*) echo "looks: bad look: $look" >&2; exit 1 ;; esac
-    tag=$(echo "$look" | tr ',' '+')
+    # bench.sh names take letters, digits, . _ - only.
+    tag=$(echo "$look" | tr ',' '_')
     marker=tools/out/bench/done-$NAME-$tag
     [ -f "$marker" ] && continue
     if [ "$look" = full ]; then
