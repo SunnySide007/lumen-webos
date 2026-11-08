@@ -71,6 +71,27 @@ class RunNumbers(unittest.TestCase):
         self.assertEqual(gate.startup_from_log(log), {'platform': 'wayland', 'startup_ms': 410.0})
 
 
+class HomePress(unittest.TestCase):
+    LOG = '''\
+[1000.500] foreground: first frame after 3 ms
+[1010.250] front app io.github.sunnyside007.lumen.shell: last input 0.1 s ago
+[1010.871] foreground: first frame after 12 ms
+[1020.000] foreground: not shown after 900 ms: the window lost focus
+'''
+
+    def test_the_first_foreground_frame_after_the_press(self):
+        n = gate.home_press(self.LOG, 1010.123)
+        self.assertEqual(n['target5_ms'], 748)
+        self.assertEqual(n['shell_ms'], 12)
+        self.assertEqual(n['event'], 'foreground')
+
+    def test_a_frame_not_shown_has_no_target(self):
+        n = gate.home_press(self.LOG, 1015.0)
+        self.assertNotIn('target5_ms', n)
+        self.assertIn('not shown', n['line'])
+        self.assertEqual(gate.home_press(self.LOG, 2000.0), {'line': None})
+
+
 class Combine(unittest.TestCase):
     def test_medians_over_the_runs(self):
         s = gate.combine([{'avg_frame_ms': 16.9, 'platform': 'sdl'},

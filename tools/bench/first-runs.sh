@@ -32,4 +32,7 @@ step base-3a89955 --ipk "$BASE" --settle &&
     baseline &&
     step fix-plain --ipk "$FIX" --params '{"look":"plain"}' --settle &&
     step fix-nodither --ipk "$FIX" --params '{"look":"-dither"}' &&
-    step fix-full --ipk "$FIX"
+    step fix-full --ipk "$FIX" &&
+    if [ ! -f tools/out/bench/done-apps ]; then
+        sh tools/bench.sh apps && : >tools/out/bench/done-apps
+    fi

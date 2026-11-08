@@ -4,6 +4,9 @@
     gate.py params JSON [JSON ...]          merge launch parameters, later wins
     gate.py run --stats F --log F [--play F] [--rss KB] [--cpu PCT]
                                             one run's numbers, as JSON
+    gate.py home PRESS LOG                  target 5: the robot's Home press
+                                            (epoch s) to the shell's next
+                                            foreground frame, as JSON
     gate.py combine RUN.json [RUN.json ...] the median of the runs, as JSON
     gate.py check SUMMARY.json BASELINE.json
                                             the gate: a table, exit 0 if
@@ -97,6 +100,24 @@ def startup_from_log(text):
         if m:
             return {'platform': m.group(1), 'startup_ms': float(m.group(2))}
     return {}
+
+
+def home_press(text, press):
+    """Target 5 from the robot's Home press at `press` (epoch seconds, the
+    TV's clock): the first `foreground:` or `relaunch:` line after it. Its
+    stamp is logged right after the frame's swap, so the stamp minus the
+    press is the press to the swap; the line's own ms is the shell's half."""
+    for line in text.splitlines():
+        m = re.match(r'\[([0-9]+\.[0-9]+)\] (foreground|relaunch): (.*)', line)
+        if not m or float(m.group(1)) < press:
+            continue
+        out = {'event': m.group(2), 'line': m.group(3)}
+        shown = re.match(r'first frame after ([0-9]+) ms', m.group(3))
+        if shown:
+            out['target5_ms'] = round((float(m.group(1)) - press) * 1000)
+            out['shell_ms'] = int(shown.group(1))
+        return out
+    return {'line': None}
 
 
 def keys_in_log(text):
@@ -224,6 +245,9 @@ def main(argv):
         cpu = float(opts['--cpu']) if opts['--cpu'] else None
         print(json.dumps(run_numbers(read(opts['--stats']), read(opts['--log']), play, rss, cpu),
                          indent=2, sort_keys=True))
+        return 0
+    if cmd == 'home' and len(rest) == 2:
+        print(json.dumps(home_press(read(rest[1]), float(rest[0])), sort_keys=True))
         return 0
     if cmd == 'combine':
         print(json.dumps(combine([json.loads(read(p)) for p in rest]), indent=2, sort_keys=True))

@@ -20,6 +20,13 @@
 #                       the shell's RSS and idle CPU
 #       --force         run outside a lab window: only when the owner says
 #                       the TV is free
+#   tools/bench.sh apps [--apps "ID ..."] [--force]
+#                                      app launch times and target 5: each app
+#                                      (default netflix, youtube.leanback.v4,
+#                                      com.beb.plxnative) launched cold, then a
+#                                      robot Home press back to Lumen, then
+#                                      warm and Home again; apps not running
+#                                      before are closed after
 #   tools/bench.sh restore             put back the last good build
 #   tools/bench.sh gate DIR [BASE]     the speed gate: DIR/summary.json against
 #                                      BASE (default tools/out/bench/baseline.json)
@@ -393,6 +400,104 @@ cmd_run() {
     fi
 }
 
+# One robot Home press with $1 in front: target 5 into $OUT/apps.tsv.
+home_from() {
+    app=$1 mode=$2
+    set +e
+    tv run "$CTL key home --hold-ms 180" </dev/null >"$OUT/home-$app-$mode.jsonl"
+    rc=$?
+    set -e
+    if [ "$rc" = 3 ]; then
+        say "YIELD: a person used the remote"
+        exit 3
+    fi
+    press=$(sed -n 's/.*"first":\([0-9.]*\).*/\1/p' "$OUT/home-$app-$mode.jsonl" | head -n 1)
+    [ -n "$press" ] || {
+        say "$app $mode: the Home press failed: $(tail -n 1 "$OUT/home-$app-$mode.jsonl")"
+        return 0
+    }
+    sleep 3
+    tv_step logsince "SINCE=${press%.*}" >"$OUT/home-$app-$mode.log"
+    fg=$(value fg "$(tv_step window)")
+    "$PY" -I "$BENCH/gate.py" home "$press" "$OUT/home-$app-$mode.log" >"$OUT/home-$app-$mode.json"
+    t5=$(sed -n 's/.*"target5_ms": \([0-9]*\).*/\1/p' "$OUT/home-$app-$mode.json")
+    say "$app $mode: Home press to Lumen ${t5:-not measured} ms; in front after: ${fg:-?}"
+    printf '%s\t%s\thome\t%s\t%s\n' "$app" "$mode" "${t5:-}" "$fg" >>"$OUT/apps.tsv"
+    # Lumen must be back in front: the automatic undo's second trigger.
+    if [ "$fg" != "$APP" ]; then
+        say "the Home press did not bring Lumen back (front: ${fg:-?}); bringing it back by launch"
+        tv launch "$APP" </dev/null >/dev/null || true
+        sleep 2
+        [ "$(value fg "$(tv_step window)")" = "$APP" ] || {
+            say "AUTOMATIC UNDO: Lumen does not come back in front"
+            exit 4
+        }
+    fi
+}
+
+cmd_apps() {
+    FORCE=0 APPS="netflix youtube.leanback.v4 com.beb.plxnative"
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --apps) APPS=$2; shift 2 ;;
+            --force) FORCE=1; shift ;;
+            *) die "unknown option for apps: $1" ;;
+        esac
+    done
+    for app in $APPS; do
+        case $app in *[!A-Za-z0-9._-]* | "$APP") die "--apps: plain app ids other than Lumen's" ;; esac
+    done
+    [ -f "$ROOT/dist/ctl/lumen-ctl" ] || die "no dist/ctl/lumen-ctl: tools/dev.sh make ctl"
+    if [ "$FORCE" = 0 ]; then
+        why=$(window_closed)
+        [ -z "$why" ] || {
+            echo "bench: no lab window: $why"
+            exit 5
+        }
+    fi
+    OUT=$OUTROOT/$(date -u +%Y%m%dT%H%M%SZ)-apps
+    KEEP=1
+    mkdir -p "$OUT"
+    BENCH_T0=$(tv run 'date +%s' </dev/null | tr -d '\r')
+    trap cleanup EXIT
+    trap 'exit 130' INT TERM
+    {
+        echo "apps $APPS"
+        echo "commit $(git -C "$ROOT" rev-parse --short HEAD)"
+        echo "binary $(tv_binary_sha)"
+        tv check </dev/null | grep -E '"(modelName|firmwareVersion)"' | tr -d ' ,'
+    } >"$OUT/run.txt"
+    say "report in ${OUT#"$ROOT"/}"
+    tv push "$ROOT/dist/ctl/lumen-ctl" "$CTL" >/dev/null
+    tv run "chmod 0700 $CTL" </dev/null
+    tv_step running >"$OUT/running-before.txt"
+    printf 'app\tmode\twhat\tms\tnote\n' >"$OUT/apps.tsv"
+    for app in $APPS; do
+        for mode in cold warm; do
+            cold=0
+            [ "$mode" = warm ] || cold=1
+            r=$(tv_step applaunch "APP=$app" "COLD=$cold")
+            echo "$r" >"$OUT/launch-$app-$mode.txt"
+            ms=$(value front_ms "$r")
+            err=$(value error "$r")
+            was=$(value was_running "$r")
+            say "$app $mode (running before: $was): in front after ${ms:-?} ms ${err:+($err)}"
+            printf '%s\t%s\tlaunch\t%s\t%s\n' "$app" "$mode" "${ms:-}" "${err:-was_running=$was}" >>"$OUT/apps.tsv"
+            # Let it settle in front, then Home.
+            sleep 5
+            home_from "$app" "$mode"
+            sleep 3
+        done
+    done
+    # Put back: close the apps that were not running before.
+    tv_step running >"$OUT/running-after.txt"
+    for app in $APPS; do
+        grep -qx "$app" "$OUT/running-before.txt" ||
+            tv close "$app" </dev/null >/dev/null || true
+    done
+    cat "$OUT/apps.tsv"
+}
+
 cmd_gate() {
     [ -f "${1:-}/summary.json" ] || die "no summary.json in ${1:-?}"
     "$PY" -I "$BENCH/gate.py" check "$1/summary.json" "${2:-$OUTROOT/baseline.json}"
@@ -405,6 +510,7 @@ case $cmd in
     wait-window) cmd_wait_window "$@" ;;
     last-good) cmd_last_good "$@" ;;
     run) cmd_run "$@" ;;
+    apps) cmd_apps "$@" ;;
     restore) cmd_restore ;;
     gate) cmd_gate "$@" ;;
     -h | --help | help | '') usage ;;
