@@ -531,10 +531,12 @@ went to the builder session the same day. There is no boot hook.
   each checked by SHA-256 through the stage, and writes `web.conf`.
   * **`web start`** (`profiles/remote/web-start.sh`) checks the kill
     switch, that uid and gid 61101 are nobody's and that nothing listens on
-    8443. Then it adds `INPUT -p tcp --dport 8443 ! -s NET -j REJECT` and
-    starts `lumen-remote` with `setsid`. If it doesn't come up, the rule
-    comes out again.
-  * **`web stop`** stops it and takes out every 8443 rule. `remove` does
+    8443. Then it adds `INPUT -p tcp --dport 8443 ! -s NET -j REJECT`,
+    unless that very rule is there (another rule on 8443, such as an
+    ACCEPT, doesn't count), and starts `lumen-remote` with `setsid`. If it
+    doesn't come up, the rule comes out again.
+  * **`web stop`** stops it and takes out every REJECT on 8443, leaving any
+    other rule on the port. `remove` does
     both before it deletes the folder, paired devices included. Nothing
     lasts past a reboot.
 * **The front-end:**

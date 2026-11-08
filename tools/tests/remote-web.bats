@@ -277,6 +277,26 @@ name lumen-tv.lan" ]
     [ "$(cat "$T/rules")" = "REJECT     tcp  --  0.0.0.0/0  0.0.0.0/0  tcp dpt:11111 reject-with icmp-port-unreachable" ]
 }
 
+@test "another rule on 8443 isn't taken for ours, and stop and remove leave it" {
+    web_installed
+    accept="ACCEPT     tcp  --  192.168.86.5  0.0.0.0/0  tcp dpt:8443"
+    printf '%s\n' "$accept" "REJECT     tcp  --  !10.0.0.0/8  0.0.0.0/0  tcp dpt:8443 reject-with icmp-port-unreachable" >"$T/rules"
+    remote web start
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"rejecting tcp 8443 from outside 192.168.86.0/24"* ]]
+    head -n 1 "$T/rules" | grep -q '^REJECT .*!192.168.86.0/24 .*dpt:8443 '
+    remote web start
+    [[ "$output" == *"running already"* ]]
+    remote web stop
+    [ "$status" -eq 0 ]
+    [ "$(cat "$T/rules")" = "$accept" ]
+    remote web status
+    [[ "$output" == *"8443 rule: none"* ]]
+    remote remove
+    [ "$status" -eq 0 ]
+    [ "$(cat "$T/rules")" = "$accept" ]
+}
+
 @test "remove stops lumen-remote, takes out its rule and deletes what web install copied" {
     web_installed
     remote web start

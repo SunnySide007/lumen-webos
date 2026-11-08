@@ -73,8 +73,14 @@ rule() {
     iptables "$1" INPUT -p tcp --dport $PORT ! -s "$allow" -j REJECT
 }
 
+# Ours only: a REJECT on the port from outside this network. Another rule
+# on the port (an ACCEPT someone added) doesn't count, and ours goes above it.
+ours() {
+    iptables -L INPUT -n | grep '^REJECT ' | grep -F -- "!$allow " | grep -Eq "tcp dpt:$PORT( |\$)"
+}
+
 added=
-if iptables -L INPUT -n | grep -Eq "tcp dpt:$PORT( |\$)"; then
+if ours; then
     echo "web-start: the $PORT rule is already in place"
 elif rule -I; then
     added=1

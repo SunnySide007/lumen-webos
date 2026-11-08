@@ -61,7 +61,7 @@ if [ -d $DIR/web ]; then
 else
     echo "web: none"
 fi
-if iptables -L INPUT -n 2>/dev/null | grep -Eq "tcp dpt:8443( |\$)"; then
+if iptables -L INPUT -n 2>/dev/null | grep -Eq "^REJECT .*tcp dpt:8443( |\$)"; then
     echo "8443 rule: in place"
 else
     echo "8443 rule: none"
