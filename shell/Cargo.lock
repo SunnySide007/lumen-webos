@@ -116,6 +116,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumen-remote-link"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "lumen-shell"
 version = "0.0.1"
 dependencies = [
