@@ -34,6 +34,12 @@ export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
 DIR=${LUMEN_CA_DIR:-$HOME/.lumen/remote/ca}
+# With conversion off, Git Bash's openssl (a native Windows program) can't
+# open "/c/Users/...": hand it "C:/Users/..." instead, which the shell's
+# own tools take too.
+if command -v cygpath >/dev/null 2>&1; then
+    DIR=$(cygpath -m "$DIR")
+fi
 CA_DAYS=3650
 LEAF_DAYS=397
 IP=
