@@ -211,6 +211,23 @@ describe("checkResult", () => {
       }),
     ).not.toBeNull();
     expect(checkResult("privacy.state", { hook: {} })).toBeNull();
+    // Guard's route (G3): each of its words, the fallback's start, and
+    // neither before G3.
+    const privacy = (guard: object) => ({
+      hook: { installed: true, log: [] },
+      port11111: { rejected: true },
+      jobs: [],
+      guard: { since: "2026-10-30T00:00:00Z", lookups: 12, blocked: 0, ...guard },
+    });
+    for (const route of ["tls", "clear", "fallback-clock", "fallback-down"]) {
+      expect(checkResult("privacy.state", privacy({ route }))).not.toBeNull();
+    }
+    expect(
+      checkResult("privacy.state", privacy({ route: "fallback-down", fallbackSince: "2026-10-30T00:00:10Z" })),
+    ).not.toBeNull();
+    expect(checkResult("privacy.state", privacy({}))).not.toBeNull();
+    expect(checkResult("privacy.state", privacy({ route: "quad9" }))).toBeNull();
+    expect(checkResult("privacy.state", privacy({ route: "tls", fallbackSince: 5 }))).toBeNull();
     expect(checkResult("volume.up", {})).toEqual({});
     expect(checkResult("volume.up", null)).toBeNull();
   });

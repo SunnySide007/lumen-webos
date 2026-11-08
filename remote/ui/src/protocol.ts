@@ -143,9 +143,25 @@ export interface PrivacyState {
   port11111: { rejected: boolean };
   /** LG's diagnostics jobs the hook stops. */
   jobs: { name: string; running: boolean }[];
-  /** Lumen Guard's counts since `since` (ISO 8601), or null before Guard exists. */
-  guard: { since: string; lookups: number; blocked: number } | null;
+  /** Lumen Guard's counts since `since` (ISO 8601), or null before Guard
+   * exists. `route` is Guard's upstream from G3 on (absent before);
+   * `fallbackSince` (ISO 8601) is when the current fallback began, only
+   * while one lasts. */
+  guard: {
+    since: string;
+    lookups: number;
+    blocked: number;
+    route?: GuardRoute;
+    fallbackSince?: string;
+  } | null;
 }
+
+/** Where Lumen Guard sends lookups (privacy.md, G3): "tls" to Quad9 over
+ * DNS over TLS; "clear" to the router because the owner's switch is off;
+ * "fallback-clock" and "fallback-down" to the router in clear because the
+ * TV's clock is implausible or Quad9 can't be reached. */
+export type GuardRoute = "tls" | "clear" | "fallback-clock" | "fallback-down";
+export const GUARD_ROUTES: readonly GuardRoute[] = ["tls", "clear", "fallback-clock", "fallback-down"];
 
 /** What a paired device may do (decision 12): "remote" is power, volume,
  * inputs, apps, keys, typing and the picture and sound presets; "owner"
@@ -504,7 +520,9 @@ function isPrivacyState(v: unknown): v is PrivacyState {
       (isObject(guard) &&
         typeof guard.since === "string" &&
         isCount(guard.lookups) &&
-        isCount(guard.blocked)))
+        isCount(guard.blocked) &&
+        (guard.route === undefined || (GUARD_ROUTES as readonly unknown[]).includes(guard.route)) &&
+        (guard.fallbackSince === undefined || typeof guard.fallbackSince === "string")))
   );
 }
 
