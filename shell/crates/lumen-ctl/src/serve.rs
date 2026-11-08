@@ -10,6 +10,13 @@
 //!    turn; a ticker sends `alive` every 10 s; a poller reads the polled
 //!    states.
 //!
+//! On `--link web` the other end is `lumen-remote`, for the paired phones:
+//! every request but `pair.complete` carries the device's token, which is
+//! checked against `devices.json` before the verb runs, and a remote-only
+//! device is refused the owner's verbs (decision 12). Either link gets a
+//! `devices` event when a device pairs, is revoked or changes role, or
+//! pairing opens or closes.
+//!
 //! The session ends when stdin ends, when a line is over 64 KiB, when stdout
 //! is gone, or at SIGTERM, SIGHUP or SIGINT; the ticker sees the last three
 //! within 50 ms, whatever the main thread is blocked in, and ends the process
@@ -26,13 +33,15 @@ use serde_json::{Value, json};
 
 use crate::args::{BusKind, KeysKind, Serve};
 use crate::bus::{self, Bus, CommandBus, Runner, Sink, Spawn};
+use crate::devices::{Device, Store};
 use crate::fake::{self, FakeBus};
 use crate::keys::{KeyRoute, NoKeys, Template};
 use crate::lg::{self, App, LgSetting, Range};
 use crate::log::{self, Log};
 use crate::privacy;
 use crate::protocol::{
-    self, ErrorCode, MAX_LINE_BYTES, PROTOCOL_VERSION, Refusal, Setting, SettingValue, VERBS, Verb,
+    self, ErrorCode, Link, MAX_LINE_BYTES, PROTOCOL_VERSION, Refusal, Request, Role, Setting,
+    SettingValue, VERBS, Verb,
 };
 use crate::sys;
 use crate::watch::{self, Source, States};
@@ -42,6 +51,8 @@ const FIRST_WAIT: Duration = Duration::from_secs(3);
 /// How long `apps.list`'s answer stands for `launch`.
 const APPS_FRESH: Duration = Duration::from_secs(60);
 const TICK: Duration = Duration::from_millis(50);
+/// How often the devices' files are looked at for a change.
+const DEVICES_EVERY: Duration = Duration::from_secs(1);
 
 pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -184,6 +195,8 @@ pub struct Ctl {
     runner: Box<dyn Runner>,
     apps: Mutex<Option<(Instant, Vec<String>)>>,
     desc: Mutex<HashMap<&'static str, Option<Vec<String>>>>,
+    store: Store,
+    link: Link,
 }
 
 /// A verb's answer, and the state to read again once the reply is out.
@@ -196,6 +209,8 @@ impl Ctl {
         events: Arc<Events>,
         paths: privacy::Paths,
         runner: Box<dyn Runner>,
+        store: Store,
+        link: Link,
     ) -> Self {
         Self {
             bus,
@@ -205,17 +220,55 @@ impl Ctl {
             runner,
             apps: Mutex::new(None),
             desc: Mutex::new(HashMap::new()),
+            store,
+            link,
         }
     }
 
     /// The verbs this TV takes, for `hello`: all but `key` without a route,
-    /// and `ambient.start`, which waits for the ambient track.
+    /// and `ambient.start`, which waits for the ambient track; on the web
+    /// link, not the PC's pairing verbs.
     pub fn verbs(&self) -> Vec<&'static str> {
         VERBS
             .iter()
             .copied()
             .filter(|v| *v != "ambient.start" && (*v != "key" || self.keys.any()))
+            .filter(|v| protocol::takes(self.link, v))
             .collect()
+    }
+
+    /// The device a request comes from, on the web link: its token must be
+    /// a paired device's, and that device's role must allow the verb. The
+    /// PC's session is the owner and carries no token.
+    pub fn authorize(&self, request: &Request) -> Result<Option<Device>, Refusal> {
+        if self.link == Link::Ssh {
+            return Ok(None);
+        }
+        if matches!(request.verb, Verb::PairComplete { .. }) {
+            return match request.token {
+                None => Ok(None),
+                Some(_) => Err(Refusal::new(
+                    ErrorCode::BadLine,
+                    "pair.complete carries no token",
+                )),
+            };
+        }
+        let forbidden = |m: &str| Refusal::new(ErrorCode::Forbidden, m);
+        let token = request
+            .token
+            .as_deref()
+            .ok_or_else(|| forbidden("the request carries no device token"))?;
+        let device = self
+            .store
+            .auth(token)?
+            .ok_or_else(|| forbidden("this device is not paired, or was revoked"))?;
+        if request.verb.owner_only() && device.role != Role::Owner {
+            return Err(forbidden(&format!(
+                "{} needs owner rights, which only the PC grants",
+                request.verb.name()
+            )));
+        }
+        Ok(Some(device))
     }
 
     fn done(&self, c: &lg::Call) -> Result<Value, Refusal> {
@@ -224,7 +277,7 @@ impl Ctl {
             .map_err(failed)
     }
 
-    pub fn handle(&self, verb: &Verb) -> Answer {
+    pub fn handle(&self, verb: &Verb, device: Option<&Device>) -> Answer {
         match verb {
             Verb::PowerOff => (self.done(&lg::power_off()), Some(Source::Power)),
             Verb::ScreenOff => (self.done(&lg::screen(false)), Some(Source::Power)),
@@ -266,7 +319,44 @@ impl Ctl {
                 (self.settings_set(lg, *v), Some(src))
             }
             Verb::Toast(text) => (self.done(&lg::toast(text)), None),
+            Verb::PairOpen => (self.pair_open(), None),
+            Verb::PairClose => (self.store.close_pairing().map(|()| json!({})), None),
+            Verb::DevicesList => (self.store.list(), None),
+            Verb::DevicesRevoke(id) => (self.store.revoke(id).map(|()| json!({})), None),
+            Verb::DevicesRole(id, role) => {
+                (self.store.set_role(id, *role).map(|()| json!({})), None)
+            }
+            Verb::PairComplete { code, name } => (
+                self.store.complete(code, name).map(|(d, token)| {
+                    json!({ "id": d.id, "name": d.name, "role": d.role.as_str(), "token": token })
+                }),
+                None,
+            ),
+            Verb::DeviceAuth => (
+                device.map(Device::to_json).ok_or_else(|| {
+                    Refusal::new(ErrorCode::Forbidden, "device.auth needs a device")
+                }),
+                None,
+            ),
         }
+    }
+
+    /// A new pairing window: the code goes back to the PC and onto the TV
+    /// as a toast (LG's toasts last seconds, so the PC shows it for the
+    /// two minutes).
+    fn pair_open(&self) -> Result<Value, Refusal> {
+        let (code, seconds) = self.store.open_pairing()?;
+        let text = format!("Lumen Remote pairing code: {code}");
+        let toasted = bus::checked(&*self.bus, &lg::toast(&text)).is_ok();
+        Ok(json!({ "code": code, "seconds": seconds, "toasted": toasted }))
+    }
+
+    /// `devices.list`'s answer, for the `devices` event.
+    pub fn devices_event(&self) -> Option<String> {
+        self.store
+            .list()
+            .ok()
+            .map(|list| protocol::event("devices", list))
     }
 
     /// Reads `src` once and pushes what changed.
@@ -393,7 +483,7 @@ pub fn next_line(r: &mut impl BufRead, buf: &mut Vec<u8>, max: usize) -> io::Res
 /// Answers one line: the reply, and the state to read again after it.
 pub fn answer(ctl: &Ctl, log: &Mutex<Log>, line: &[u8]) -> (String, Option<Source>) {
     let started = Instant::now();
-    let request = match protocol::parse_request(line) {
+    let request = match protocol::parse_request(line, ctl.link) {
         Ok(request) => request,
         Err(refused) => {
             let id = refused
@@ -409,12 +499,21 @@ pub fn answer(ctl: &Ctl, log: &Mutex<Log>, line: &[u8]) -> (String, Option<Sourc
     };
     let (id, verb) = (request.id, &request.verb);
     let args = verb.log_args();
+    let device = ctl.authorize(&request);
+    let who = match &device {
+        Ok(Some(d)) => format!("[{}] ", d.id),
+        Ok(None) => String::new(),
+        Err(_) => "[refused] ".to_owned(),
+    };
     lock(log).line(&format!(
-        "> {id} {}{}{args}",
+        "> {id} {who}{}{}{args}",
         verb.name(),
         if args.is_empty() { "" } else { " " }
     ));
-    let (result, refresh) = ctl.handle(verb);
+    let (result, refresh) = match &device {
+        Ok(device) => ctl.handle(verb, device.as_ref()),
+        Err(refusal) => (Err(refusal.clone()), None),
+    };
     let mut reply = match &result {
         Ok(value) => protocol::reply_ok(id, value.clone()),
         Err(refusal) => protocol::reply_err(Some(id), refusal),
@@ -424,7 +523,10 @@ pub fn answer(ctl: &Ctl, log: &Mutex<Log>, line: &[u8]) -> (String, Option<Sourc
     }
     let ms = started.elapsed().as_millis();
     // LG's reason for a text verb could hold the text: only its code is kept.
-    let typed = matches!(verb, Verb::TextInsert(_) | Verb::Toast(_));
+    let typed = matches!(
+        verb,
+        Verb::TextInsert(_) | Verb::Toast(_) | Verb::PairComplete { .. }
+    );
     let outcome = match &result {
         Ok(_) => "ok".to_owned(),
         Err(r) if typed => r.code.as_str().to_owned(),
@@ -516,17 +618,44 @@ fn polling(events: &Events) -> Vec<&'static str> {
 }
 
 pub fn hello(ctl: &Ctl, events: &Events, bus: &str, keys: &str) -> String {
-    protocol::event(
-        "hello",
-        json!({
-            "protocol": PROTOCOL_VERSION,
-            "server": concat!("lumen-ctl ", env!("CARGO_PKG_VERSION")),
-            "verbs": ctl.verbs(),
-            "polling": polling(events),
-            "bus": bus,
-            "keys": keys,
-        }),
-    )
+    let verbs = ctl.verbs();
+    let mut data = json!({
+        "protocol": PROTOCOL_VERSION,
+        "server": concat!("lumen-ctl ", env!("CARGO_PKG_VERSION")),
+        "verbs": verbs,
+        "polling": polling(events),
+        "bus": bus,
+        "keys": keys,
+    });
+    if ctl.link == Link::Web {
+        // lumen-remote checks each phone's requests against these before
+        // they come here, where they are checked again.
+        let of = |role| -> Vec<&str> {
+            protocol::role_verbs(role)
+                .into_iter()
+                .filter(|v| verbs.contains(v))
+                .collect()
+        };
+        data["roles"] = json!({ "remote": of(Role::Remote), "owner": of(Role::Owner) });
+        data["remoteSettings"] = json!(protocol::REMOTE_SETTINGS);
+    }
+    protocol::event("hello", data)
+}
+
+/// Pushes the `devices` event whenever the devices' files change, once
+/// `hello` is out.
+fn devices_watch(ctl: Arc<Ctl>, out: Arc<Out>) {
+    let mut seen = ctl.store.stamp();
+    loop {
+        thread::sleep(DEVICES_EVERY);
+        let now = ctl.store.stamp();
+        if now != seen {
+            seen = now;
+            if let Some(line) = ctl.devices_event() {
+                out.line(&line);
+            }
+        }
+    }
 }
 
 /// Sends `alive`, and ends the session when a stop signal comes or the
@@ -614,17 +743,23 @@ pub fn run(cfg: Serve) -> ! {
         BusKind::Fake => Box::new(NoPrograms),
         _ => Box::new(Spawn),
     };
-    let ctl = Ctl::new(
+    let ctl = Arc::new(Ctl::new(
         Arc::clone(&bus),
         keys,
         Arc::clone(&events),
         privacy::Paths::tv(),
         runner,
-    );
+        Store::new(&cfg.state),
+        cfg.link,
+    ));
     subscribe(&*bus, &events);
     let hello = hello(&ctl, &events, bus.name(), ctl.keys.name());
     lock(&log).line(&format!(
-        "start: {} bus, keys {}, polling {:?}",
+        "start: {} link, {} bus, keys {}, polling {:?}",
+        match cfg.link {
+            Link::Ssh => "ssh",
+            Link::Web => "web",
+        },
         bus.name(),
         ctl.keys.name(),
         polling(&events)
@@ -645,6 +780,10 @@ pub fn run(cfg: Serve) -> ! {
     let (b, ev) = (Arc::clone(&bus), Arc::clone(&events));
     if let Err(e) = spawn("poller", Box::new(move || poller(b, ev))) {
         finish(&log, &format!("no poller thread: {e}"), 1);
+    }
+    let (c, o) = (Arc::clone(&ctl), Arc::clone(&out));
+    if let Err(e) = spawn("devices", Box::new(move || devices_watch(c, o))) {
+        finish(&log, &format!("no devices thread: {e}"), 1);
     }
     if let Some(fake) = &fake {
         fake::start_script(fake);
@@ -746,6 +885,10 @@ mod tests {
     }
 
     fn tv(name: &str, keys: Box<dyn KeyRoute>) -> Tv {
+        tv_on(name, keys, Link::Ssh)
+    }
+
+    fn tv_on(name: &str, keys: Box<dyn KeyRoute>, link: Link) -> Tv {
         let dir =
             std::env::temp_dir().join(format!("lumen-ctl-serve-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -772,6 +915,8 @@ mod tests {
             Arc::clone(&events),
             paths,
             Box::new(NoPrograms),
+            Store::new(&dir),
+            link,
         );
         Tv {
             ctl,
@@ -1073,11 +1218,150 @@ mod tests {
             Arc::clone(&t.events),
             privacy::Paths::tv(),
             Box::new(NoPrograms),
+            Store::new(&t.dir),
+            Link::Ssh,
         );
         let (reply, _) = answer(&ctl, &t.log, br#"{"id":1,"verb":"apps.list"}"#);
         assert_eq!(
             serde_json::from_str::<Value>(&reply).unwrap()["error"]["message"],
             json!("the reply would be over 64 KiB")
         );
+    }
+
+    /// The PC opens pairing, lumen-remote completes it, and what each
+    /// device may then do.
+    #[test]
+    fn pairs_a_phone_and_holds_it_to_its_role() {
+        let pc = tv("roles-pc", Box::new(NoKeys));
+        let web = tv_on("roles-web", Box::new(NoKeys), Link::Web);
+        // Both sessions share one folder, as on the TV.
+        let web_ctl = Ctl::new(
+            Arc::clone(&web.fake) as Arc<dyn Bus>,
+            Box::new(NoKeys),
+            Arc::clone(&web.events),
+            privacy::Paths::tv(),
+            Box::new(NoPrograms),
+            Store::new(&pc.dir),
+            Link::Web,
+        );
+        let ask = |line: &str| -> Value {
+            serde_json::from_str(&answer(&web_ctl, &web.log, line.as_bytes()).0).unwrap()
+        };
+        let opened = pc.ask(r#"{"id":1,"verb":"pair.open"}"#);
+        assert_eq!(opened["ok"], json!(true), "{opened}");
+        let code = opened["result"]["code"].as_str().unwrap().to_owned();
+        assert_eq!(opened["result"]["seconds"], json!(120));
+        // The code was toasted on the TV.
+        assert_eq!(pc.fake.toasts(), 1);
+        // Pairing verbs are the PC's alone.
+        assert_eq!(
+            ask(r#"{"id":2,"verb":"pair.open"}"#)["error"]["code"],
+            json!("unknown-verb")
+        );
+        let paired = ask(&format!(
+            r#"{{"id":3,"verb":"pair.complete","args":{{"code":"{code}","name":"Pixel"}}}}"#
+        ));
+        assert_eq!(paired["result"]["role"], json!("remote"), "{paired}");
+        let token = paired["result"]["token"].as_str().unwrap().to_owned();
+        let id = paired["result"]["id"].as_str().unwrap().to_owned();
+        let with = |n: u32, verb: &str, args: &str| -> Value {
+            ask(&format!(
+                r#"{{"id":{n},"verb":"{verb}","args":{args},"token":"{token}"}}"#
+            ))
+        };
+        // Remote-only: the remote's verbs and presets, not privacy, toasts
+        // or OLED light.
+        assert_eq!(with(4, "volume.set", r#"{"level":9}"#)["ok"], json!(true));
+        assert_eq!(
+            with(
+                5,
+                "settings.set",
+                r#"{"key":"picture.mode","value":"cinema"}"#
+            )["ok"],
+            json!(true)
+        );
+        for (verb, args) in [
+            ("privacy.state", "{}"),
+            ("toast", r#"{"text":"hi"}"#),
+            ("settings.set", r#"{"key":"picture.oledLight","value":10}"#),
+        ] {
+            let r = with(6, verb, args);
+            assert_eq!(r["error"]["code"], json!("forbidden"), "{verb}: {r}");
+        }
+        let me = with(7, "device.auth", "{}");
+        assert_eq!(
+            me["result"],
+            json!({ "id": id, "name": "Pixel", "role": "remote", "paired": me["result"]["paired"] })
+        );
+        // No token, or someone else's, gets nothing.
+        assert_eq!(
+            ask(r#"{"id":8,"verb":"volume.up"}"#)["error"]["code"],
+            json!("forbidden")
+        );
+        let other = "f".repeat(64);
+        let r = ask(&format!(
+            r#"{{"id":9,"verb":"volume.up","token":"{other}"}}"#
+        ));
+        assert_eq!(r["error"]["code"], json!("forbidden"));
+        // The PC makes it an owner, then revokes it.
+        let r = pc.ask(&format!(
+            r#"{{"id":10,"verb":"devices.role","args":{{"id":"{id}","role":"owner"}}}}"#
+        ));
+        assert_eq!(r["ok"], json!(true), "{r}");
+        assert_eq!(with(11, "privacy.state", "{}")["ok"], json!(true));
+        let list = pc.ask(r#"{"id":12,"verb":"devices.list"}"#);
+        assert_eq!(list["result"]["devices"][0]["role"], json!("owner"));
+        assert!(list["result"]["devices"][0].get("sha256").is_none());
+        pc.ask(&format!(
+            r#"{{"id":13,"verb":"devices.revoke","args":{{"id":"{id}"}}}}"#
+        ));
+        assert_eq!(
+            with(14, "volume.up", "{}")["error"]["code"],
+            json!("forbidden")
+        );
+        // The log names the device, never the token or the code.
+        let log = web.log_text();
+        assert!(log.contains(&format!("> 4 [{id}] volume.set")), "{log}");
+        assert!(
+            log.contains("pair.complete (code and name withheld)"),
+            "{log}"
+        );
+        assert!(!log.contains(&token) && !log.contains(&code), "{log}");
+    }
+
+    #[test]
+    fn the_web_hello_carries_the_roles() {
+        let web = tv_on("roles-hello", Box::new(NoKeys), Link::Web);
+        let h: Value = serde_json::from_str(&hello(&web.ctl, &web.events, "fake", "none")).unwrap();
+        let data = &h["data"];
+        let names = |v: &Value| -> Vec<String> {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap().to_owned())
+                .collect()
+        };
+        let verbs = names(&data["verbs"]);
+        assert!(
+            !verbs
+                .iter()
+                .any(|v| v.starts_with("pair.") || v.starts_with("devices."))
+        );
+        let remote = names(&data["roles"]["remote"]);
+        assert!(
+            remote.contains(&"volume.set".to_owned())
+                && !remote.contains(&"privacy.state".to_owned())
+        );
+        // Without a key route, no role gets key.
+        assert!(!names(&data["roles"]["owner"]).contains(&"key".to_owned()));
+        assert_eq!(
+            data["remoteSettings"],
+            json!(["picture.mode", "sound.mode"])
+        );
+        // The PC's hello has no roles, and has the pairing verbs.
+        let pc = tv("roles-hello-pc", Box::new(NoKeys));
+        let h: Value = serde_json::from_str(&hello(&pc.ctl, &pc.events, "fake", "none")).unwrap();
+        assert!(h["data"].get("roles").is_none());
+        assert!(names(&h["data"]["verbs"]).contains(&"pair.open".to_owned()));
     }
 }

@@ -265,8 +265,48 @@ Tauri's IPC and no WebSockets.
   docker run -i --rm -v lumen-target-<checkout>:/t lumen-dev:<tag> /t/debug/lumen-ctl serve --bus fake --log /tmp/ctl.log --config /tmp/none
   ```
 
-## What waits
+## The phone (R4)
 
-**R4, `lumen-remote`:** serve `ui/dist/` and `/ctl` on one port as the mock
-does, over HTTPS (D4), with real pairing behind the Pairing screen
-(`pairing.ts` is the stub to replace) and its own origin check.
+The TV serves `ui/dist/` and `/ctl` itself, over HTTPS on tcp 8443, to
+paired phones only: `lumen-remote` (`shell/crates/lumen-remote`) in front
+of `lumen-ctl serve --link web`. docs/specs/remote.md, R4, has what was
+built and why.
+
+**Pairing.** The PC app's Pairing screen opens a two-minute window: the TV
+toasts a six-digit code, and the screen shows it with the time and tries
+left. The phone opens `https://<the TV>:8443`, gets the pairing page, and
+types the code. Five wrong codes close the window. A paired phone starts
+remote only; the PC app's device list makes it owner, takes that back, or
+revokes it, which closes its link at once. In the mock, `phone NAME` on the
+console pairs one while a window is open.
+
+**On the TV, by hand, nothing at boot:**
+
+```sh
+tools/remote/ca.sh init --ip 192.168.86.20      # on the PC: the authority, the TV's certificate
+cd remote/ui && npm run build && cd ../..
+tools/remote.sh web install --allow 192.168.86.0/24
+tools/remote.sh web start                       # INPUT rule, then lumen-remote
+tools/remote.sh web status
+tools/remote.sh web stop                        # stops it, takes the rule out
+```
+
+`web install` needs `tools/remote.sh install` first, which puts the PC's key
+and `lumen-ctl` there. The phone needs `~/.lumen/remote/ca/lumen-ca.crt`
+installed as a CA certificate (Android: Settings, Security, Encryption and
+credentials, Install a certificate, CA certificate). `tools/remote.sh
+remove` stops `lumen-remote` and deletes everything, paired devices
+included.
+
+**Its checks.** `cargo test -p lumen-remote` (in `make check`) runs it as
+root in the container, dropping as on the TV. The browser end to end runs
+it there too, with the port published, and plays the PC with a second
+`lumen-ctl` over `docker exec`:
+
+```sh
+cd remote/ui && npm run build && PW_CHANNEL=msedge npm run e2e:phone
+```
+
+It covers pairing, five wrong codes, a remote-only phone refused the
+owner's verbs until the PC grants them, and revocation. `tools/dev.sh`
+takes `LUMEN_DEV_NAME` and `LUMEN_DEV_PUBLISH` for it.

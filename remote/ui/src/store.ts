@@ -100,6 +100,7 @@ export function applyEvent(s: TvState, e: Event): TvState {
     }
     case "hello":
     case "alive":
+    case "devices":
       return s;
   }
 }

@@ -118,6 +118,7 @@ ThinQ AI adapter. No crash reports are queued; `/tmp/var/log` holds 808 KB.
 | tcp 7000, tcp6 35254 | AirPlay, HomeKit | Apple devices | owner (P9) |
 | tcp 1103, 1537, 1551, 1830, 1833, 1973, udp 1900 | `upnpd` (DLNA) | DLNA casting; the Plex server probes it | keep unless nobody casts by DLNA |
 | udp 5353 and others | `mdnsd`, `avahi-daemon` | finding the TV (Spotify Connect, casting) | keep |
+| tcp 8443 (Lumen, R4) | `lumen-remote`, started by hand (`tools/remote.sh web start`), as uid 61101 in an empty chroot | the owner's paired phones: HTTPS with Lumen's own certificate authority (remote.md, D4) | an `INPUT` rule rejects it from outside the home network; never forwarded on the router; not running until started, and gone after a reboot |
 | 53 on loopback | connman | the TV's own lookups | keep |
 
 SSH is key-only in effect: the root password is locked and one key is

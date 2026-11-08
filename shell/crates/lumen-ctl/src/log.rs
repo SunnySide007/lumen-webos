@@ -17,6 +17,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::sys;
 
 pub const LOG_FILE: &str = "/var/lib/lumen/remote/lumen-ctl.log";
+/// `--link web`'s: lumen-remote's own lumen-ctl.
+pub const WEB_LOG_FILE: &str = "/var/lib/lumen/remote/lumen-ctl-web.log";
 pub const MAX_BYTES: u64 = 1 << 20;
 
 pub struct Log {

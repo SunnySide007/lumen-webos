@@ -17,7 +17,8 @@
     "test": "vitest run",
     "e2e": "playwright test --project=smoke",
     "capture": "playwright test --project=capture",
-    "e2e:pc": "playwright test --project=pc"
+    "e2e:pc": "playwright test --project=pc",
+    "e2e:phone": "playwright test --project=phone"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

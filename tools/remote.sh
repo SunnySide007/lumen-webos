@@ -30,12 +30,34 @@
 #   tools/remote.sh probe-keys [library|command]
 #                              run lumen-ctl's probe on the TV and save what it
 #                              prints in tools/out/remote/
+#
+# The phone's door, stage R4: lumen-remote serves the phone page over HTTPS
+# on tcp 8443 to paired phones only. Nothing starts at boot.
+#
+#   tools/remote.sh web install --allow NET/BITS
+#                              build lumen-ctl and lumen-remote (tools/dev.sh
+#                              make ctl web) and copy them, remote/ui/dist
+#                              (npm run build there first) and the TV's
+#                              certificate and key from tools/remote/ca.sh to
+#                              the TV, each checked; write web.conf with the
+#                              certificate's names and the home network,
+#                              such as 192.168.86.0/24. Needs install first
+#   tools/remote.sh web start  reject tcp 8443 from outside the home network
+#                              with an INPUT rule, then start lumen-remote,
+#                              by hand: it lasts until web stop or a reboot
+#   tools/remote.sh web stop   stop it and take the rule out
+#   tools/remote.sh web status is it running, and the rule (also in status)
+#
+# remove also stops lumen-remote and deletes what web install copied.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TV=${LUMEN_TV_SH:-$ROOT/tools/tv.sh}
 DEV=${LUMEN_DEV_SH:-$ROOT/tools/dev.sh}
 BIN=${LUMEN_CTL_BIN:-$ROOT/dist/ctl/lumen-ctl}
+WEB_BIN=${LUMEN_WEB_BIN:-$ROOT/dist/web/lumen-remote}
+UI_DIST=${LUMEN_UI_DIST:-$ROOT/remote/ui/dist}
+CA_DIR=${LUMEN_CA_DIR:-$HOME/.lumen/remote/ca}
 OUT=${LUMEN_REMOTE_OUT:-$ROOT/tools/out/remote}
 KEYDIR=${LUMEN_REMOTE_KEYDIR:-$HOME/.lumen/remote}
 KEY=$KEYDIR/id_ed25519
@@ -266,6 +288,66 @@ cmd_probe() {
     return $status
 }
 
+is_net() {
+    printf '%s\n' "$1" | grep -Eq '^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}/(1[6-9]|2[0-9]|3[0-2])$'
+}
+
+cmd_web_install() {
+    if [ $# -ne 2 ] || [ "$1" != --allow ]; then
+        die "web install takes --allow NET/BITS, the home network"
+    fi
+    allow=$2
+    is_net "$allow" || die "--allow wants the home network as NET/BITS, /16 to /32, such as 192.168.86.0/24, not $allow"
+    for f in names server.crt server.key; do
+        [ -f "$CA_DIR/$f" ] || die "no $CA_DIR/$f: tools/remote/ca.sh init --ip ADDR first"
+    done
+    ip=$(sed -n 's/^IP://p' "$CA_DIR/names" | head -n 1)
+    [ -n "$ip" ] || die "$CA_DIR/names has no address"
+    [ -f "$UI_DIST/index.html" ] || die "no $UI_DIST/index.html: npm run build in remote/ui first"
+    "$DEV" make ctl web
+    if [ ! -f "$BIN" ] || [ ! -f "$WEB_BIN" ]; then
+        die "no $BIN or $WEB_BIN after tools/dev.sh make ctl web"
+    fi
+    "$TV" run "[ -d $DIR ] || { echo 'no $DIR: tools/remote.sh install first' >&2; exit 1; }; mkdir -p $DIR/tls && chmod 700 $DIR/tls" </dev/null
+    put "$BIN" "$DIR/lumen-ctl" 700 || die "copying lumen-ctl failed"
+    put "$WEB_BIN" "$DIR/lumen-remote" 700 || die "copying lumen-remote failed"
+    put "$CA_DIR/server.crt" "$DIR/tls/server.crt" 644 || die "copying the certificate failed"
+    put "$CA_DIR/server.key" "$DIR/tls/server.key" 600 || die "copying the key failed"
+    echo "copied lumen-ctl, lumen-remote and the TV's certificate and key; SHA-256 checked"
+
+    # The page as one tar, checked, unpacked beside the old one and swapped.
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    (cd "$UI_DIST" && tar -cf "$tmp/web.tar" .)
+    put "$tmp/web.tar" "$DIR/web.tar" 600 || die "copying the page failed"
+    "$TV" run "set -e; cd $DIR; rm -rf web.new; mkdir web.new; tar -xf web.tar -C web.new; rm -f web.tar
+chown -R 0:0 web.new; chmod -R u=rwX,go=rX web.new
+rm -rf web.old; if [ -d web ]; then mv web web.old; fi; mv web.new web; rm -rf web.old
+echo \"copied the page: \$(find web -type f | wc -l | tr -d ' ') files\"" </dev/null
+
+    {
+        echo "# Written by tools/remote.sh web install; web-start.sh reads it."
+        echo "listen $ip:8443"
+        echo "allow $allow"
+        sed -n 's/^[A-Z]*:/name /p' "$CA_DIR/names"
+    } >"$tmp/web.conf"
+    put "$tmp/web.conf" "$DIR/web.conf" 600 || die "writing web.conf failed"
+    grep -v '^#' "$tmp/web.conf"
+    echo "next: tools/remote.sh web start"
+}
+
+cmd_web() {
+    sub=${1:-}
+    [ $# -gt 0 ] && shift
+    case $sub in
+        install) cmd_web_install "$@" ;;
+        start) no_args "$@" && "$TV" script "$PROFILE/web-start.sh" ;;
+        stop) no_args "$@" && "$TV" script "$PROFILE/web-stop.sh" ;;
+        status) no_args "$@" && "$TV" script "$PROFILE/status.sh" | sed -n '/^lumen-remote:/,$p' ;;
+        *) die "web takes install, start, stop or status" ;;
+    esac
+}
+
 command=${1:-}
 [ $# -gt 0 ] && shift
 case $command in
@@ -276,6 +358,7 @@ case $command in
     config) cmd_config "$@" ;;
     keys) cmd_keys "$@" ;;
     probe | probe-keys) cmd_probe "$command" "$@" ;;
+    web) cmd_web "$@" ;;
     -h | --help | help) usage ;;
     *)
         usage >&2

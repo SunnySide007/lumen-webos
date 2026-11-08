@@ -4,7 +4,7 @@
 // message on the TV, and the privacy state: the boot hook's log, the 11111
 // rule, LG's stopped diagnostics jobs, and Guard's counts once Guard exists
 // (privacy.md).
-import { enableWhen } from "../context.ts";
+import { accepts, enableWhen } from "../context.ts";
 import type { Ctx, Screen } from "../context.ts";
 import { h, setText } from "../dom.ts";
 import { icon } from "../icons.ts";
@@ -108,6 +108,15 @@ export function lumenScreen(ctx: Ctx): Screen {
     privacy.classList.remove("loading");
   };
 
+  /** A remote-only phone: privacy is the owner's (decision 12). */
+  function ownerOnly(): void {
+    checks.replaceChildren(
+      h("li", { class: "na" }, icon("shield"), h("span", null, "Privacy is the owner's", h("small", { text: "Owner rights come only from the PC app." }))),
+    );
+    setText(log, "");
+    privacy.classList.remove("loading");
+  }
+
   async function read(): Promise<void> {
     privacy.classList.add("reading");
     const p = await ctx.send("privacy.state");
@@ -122,7 +131,10 @@ export function lumenScreen(ctx: Ctx): Screen {
   let wasOpen = false;
   off.push(
     ctx.link.subscribe((l) => {
-      if (l.kind === "open" && !wasOpen) void read();
+      if (l.kind === "open" && !wasOpen) {
+        if (accepts(l, "privacy.state")) void read();
+        else ownerOnly();
+      }
       wasOpen = l.kind === "open";
     }),
   );

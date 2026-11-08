@@ -7,11 +7,14 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::devices::STATE_DIR;
 use crate::keys::KEYS_FILE;
-use crate::log::LOG_FILE;
+use crate::log::{LOG_FILE, WEB_LOG_FILE};
+use crate::protocol::Link;
 
 pub const USAGE: &str = "\
 usage: lumen-ctl serve [--bus library|command] [--keys none|keymanager|inject] [--log FILE]
+                       [--link ssh|web]
        lumen-ctl probe [--bus library|command]
        lumen-ctl probe-keys [--bus library|command]
        lumen-ctl play FILE [--settle-ms N]
@@ -28,6 +31,10 @@ makes). Without the flags, /var/lib/lumen/remote/
 ctl.conf decides (`bus command`, `keys none` lines), else command and none.
 --log is where each request and reply is logged (default
 /var/lib/lumen/remote/lumen-ctl.log, moved to .1 at 1 MiB).
+--link says who is at the other end: ssh (the default, and the forced
+command's) is the PC, with owner rights and the pairing verbs; web is
+lumen-remote, whose every request carries a paired device's token, checked
+against /var/lib/lumen/remote/devices.json (log lumen-ctl-web.log).
 
 probe makes only read-only calls and says which of them this TV's bus allows,
 over library and then command (or the one --bus names). probe-keys calls
@@ -46,7 +53,8 @@ person. watch-remote prints the people's events on those nodes for
 SECONDS, with the kernel's stamps. Each prints JSON lines.
 
 For tests and the PC: --bus fake (a TV in the process, no luna), --config
-FILE, --keys-file FILE and --alive-ms N.
+FILE, --keys-file FILE, --state DIR (where devices.json and pairing.json
+are) and --alive-ms N.
 ";
 
 pub const CONFIG_FILE: &str = "/var/lib/lumen/remote/ctl.conf";
@@ -97,6 +105,8 @@ pub struct Serve {
     pub log: PathBuf,
     pub keys_file: PathBuf,
     pub alive: Duration,
+    pub link: Link,
+    pub state: PathBuf,
 }
 
 /// `serve`'s flags before the settings file fills in what they leave out.
@@ -108,6 +118,8 @@ pub struct ServeFlags {
     pub config: PathBuf,
     pub keys_file: PathBuf,
     pub alive: Duration,
+    pub link: Link,
+    pub state: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,7 +197,10 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         config: PathBuf::from(CONFIG_FILE),
         keys_file: PathBuf::from(KEYS_FILE),
         alive: ALIVE,
+        link: Link::Ssh,
+        state: PathBuf::from(STATE_DIR),
     };
+    let mut log_given = false;
     let mut it = rest.iter();
     while let Some(flag) = it.next() {
         if flag == "-h" || flag == "--help" {
@@ -196,7 +211,18 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         match flag.as_str() {
             "--bus" => serve.bus = Some(BusKind::parse(value, true)?),
             "--keys" if serve_only => serve.keys = Some(KeysKind::parse(value)?),
-            "--log" if serve_only => serve.log = PathBuf::from(value),
+            "--log" if serve_only => {
+                serve.log = PathBuf::from(value);
+                log_given = true;
+            }
+            "--link" if serve_only => {
+                serve.link = match value.as_str() {
+                    "ssh" => Link::Ssh,
+                    "web" => Link::Web,
+                    other => return Err(format!("--link must be ssh or web, not {other}")),
+                }
+            }
+            "--state" if serve_only => serve.state = PathBuf::from(value),
             "--config" if serve_only => serve.config = PathBuf::from(value),
             "--keys-file" if serve_only => serve.keys_file = PathBuf::from(value),
             "--alive-ms" if serve_only => {
@@ -209,6 +235,9 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             }
             other => return Err(format!("unknown argument for {sub}: {other}")),
         }
+    }
+    if serve.link == Link::Web && !log_given {
+        serve.log = PathBuf::from(WEB_LOG_FILE);
     }
     match sub.as_str() {
         "serve" => Ok(Command::Serve(serve)),
@@ -247,6 +276,8 @@ pub fn resolve(flags: ServeFlags, text: Option<&str>) -> Result<Serve, String> {
         log: flags.log,
         keys_file: flags.keys_file,
         alive: flags.alive,
+        link: flags.link,
+        state: flags.state,
     })
 }
 
@@ -272,6 +303,8 @@ mod tests {
         assert_eq!(f.log, PathBuf::from("/var/lib/lumen/remote/lumen-ctl.log"));
         assert_eq!(f.config, PathBuf::from("/var/lib/lumen/remote/ctl.conf"));
         assert_eq!(f.alive, Duration::from_secs(10));
+        assert_eq!(f.link, Link::Ssh);
+        assert_eq!(f.state, PathBuf::from("/var/lib/lumen/remote"));
         let s = resolve(f, None).unwrap();
         assert_eq!((s.bus, s.keys), (BusKind::Command, KeysKind::None));
         assert_eq!(
@@ -307,6 +340,29 @@ mod tests {
         assert_eq!(s.bus, BusKind::Fake);
         assert_eq!(s.alive, Duration::from_millis(200));
         assert_eq!(s.log, PathBuf::from("/tmp/x"));
+    }
+
+    #[test]
+    fn the_web_link_has_its_own_log() {
+        let f = flags(&["serve", "--link", "web"]);
+        assert_eq!(f.link, Link::Web);
+        assert_eq!(
+            f.log,
+            PathBuf::from("/var/lib/lumen/remote/lumen-ctl-web.log")
+        );
+        let f = flags(&[
+            "serve", "--log", "/tmp/w", "--link", "web", "--state", "/tmp/s",
+        ]);
+        assert_eq!(
+            (f.log, f.state),
+            (PathBuf::from("/tmp/w"), PathBuf::from("/tmp/s"))
+        );
+        for bad in [
+            &["serve", "--link", "owner"][..],
+            &["probe", "--link", "web"],
+        ] {
+            assert!(parse(&args(bad)).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

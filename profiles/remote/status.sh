@@ -41,6 +41,36 @@ for p in /proc/[0-9]*; do
     fi
 done
 echo "sessions: $n"
+# R4: lumen-remote, its page and certificate, its rule, the paired devices.
+pid=
+for p in /proc/[0-9]*; do
+    if tr '\0' ' ' 2>/dev/null <"$p/cmdline" | grep -q "^$DIR/lumen-remote "; then
+        pid=${p#/proc/}
+    fi
+done
+echo "lumen-remote: ${pid:+running, pid }${pid:-not running}"
+for f in lumen-remote tls/server.crt; do
+    if [ -f $DIR/$f ]; then
+        echo "$f: $(sha256sum <$DIR/$f | cut -d' ' -f1)"
+    else
+        echo "$f: none"
+    fi
+done
+if [ -d $DIR/web ]; then
+    echo "web: $(find $DIR/web -type f | wc -l | tr -d ' ') files"
+else
+    echo "web: none"
+fi
+if iptables -L INPUT -n 2>/dev/null | grep -Eq "tcp dpt:8443( |\$)"; then
+    echo "8443 rule: in place"
+else
+    echo "8443 rule: none"
+fi
+if [ -f $DIR/devices.json ]; then
+    echo "paired devices: $(grep -o '"id"' $DIR/devices.json | wc -l | tr -d ' ')"
+else
+    echo "paired devices: none"
+fi
 if [ -f $AK ]; then
     echo "authorized_keys: $(grep -c '[^[:space:]]' $AK) lines"
     # The key's base64 hashed, so it can be compared with the PC's.

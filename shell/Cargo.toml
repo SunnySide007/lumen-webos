@@ -8,6 +8,7 @@ members = [
     "crates/lumend-proto",
     "crates/lumend",
     "crates/lumen-remote-link",
+    "crates/lumen-remote",
 ]
 # lumen-guard, lumen-ctl and lumend build for Linux only, so a plain `cargo run` or
 # `cargo build` on the PC (tools/sim.ps1) means the shell and its core; make

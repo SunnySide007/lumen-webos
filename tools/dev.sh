@@ -5,6 +5,10 @@
 #   tools/dev.sh make check
 #   tools/dev.sh            # a shell in the container
 #
+# LUMEN_DEV_NAME names the container and LUMEN_DEV_PUBLISH publishes a port
+# (docker's -p, such as 127.0.0.1:18443:18443): remote/ui's phone tests use
+# both, to reach lumen-remote in the container and to drive its lumen-ctl.
+#
 # The image is tagged with a hash of the Dockerfile, so editing the Dockerfile
 # builds a fresh image on the next run. Cargo's registry and the TV build's
 # target directory live in named volumes, which keeps rebuilds fast.
@@ -38,10 +42,14 @@ tty=""
 if [ -t 0 ] && [ -t 1 ]; then tty="-it"; fi
 [ $# -gt 0 ] || set -- bash
 
+extra=""
+if [ -n "${LUMEN_DEV_NAME:-}" ]; then extra="$extra --name $LUMEN_DEV_NAME"; fi
+if [ -n "${LUMEN_DEV_PUBLISH:-}" ]; then extra="$extra -p $LUMEN_DEV_PUBLISH"; fi
+
 # Stop Git Bash rewriting /work and other container paths.
 export MSYS_NO_PATHCONV=1
 # shellcheck disable=SC2086
-exec docker run --rm $tty \
+exec docker run --rm $tty $extra \
     -v "$HOST_ROOT:/work" \
     -v lumen-cargo-registry:/usr/local/cargo/registry \
     -v "lumen-target-$checkout:/work/shell/target" \

@@ -451,6 +451,117 @@ went to the builder session the same day. `lumen-ctl` is unchanged.
 **Undo:** stop it, and `tools/remote.sh remove` takes away the hook, the
 files and the tokens. Remove Lumen's certificate authority from the phone.
 
+**Built on 2026-11-08** (`shell/crates/lumen-remote`, `tools/remote/ca.sh`,
+`tools/remote.sh web`, `profiles/remote/web-*.sh`, the Pairing screen in
+`remote/ui`; remote/README.md, "The phone"), against `lumen-ctl serve --bus
+fake` only. Not yet run on the B9; its by-hand steps and the phone's checks
+went to the builder session the same day. There is no boot hook.
+* **The server:** one thread around `poll`, as root only until it drops.
+  * **Before any request:** it reads the certificate, the key and every
+    file of `remote/ui/dist` into memory (each must be root's and no wider
+    than 0755, the key 0600), binds the port, and starts `lumen-ctl serve
+    --link web` as its child over a socket pair, with a cleared environment.
+  * **The drop:** `chroot` into an empty folder only root can write
+    (`/var/lib/lumen/remote/empty`), `setgroups(0)`, then uid and gid 61101,
+    which no file on the TV has. Then `PR_SET_NO_NEW_PRIVS` and
+    `PR_SET_DUMPABLE` 0, and a check that `setuid(0)` now fails. Without
+    root it refuses to run unless told `--no-drop` (tests only), and as root
+    it refuses `--no-drop`.
+  * **Crates:** rustls 0.23.46 on ring 0.17.14, TLS 1.3 only, ALPN
+    `http/1.1`, plus libc and serde_json. HTTP/1.1 (8 KiB heads, 2 KiB
+    bodies), the WebSocket framing and base64 are hand-written. The TV's
+    release binary is about 1.3 MB.
+* **Certificates (D4):** `tools/remote/ca.sh` on the PC, with OpenSSL.
+  * P-256 keys. The authority carries critical name constraints with
+    exactly the TV's address and DNS name, if one is given; with an address
+    alone, DNS names are bound to `lumen.invalid`. Constraints bind only the
+    kinds of name they list, so without that line its key could sign any
+    DNS name. The tests sign rogue certificates with the authority's own key
+    and OpenSSL refuses them.
+  * The TV's certificate lasts 397 days (`ca.sh issue` renews it, nothing
+    new on the phone). The authority's key never leaves the PC.
+* **Pairing and roles, in `lumen-ctl`:** the brief's design, with
+  `lumen-ctl` holding the devices.
+  * **The store** (`/var/lib/lumen/remote/devices.json`, root's): each
+    device's id, name, role, when it paired, and the SHA-256 of its token
+    (256 random bits from `/dev/urandom`), never the token. At most 16
+    devices. The pairing window is in `pairing.json`: its code, its end
+    (120 s) and its tries left (5). Changes take a lock and land by rename.
+  * **Pairing:** `pair.open` toasts the code on the TV and returns it to the
+    PC, which shows it with its countdown. The fifth wrong code closes the
+    window; a right code closes it too.
+  * **Roles:** a remote-only device gets power, volume, inputs, apps, keys,
+    typing and `settings.set` on `picture.mode` and `sound.mode`.
+    Everything else (`privacy.state`, `toast`, every other setting, and
+    later the owner's verbs) is the owner's. `lumen-remote` checks each request
+    against the role's verbs from `lumen-ctl`'s hello, and `lumen-ctl`
+    checks the token and the role again on every request.
+  * **Revocation:** `lumen-ctl` pushes a `devices` event when the store
+    changes. `lumen-remote` then asks again for every open WebSocket's
+    device: a revoked one is closed with 4401, and the page goes back to
+    the pairing page; a changed role is closed with 4001, and the page
+    reconnects with its new verbs.
+* **What changed in `lumen-ctl`, for the roles:** `--link ssh|web`
+  (`ssh` is the default, the PC's forced command) and `--state DIR`.
+  * **The SSH link** (the PC app) gets five new verbs: `pair.open`,
+    `pair.close`, `devices.list`, `devices.revoke` and `devices.role`.
+  * **The web link** (lumen-remote only) takes `pair.complete` and
+    `device.auth`, plus every phone request with its token; it refuses the
+    PC's five.
+  * **Also new:** the `forbidden` error code and the `devices` event.
+    `src/devices.rs` holds the store, and `src/sha256.rs` is a hand-written
+    SHA-256 with NIST's test vectors.
+* **The web rules** (`src/server.rs` has the table):
+  * **Unpaired:** an unpaired browser gets the pairing page (no script; its
+    CSP allows its one style, by hash) and nothing else: the WebSocket and
+    `/whoami` answer 401, and any other path goes back to `/`.
+  * **Host and origin:** every request must name the TV as its Host (421
+    otherwise), and the form's POST and the WebSocket must come from
+    `https://` that host (403 otherwise).
+  * **The cookie:** `__Host-lumen`, `Secure; HttpOnly; SameSite=Strict`,
+    400 days. A revoked phone's is cleared when it is next served the
+    pairing page.
+  * **The network:** peers outside `--allow` are closed unread, behind the
+    `INPUT` rule.
+  * **Referrer-Policy is `same-origin`,** not `no-referrer`: under
+    `no-referrer` Chromium sends `Origin: null` with the form's POST, which
+    the origin check refused. The phone tests found it.
+* **On the TV:** `tools/remote.sh web install --allow NET/BITS` copies
+  `lumen-ctl`, `lumen-remote`, the page and the TV's certificate and key,
+  each checked by SHA-256 through the stage, and writes `web.conf`.
+  * **`web start`** (`profiles/remote/web-start.sh`) checks the kill
+    switch, that uid and gid 61101 are nobody's and that nothing listens on
+    8443. Then it adds `INPUT -p tcp --dport 8443 ! -s NET -j REJECT` and
+    starts `lumen-remote` with `setsid`. If it doesn't come up, the rule
+    comes out again.
+  * **`web stop`** stops it and takes out every 8443 rule. `remove` does
+    both before it deletes the folder, paired devices included. Nothing
+    lasts past a reboot.
+* **The front-end:**
+  * **On the PC app,** the Pairing screen opens a window: six code cells,
+    the countdown, tries left and Close pairing. It lists the paired devices
+    with Make owner / Make remote only and a two-tap Revoke.
+  * **On the phone,** the screen shows its name and role. Owner-only
+    settings are marked and disabled for a remote-only phone, and the Lumen
+    screen says privacy is the owner's.
+  * **The mock** (`remote/mock-ctl`) pairs a phone from its console
+    (`phone NAME`).
+* **Tests:**
+  * **lumen-remote:** 23 unit tests, and 7 end-to-end tests that run it as
+    root in the container and check the drop through `/proc`.
+  * **lumen-ctl:** the store, roles and links.
+  * **bats:** `remote-web.bats` and `remote-ca.bats`.
+  * **`npm run e2e:phone`** (Playwright, 5 tests) runs `lumen-remote` and
+    the fake `lumen-ctl` in the build container (`e2e/phone-tv.sh`), with
+    the PC's side as a second `lumen-ctl --link ssh` over `docker exec`. It
+    covers pairing, the cookie's flags, five wrong codes, a remote-only
+    phone refused the owner's verbs until the PC grants them, and
+    revocation.
+* **Not done yet:** the boot hook (after the owner's tests), "done when" on
+  the B9 and the Pixel, and the security review of the running server on
+  the TV. The PC app's binary is also called `lumen-remote` (its Cargo
+  package, in its own workspace); the two never meet on one machine.
+
 ### R5: Google Home beyond CEC (only if R1 falls short)
 
 **Brief.** Home Assistant on a bridge box (D9), with:

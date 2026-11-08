@@ -6,6 +6,7 @@
 #   tools/dev.sh make kern-table      # Inter's kerning table (shell/assets/fonts/)
 #   tools/dev.sh make guard    # Lumen Guard for the TV (dist/guard/)
 #   tools/dev.sh make ctl      # lumen-ctl for Lumen Remote (dist/ctl/)
+#   tools/dev.sh make web      # lumen-remote, the phone's door (dist/web/)
 #   tools/dev.sh make lumend   # lumend, its stand-in and its door (dist/lumend/)
 #
 # Talking to the TV (install, launch, logs, recon) is tools/tv.sh, which runs on
@@ -18,6 +19,7 @@ TARGET  := armv7-unknown-linux-gnueabi
 BIN     := shell/target/$(TARGET)/release/lumen-shell
 GUARD   := shell/target/$(TARGET)/release/lumen-guard
 CTL     := shell/target/$(TARGET)/release/lumen-ctl
+WEB     := shell/target/$(TARGET)/release/lumen-remote
 LUMEND  := shell/target/$(TARGET)/release/lumend
 STANDIN := shell/target/$(TARGET)/release/lumen-standin
 STAGE   := dist/stage/$(APP_ID)
@@ -30,7 +32,7 @@ STAGE   := dist/stage/$(APP_ID)
 PLATFORM  ?=
 LIFECYCLE ?= 1
 
-.PHONY: all build-tv check-trial ipk capture-tools kern-table guard ctl lumend licenses test lint check clean
+.PHONY: all build-tv check-trial ipk capture-tools kern-table guard ctl web lumend licenses test lint check clean
 
 all: ipk
 
@@ -61,6 +63,15 @@ ctl:
 	mkdir -p dist/ctl
 	install -m 0755 $(CTL) dist/ctl/lumen-ctl
 	@ls -l dist/ctl/lumen-ctl
+
+# The phone's door for the TV (tools/remote.sh web install), beside
+# lumen-ctl; not part of check either. The page is remote/ui/dist, which
+# npm builds on the PC.
+web:
+	cd shell && cargo build --release --target $(TARGET) -p lumen-remote
+	mkdir -p dist/web
+	install -m 0755 $(WEB) dist/web/lumen-remote
+	@ls -l dist/web/lumen-remote
 
 # Lumen's root daemon for the TV (tools/lumend.sh push); not part of check,
 # which builds and tests it with the rest of the workspace.
@@ -124,7 +135,7 @@ lint:
 	cd shell && cargo fmt --all --check
 	cd shell && cargo clippy --workspace --all-targets -- -D warnings
 	cd shell && cargo clippy --workspace --release --target $(TARGET) --all-targets -- -D warnings
-	shellcheck tools/*.sh tools/bench/*.sh tools/bench/tv/*.sh tools/recon/*.sh tools/backup/*.sh tools/capture/*.sh profiles/glasshouse/*.sh profiles/privacy/*.sh profiles/remote/*.sh profiles/lumend/*.sh profiles/lumend/lumend profiles/privacy/lumen-privacy profiles/privacy/lumen-guard takeover/*.sh takeover/lumen-home packaging/shell/*.sh .githooks/pre-push
+	shellcheck tools/*.sh tools/bench/*.sh tools/bench/tv/*.sh tools/recon/*.sh tools/backup/*.sh tools/capture/*.sh tools/remote/*.sh remote/ui/e2e/*.sh profiles/glasshouse/*.sh profiles/privacy/*.sh profiles/remote/*.sh profiles/lumend/*.sh profiles/lumend/lumend profiles/privacy/lumen-privacy profiles/privacy/lumen-guard takeover/*.sh takeover/lumen-home packaging/shell/*.sh .githooks/pre-push
 
 # Every crate in Cargo.lock under a license Lumen's GPL-3.0-or-later can meet,
 # and every direct dependency named in THIRD-PARTY.md (tools/licenses.py).
