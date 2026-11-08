@@ -394,6 +394,26 @@ These cost little or nothing per frame and do the most for the look:
    settled start screen (1280x720) the background's longest run of one
    colour fell from 22 px to 5 px. Its cost on the TV is not measured yet;
    the `-dither` look switch turns it off.
+
+   **Measured on the B9 (OLED55B9PUA, 05.50.00, 2026-11-07),** 45 s of
+   arrows held around the grid, the window from the log's first to last
+   key (`tools/out/tv-session-20261107/plan.md`, git-ignored):
+
+   | Build | Average frame | Vsyncs skipped per 10 s |
+   |---|---|---|
+   | 3a89955, before lane J | 16.88 ms | 4.7 |
+   | Lane J's build, `{"look":"plain"}` | 21.61 ms | 131.7 |
+   | main e57dc5b, `{"look":"plain"}` | 21.53 ms | 128.4 |
+   | main e57dc5b, the full look (short bursts only) | 27.95 ms | 231 |
+
+   Plain still paid: the dither's varying (`v_pos`) and its branch on
+   `u_dither` were in the one shader, run for every pixel at `u_dither` 0,
+   the only change to what plain draws. Since then the dither is built
+   only into a program of its own (`render.rs`, `DITHER`), made when it is
+   turned on, so plain's fragment shader is again the one from before lane
+   J byte for byte (a test holds it). Whether that brings plain back to
+   17 ms, and what the dither, tilt and hero cost each, is the next run on
+   the TV.
 3. **Kerning.** Inter wasn't kerned: fontdue reads kerning only from a `kern`
    table, and Inter keeps it in GPOS. The 72 px shelf title shows it most.
    Done on 2026-10-23 (e823515): the pairs are pulled out of GPOS ahead of

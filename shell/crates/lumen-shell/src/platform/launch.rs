@@ -9,7 +9,8 @@
 //!
 //! `Launch::read` takes either apart, and `Params` reads the platform
 //! layer's own parameters: which platform, an ES 3 context, the GPU probe,
-//! the overlay trial's window type, a hidden start and a time limit. A value
+//! the overlay trial's window type, a hidden start, a time limit and the
+//! bench's screenshots. A value
 //! that makes no sense is left out and said in the log; it never keeps the
 //! TV's Home from starting.
 
@@ -24,6 +25,8 @@ use super::lifecycle::Method;
 const MAX_EXIT_AFTER: f64 = 3600.0;
 /// The longest window type name taken from the parameters.
 const MAX_WINDOW_TYPE: usize = 48;
+/// The most screenshots one launch asks for.
+pub const MAX_SHOTS: usize = 8;
 
 /// One launch argument, taken apart.
 #[derive(Debug, Default, PartialEq)]
@@ -102,6 +105,12 @@ pub struct Params {
     /// `"hidden": true`: start without showing the window, as a preload
     /// does, until a relaunch shows it.
     pub hidden: bool,
+    /// `"shots": [6, 60]`: save the first settled frame at or after each of
+    /// these times on the loop's clock (the bench's screenshots), sorted.
+    pub shots: Vec<Duration>,
+    /// `"saver": "hold"`: answer LG's screensaver requests `ack: false`
+    /// for this launch (a bench run; LG's settings stay as they are).
+    pub hold_saver: bool,
     /// What was said that makes no sense, one line each for the log.
     pub refused: Vec<String>,
 }
@@ -149,6 +158,23 @@ impl Params {
                 None => out.refuse("hidden", said, "true or false"),
             }
         }
+        if let Some(said) = params.get("saver") {
+            match said.as_str() {
+                Some("hold") => out.hold_saver = true,
+                Some("allow") => {}
+                _ => out.refuse("saver", said, "\"hold\" or \"allow\""),
+            }
+        }
+        if let Some(said) = params.get("shots") {
+            match read_shots(said) {
+                Some(shots) => out.shots = shots,
+                None => out.refuse(
+                    "shots",
+                    said,
+                    "a list of 1 to 8 times in seconds, up to an hour",
+                ),
+            }
+        }
         out
     }
 
@@ -161,6 +187,24 @@ impl Params {
             "launch parameter {key:?}: {shown} is not {wanted}; left out"
         ));
     }
+}
+
+/// `"shots"`' times, sorted, or `None` unless it is a list of 1 to
+/// `MAX_SHOTS` numbers from 0 to an hour.
+fn read_shots(said: &Value) -> Option<Vec<Duration>> {
+    let list = said
+        .as_array()
+        .filter(|l| (1..=MAX_SHOTS).contains(&l.len()))?;
+    let mut shots = list
+        .iter()
+        .map(|v| {
+            v.as_f64()
+                .filter(|s| s.is_finite() && (0.0..=MAX_EXIT_AFTER).contains(s))
+                .map(Duration::from_secs_f64)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    shots.sort();
+    Some(shots)
 }
 
 /// The compositor's window type for a short name (`overlay` gives
@@ -232,7 +276,7 @@ mod tests {
     fn the_platform_layers_parameters() {
         let params = Params::read(&object(json!({
             "platform": "wayland", "gles": 3, "probe": "gpu", "window": "overlay",
-            "exitAfter": 20, "hidden": true
+            "exitAfter": 20, "hidden": true, "shots": [60, 6.5], "saver": "hold"
         })));
         assert_eq!(
             params,
@@ -243,6 +287,8 @@ mod tests {
                 window_type: Some("_WEBOS_WINDOW_TYPE_OVERLAY".to_owned()),
                 exit_after: Some(Duration::from_secs(20)),
                 hidden: true,
+                shots: vec![Duration::from_millis(6500), Duration::from_secs(60)],
+                hold_saver: true,
                 refused: Vec::new(),
             }
         );
@@ -255,12 +301,23 @@ mod tests {
     fn nonsense_is_left_out_and_said() {
         let params = Params::read(&object(json!({
             "platform": "x11", "gles": 4, "probe": true, "window": "over lay;rm",
-            "exitAfter": -1, "hidden": "yes"
+            "exitAfter": -1, "hidden": "yes", "shots": [1, -2], "saver": true
         })));
         assert_eq!(params.platform, None);
         assert!(!params.gles3 && !params.probe && !params.hidden);
         assert_eq!((params.window_type, params.exit_after), (None, None));
-        assert_eq!(params.refused.len(), 6, "{:?}", params.refused);
+        assert!(params.shots.is_empty());
+        assert!(!params.hold_saver);
+        assert_eq!(params.refused.len(), 8, "{:?}", params.refused);
+        for bad in [
+            json!([]),
+            json!(3),
+            json!([1, 2, 3, 4, 5, 6, 7, 8, 9]),
+            json!([4000]),
+        ] {
+            let p = Params::read(&object(json!({ "shots": bad })));
+            assert!(p.shots.is_empty() && p.refused.len() == 1, "{bad}");
+        }
         assert!(params.refused[0].starts_with("launch parameter \"platform\": \"x11\""));
     }
 

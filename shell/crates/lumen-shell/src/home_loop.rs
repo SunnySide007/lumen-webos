@@ -10,8 +10,8 @@
 //! tests' are in `home_loop/fake.rs`. The loop keeps every decision, and the
 //! adapters only carry them out.
 
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::{HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -192,6 +192,8 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
     let mut screenshot = opts.screenshot.clone();
     let shot_at = opts.screenshot_at.unwrap_or(SCREENSHOT_AFTER);
     let mut settled_shot = opts.screenshot_when_settled.clone();
+    // The launch parameter `"shots"`, the earliest first.
+    let mut shots: VecDeque<Duration> = opts.shots.iter().copied().collect();
     let mut script = opts.keys.clone();
     // Every title's glyphs are made once (`warm`), while visible, when the
     // screen has stayed settled `WARM_AFTER` past a burst; a press before
@@ -233,9 +235,9 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         // A settled screenshot that is ready must not wait for an event; one
         // that cannot be drawn yet (window hidden, icons on their way) must
         // not spin either.
-        let shot_ready = settled_shot.is_some()
+        let shot_ready = (settled_shot.is_some() && keys_done(script.as_ref(), &shell.input)
+            || shot_due(&shots, clock.now()))
             && shell.visible
-            && keys_done(script.as_ref(), &shell.input)
             && !screen.icons_loading()
             && !heroes.pending(&shell.home);
         // A pass that starts with an idle wait: the GPU has most likely
@@ -287,6 +289,8 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
                     .as_ref()
                     .filter(|_| shell.visible)
                     .map(|_| shot_at),
+                // The next timed shot, the same way.
+                shots.front().copied().filter(|_| shell.visible),
                 // The same for icons; showing the shell again wakes the loop.
                 (shell.visible && screen.icons_loading()).then(|| clock.now() + ICON_POLL),
                 // The idle heartbeat. Not under a fixed clock, which would
@@ -407,6 +411,16 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         if take_settled {
             shell.home.mark_dirty();
         }
+        // A timed shot: its time has come, and the screen is settled the
+        // same way, so the frame drawn once more is the one kept.
+        let take_timed = shot_due(&shots, now)
+            && shell.visible
+            && !screen.icons_loading()
+            && !heroes.pending(&shell.home)
+            && !shell.wants_frame();
+        if take_timed {
+            shell.home.mark_dirty();
+        }
         if !shell.wants_frame() {
             // No frame to draw: a launch goes once its time has come, and
             // until then it is one of the idle deadlines.
@@ -419,6 +433,14 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
             && let Some(path) = screenshot.take()
         {
             screen.screenshot(&path);
+        }
+        if take_timed && let Some(at) = shots.pop_front() {
+            screen.screenshot(&shot_path(at));
+            info!(
+                "shot for {:.1} s taken at {:.3} s on the loop's clock",
+                at.as_secs_f64(),
+                now.as_secs_f64()
+            );
         }
         if take_settled && let Some(path) = settled_shot.take() {
             screen.screenshot(&path);
@@ -496,6 +518,22 @@ fn launch_pending<L: Launcher, W: WallClock>(
 /// came.
 fn icons_arrived(screen: &mut impl Screen, waited: bool) -> bool {
     waited && screen.take_icons()
+}
+
+/// A timed shot's time has come.
+fn shot_due(shots: &VecDeque<Duration>, now: Duration) -> bool {
+    shots.front().is_some_and(|&at| now >= at)
+}
+
+/// Where a timed shot goes: beside the log (`/tmp` on the TV, the app's own
+/// in its jail), named by its time in milliseconds.
+fn shot_path(at: Duration) -> PathBuf {
+    let name = format!("lumen-shot-{}.png", at.as_millis());
+    if cfg!(target_os = "linux") {
+        Path::new("/tmp").join(name)
+    } else {
+        PathBuf::from(name)
+    }
 }
 
 /// Every scripted key has been pressed and released.
@@ -937,6 +975,35 @@ mod tests {
         );
         assert_eq!(shots[0], ms(1_400), "in the pass that reads the release");
         assert!(ran.has_line("settled at "));
+    }
+
+    #[test]
+    fn timed_shots_wait_for_a_settled_screen_and_the_shell_goes_on() {
+        // One shot is due at 0.5 s, before any key, and one at 1.05 s, in
+        // the middle of the tap's burst: it waits for the burst to end.
+        let mut setup =
+            Setup::new().events(|e| e.tap(1_000, scancode::RIGHT).at(3_000, Event::Quit));
+        setup.opts.shots = vec![ms(500), ms(1_050)];
+        let ran = setup.run();
+        let shots: Vec<_> = ran
+            .acts
+            .iter()
+            .filter_map(|a| match a {
+                Act::Screenshot(at) => Some(*at),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(shots.len(), 2, "{:?}", ran.lines);
+        assert_eq!(shots[0], ms(500));
+        let burst_end = ran
+            .frames
+            .iter()
+            .filter(|f| f.shown > ms(1_000) && f.shown < shots[1])
+            .count();
+        assert!(burst_end > 1, "the tap's frames came first");
+        assert!(shots[1] > ms(1_050));
+        assert!(ran.has_line("shot for 0.5 s taken at "), "{:?}", ran.lines);
+        assert!(!ran.has_line("settled at "), "and the loop went on");
     }
 
     #[test]
