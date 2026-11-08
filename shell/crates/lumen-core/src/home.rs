@@ -112,6 +112,9 @@ pub struct View<'a> {
     pub drift: [f32; 2],
     /// How far the "Other apps" page has turned in: 0 on the home, 1 on it.
     pub page: f32,
+    /// How far the pages slide as they turn, in pixels: none without the
+    /// look's slide.
+    pub page_slide: f32,
     /// The focused item's name, above the row, and the line under it.
     pub title: Option<&'a str>,
     pub subtitle: Option<String>,
@@ -308,6 +311,11 @@ impl Home {
     /// it fades to it.
     pub fn show_hero(&mut self, hero: Option<Hero>) {
         if self.shelf.show(hero) {
+            // Without the look's fade the art cuts: the crossfade ends on
+            // its first frame, and the old hero can go at once.
+            if !self.look.fade {
+                self.shelf.settle_now();
+            }
             self.dirty = true;
         }
     }
@@ -755,7 +763,11 @@ impl Home {
     pub fn view(&self) -> View<'_> {
         let page = self.page.value().clamp(0.0, 1.0);
         let (home_alpha, others_alpha) = page_fades(page);
-        let slide = style::PAGE_SLIDE;
+        let slide = if self.look.slide {
+            style::PAGE_SLIDE
+        } else {
+            0.0
+        };
         let mut tiles = Vec::new();
         let mut chips = Vec::new();
         if home_alpha > 0.001 {
@@ -801,6 +813,7 @@ impl Home {
             art: self.shelf.view(&self.look),
             drift: self.drift.map(|s| s.value()),
             page,
+            page_slide: slide,
             title: focused.filter(|_| on_home).map(|a| a.title.as_str()),
             subtitle: focused.filter(|_| on_home).and_then(|a| self.subtitle(a)),
             heading_y: layout::HEADING_BASELINE + grid_dy,

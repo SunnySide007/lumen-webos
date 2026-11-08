@@ -134,7 +134,7 @@ pub fn home(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
 fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     batch.clear();
     art(batch, view, assets);
-    if view.page > 0.0 {
+    if view.page > 0.0 && view.look.dim {
         let dim = OTHERS_DIM.alpha(OTHERS_DIM.3 * view.page);
         batch.gradient_rect(0.0, 0.0, SCREEN_W, SCREEN_H, dim, dim);
     }
@@ -338,7 +338,7 @@ fn headings(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     let (home, others) = page_fades(view.page);
     let text = &mut assets.text;
     let atlas = &mut assets.atlas;
-    let slide = -style::PAGE_SLIDE * view.page;
+    let slide = -view.page_slide * view.page;
     if home > 0.0 {
         if let Some(title) = view.title {
             let px = layout::TITLE_PX;

@@ -76,6 +76,7 @@ fn paint_all(apps: &[App], assets: &mut Assets) {
                 // Half turned, so the name above the row and the page's
                 // heading both draw.
                 page: 0.5,
+                page_slide: lumen_core::style::PAGE_SLIDE,
                 title: Some(&app.title),
                 subtitle: Some(status.clone()),
                 heading_y: layout::HEADING_BASELINE,

@@ -305,7 +305,7 @@ Proposed by lane J with the hero's lines. Each starts with
 `[<unix seconds>] ` like the others.
 
 ```text
-look: hero <on|off>, dither <on|off>, tilt <on|off>, light <on|off>, parallax <on|off>, shadow <on|off>, sheen <on|off>
+look: hero <on|off>, dither <on|off>, tilt <on|off>, light <on|off>, parallax <on|off>, shadow <on|off>, sheen <on|off>, fade <on|off>, slide <on|off>, dim <on|off>
 look: "<word>" is not a feature; left out
 ```
 
@@ -316,7 +316,8 @@ look: "<word>" is not a feature; left out
   `{"look":"plain,hero"}` leaves the hero alone on, and `full` turns
   everything on again. Before the home (2026-11-08) the line ended
   `; art <full|half> size` and had no `shadow` or `sheen`; `half` is now an
-  unknown word. `tools/frame-stats.sh` reads both forms.
+  unknown word. Before the Control Center (2026-11-08) it ended at `sheen`.
+  `tools/frame-stats.sh` reads all three forms.
   `tools/tv.sh launch <app id> '<json>'` passes them (close the shell
   first: a running app is not started again); a Home press passes LG's
   own, which have no `"look"`, so the full look. `tools/sim.ps1 -Look`
@@ -563,8 +564,11 @@ home:
 
 **Every effect has a switch** in the launch parameters' `"look"`
 (`Look::parse`): `hero`, `dither`, `tilt`, `light`, `parallax`, `shadow`
-(the resting tiles' shadows: one quad each) and `sheen` (free, but a switch
-like the rest). The look line says them all (below).
+(the resting tiles' shadows: one quad each), `sheen` (free, but a switch
+like the rest), `fade` (the art's crossfade: off, the art cuts), `slide`
+(the pages', and the Control Center's, slide as they turn: off, they only
+fade) and `dim` (the dim behind "Other apps" and the Control Center: one
+full-screen quad). The look line says them all (below).
 
 **Cost.** The simulator's frames hold 80 to 95 quads; a test holds every
 frame of the mock home under 600. The art is one to three full-screen quads

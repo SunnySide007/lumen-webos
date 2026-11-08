@@ -166,6 +166,15 @@ pub struct Look {
     pub shadow: bool,
     /// The focused tile's sheen, its top left corner lit.
     pub sheen: bool,
+    /// The art's crossfade from one hero to the next; without it the art
+    /// cuts.
+    pub fade: bool,
+    /// The "Other apps" page and the Control Center sliding as they come
+    /// and go; without it they only fade.
+    pub slide: bool,
+    /// The home dimmed behind the "Other apps" page and the Control Center:
+    /// one full-screen quad.
+    pub dim: bool,
 }
 
 impl Look {
@@ -178,6 +187,9 @@ impl Look {
         parallax: true,
         shadow: true,
         sheen: true,
+        fade: true,
+        slide: true,
+        dim: true,
     };
 
     /// Every effect off: the home's layout and tiles on the gradient, with
@@ -190,6 +202,9 @@ impl Look {
         parallax: false,
         shadow: false,
         sheen: false,
+        fade: false,
+        slide: false,
+        dim: false,
     };
 
     /// Reads a look such as `plain`, `-dither,-tilt` or `plain,+hero`, from
@@ -231,6 +246,9 @@ impl Look {
             "parallax" => &mut self.parallax,
             "shadow" => &mut self.shadow,
             "sheen" => &mut self.sheen,
+            "fade" => &mut self.fade,
+            "slide" => &mut self.slide,
+            "dim" => &mut self.dim,
             _ => return None,
         })
     }
@@ -243,20 +261,24 @@ impl Default for Look {
 }
 
 /// As the start-up log gives it: `hero on, dither off, tilt on, light on,
-/// parallax on, shadow on, sheen on`.
+/// parallax on, shadow on, sheen on, fade on, slide on, dim on`.
 impl fmt::Display for Look {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let on = |b: bool| if b { "on" } else { "off" };
         write!(
             f,
-            "hero {}, dither {}, tilt {}, light {}, parallax {}, shadow {}, sheen {}",
+            "hero {}, dither {}, tilt {}, light {}, parallax {}, shadow {}, sheen {}, fade {}, \
+             slide {}, dim {}",
             on(self.hero),
             on(self.dither),
             on(self.tilt),
             on(self.light),
             on(self.parallax),
             on(self.shadow),
-            on(self.sheen)
+            on(self.sheen),
+            on(self.fade),
+            on(self.slide),
+            on(self.dim)
         )
     }
 }
@@ -481,6 +503,8 @@ mod tests {
         assert!(!look.shadow && look.sheen);
         assert_eq!(unknown, ["half"], "the half-size art is gone");
         assert_eq!(Look::parse("plain,full").0, Look::FULL);
+        let (look, _) = Look::parse("-fade,-slide,-dim");
+        assert!(!look.fade && !look.slide && !look.dim && look.tilt);
         assert_eq!(Look::parse("-light,light").0, Look::FULL, "in order");
     }
 
@@ -501,11 +525,13 @@ mod tests {
     fn a_look_reads_back_as_the_log_gives_it() {
         assert_eq!(
             Look::parse("-dither").0.to_string(),
-            "hero on, dither off, tilt on, light on, parallax on, shadow on, sheen on"
+            "hero on, dither off, tilt on, light on, parallax on, shadow on, sheen on, fade on, \
+             slide on, dim on"
         );
         assert_eq!(
             Look::PLAIN.to_string(),
-            "hero off, dither off, tilt off, light off, parallax off, shadow off, sheen off"
+            "hero off, dither off, tilt off, light off, parallax off, shadow off, sheen off, \
+             fade off, slide off, dim off"
         );
     }
 }

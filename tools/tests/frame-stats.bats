@@ -1492,6 +1492,11 @@ EOF
         '[1792800000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 18.00 ms, 52 quads); idle' > "$log"
     run "$STATS" "$log"
     [[ "$output" == *"  look             hero on, dither on, tilt off, light on, parallax on, shadow off, sheen on"* ]]
+    # The Control Center's builds add fade, slide and dim.
+    printf '%s\n' '[1792800000.000] look: hero on, dither on, tilt on, light on, parallax on, shadow on, sheen on, fade off, slide on, dim off' \
+        '[1792800000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 18.00 ms, 52 quads); idle' > "$log"
+    run "$STATS" "$log"
+    [[ "$output" == *"  look             hero on, dither on, tilt on, light on, parallax on, shadow on, sheen on, fade off, slide on, dim off"$'\n'* ]]
     # A line that does not read right is no look.
     printf '%s\n' '[1792800000.000] look: hero off, dither off; art full size' \
         '[1792800000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 18.00 ms, 52 quads); idle' > "$log"
