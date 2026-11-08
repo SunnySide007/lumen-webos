@@ -3,16 +3,20 @@
 //! asker has 3 s to send its query, and the upstream 3 s to answer it; the
 //! answer streams back unchanged, a buffer of up to 4,096 bytes at a time, so
 //! answers longer than that still pass. A query the rules refuse in block
-//! mode gets Guard's own answer, and no upstream connection is made.
+//! mode gets Guard's own answer, and no upstream connection is made. A query
+//! the TLS route takes is handed, with the asker's connection, to the TLS
+//! workers (dot.rs).
 
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::fd::AsFd;
 use std::time::{Duration, Instant};
 
+use crate::dot::{Job, Reply};
 use crate::guard::{Action, Guard, Throttle};
 use crate::sys::{self, Interest, Poller};
 use crate::udp::TICK;
+use crate::upstream::Route;
 use crate::wire::{self, HEADER, MAX_MESSAGE};
 
 const MAX_CONNECTIONS: usize = 32;
@@ -112,6 +116,23 @@ impl Conn {
                             self.deadline = Instant::now() + DEADLINE;
                             continue;
                         }
+                        let route = guard.route();
+                        if route == Route::Tls {
+                            // The worker answers on a copy of the asker's
+                            // connection; this one closes only its own copy.
+                            if let Ok(client) = self.client.try_clone() {
+                                let job = Job {
+                                    msg: msg.to_vec(),
+                                    reply: Reply::Tcp(client),
+                                    deadline: Instant::now() + DEADLINE,
+                                };
+                                if !guard.queue.push(job) {
+                                    guard.upstream_error();
+                                }
+                            }
+                            return Step::Close;
+                        }
+                        guard.went_clear(route);
                         match sys::connect_marked(guard.config.upstream, guard.config.dscp) {
                             Ok(stream) => self.upstream = Some(stream),
                             Err(_) => {

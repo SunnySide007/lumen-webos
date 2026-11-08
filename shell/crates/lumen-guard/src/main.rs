@@ -6,8 +6,12 @@
 //! The owner switches the mode, adds rules and opens learning windows through
 //! files only root can write (control.rs).
 //!
-//! Two threads: UDP (with the status file and the owner's files) on the main
-//! thread, TCP on another. The boot hook (profiles/privacy/lumen-guard) starts
+//! Stage G3 sends what it forwards to Quad9 over DNS over TLS once the owner
+//! switches that on, with a logged fallback to the router in clear
+//! (upstream.rs, dot.rs).
+//!
+//! Five threads: UDP (with the status file and the owner's files) on the main
+//! thread, TCP on another, and three TLS workers. The boot hook (profiles/privacy/lumen-guard) starts
 //! it, points the TV's resolver and a nat rule at it once it answers, and puts
 //! them back when it exits.
 
@@ -17,6 +21,7 @@
 
 mod args;
 mod control;
+mod dot;
 mod guard;
 mod lookups;
 mod rules;
@@ -25,6 +30,7 @@ mod status;
 mod sys;
 mod tcp;
 mod udp;
+mod upstream;
 mod wire;
 
 use std::fs;
@@ -46,7 +52,7 @@ const TCP_STACK: usize = 256 << 10;
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     match args::parse(&argv) {
-        Ok(Command::Run(config)) => run(config),
+        Ok(Command::Run(config)) => run(*config),
         Ok(Command::Probe { addr, name }) => probe(addr, &name),
         Ok(Command::Help) => {
             print!("{}", args::USAGE);
@@ -83,21 +89,39 @@ fn run(config: Config) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let guard = Guard::new(config, rules);
+    let tls = match dot::Tls::new(&config) {
+        Ok(tls) => tls,
+        Err(err) => {
+            say!("TLS: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let guard = Guard::new(config, rules, tls);
     let (allow, block, firmware) = guard.rules().counts();
+    let servers: Vec<String> = guard.tls.servers.iter().map(ToString::to_string).collect();
     say!(
-        "{} listening on {} (udp, tcp), upstream {}, dscp {}; rules: {allow} allow, {block} block, {firmware} firmware",
+        "{} listening on {} (udp, tcp), upstream {} in clear or {} as {} over TLS, dscp {}; rules: {allow} allow, {block} block, {firmware} firmware",
         env!("CARGO_PKG_VERSION"),
         guard.config.listen,
         guard.config.upstream,
+        servers.join(" then "),
+        guard.config.tls_name,
         guard.config.dscp,
     );
-    // The owner's files, and so the mode, before the first query.
+    // The owner's files, and so the mode and the route, before the first query.
     guard.poll_control();
     say!("mode {}", guard.mode().word());
+    guard.route();
 
-    // Either loop failing ends both, so the hook removes the nat rule.
+    // Either loop failing ends both, so the hook removes the nat rule. The
+    // TLS workers end when either does.
     let result = thread::scope(|scope| {
+        for i in 0..dot::WORKERS {
+            thread::Builder::new()
+                .name(format!("tls{i}"))
+                .stack_size(dot::STACK)
+                .spawn_scoped(scope, || dot::work(&guard))?;
+        }
         let tcp_thread = thread::Builder::new()
             .name("tcp".to_owned())
             .stack_size(TCP_STACK)

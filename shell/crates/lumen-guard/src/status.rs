@@ -36,6 +36,9 @@ pub struct Counts {
     pub blocked: u64,
     /// Lookups allowed only because a learning window was open.
     pub learned: u64,
+    /// Lookups that went to the router in clear while the TLS switch was on
+    /// (G3's fallback).
+    pub fallback: u64,
 }
 
 impl Counts {
@@ -62,6 +65,11 @@ pub struct Stats {
     pub upstream_errors: u64,
     /// Queries the upstream did not answer within 3 s.
     pub upstream_timeouts: u64,
+    /// Answers that came over TLS.
+    pub tls_answers: u64,
+    /// TLS connections made, and attempts that failed.
+    pub tls_handshakes: u64,
+    pub tls_errors: u64,
 }
 
 impl Stats {
@@ -71,6 +79,13 @@ impl Stats {
         self.roll(today);
         self.total.add(verdict, replied);
         self.today.add(verdict, replied);
+    }
+
+    /// Counts a lookup sent in clear while the TLS switch was on.
+    pub fn count_fallback(&mut self, today: Option<Date>) {
+        self.roll(today);
+        self.total.fallback += 1;
+        self.today.fallback += 1;
     }
 
     /// Starts a new day's counts when the date has changed.
@@ -97,6 +112,17 @@ pub struct Info<'a> {
     /// New names the latest window learned.
     pub learned: usize,
     pub owner_rules: usize,
+    /// Whether the owner's switch asks for TLS (G3).
+    pub tls: bool,
+    /// Where a lookup goes now: upstream.rs's `Route::word`.
+    pub route: &'static str,
+    /// The TLS server a new connection goes to, and its name.
+    pub tls_server: SocketAddrV4,
+    pub tls_name: &'a str,
+    /// TLS connections open now.
+    pub tls_open: usize,
+    /// When the current fallback began, or 0.
+    pub fallback_since: u64,
 }
 
 pub fn render(info: &Info<'_>, stats: &Stats, log_dropped: u64, now: u64) -> String {
@@ -136,6 +162,22 @@ pub fn render(info: &Info<'_>, stats: &Stats, log_dropped: u64, now: u64) -> Str
         stats.upstream_errors,
         stats.upstream_timeouts,
         log_dropped,
+    );
+    let _ = write!(
+        out,
+        "tls {}\nroute {}\ntls_server {}\ntls_name {}\ntls_open {}\ntls_answers {}\n\
+         tls_handshakes {}\ntls_errors {}\nfallback {}\nfallback_today {}\nfallback_since {}\n",
+        if info.tls { "on" } else { "off" },
+        info.route,
+        info.tls_server,
+        info.tls_name,
+        info.tls_open,
+        stats.tls_answers,
+        stats.tls_handshakes,
+        stats.tls_errors,
+        stats.total.fallback,
+        stats.today.fallback,
+        info.fallback_since,
     );
     out
 }
@@ -177,7 +219,46 @@ mod tests {
             learning_until: 0,
             learned: 0,
             owner_rules: 0,
+            tls: false,
+            route: "clear",
+            tls_server: SocketAddrV4::new(Ipv4Addr::new(9, 9, 9, 9), 853),
+            tls_name: "dns.quad9.net",
+            tls_open: 0,
+            fallback_since: 0,
         }
+    }
+
+    #[test]
+    fn renders_the_tls_upstream_and_its_fallback() {
+        let mut stats = Stats::default();
+        stats.count_fallback(Some(OCT_30));
+        stats.count_fallback(Some(OCT_30));
+        stats.count_fallback(Some(OCT_31));
+        stats.tls_answers = 7;
+        stats.tls_handshakes = 2;
+        stats.tls_errors = 1;
+        let mut info = info();
+        info.tls = true;
+        info.route = "fallback-down";
+        info.tls_open = 1;
+        info.fallback_since = 1_793_318_400;
+        let text = render(&info, &stats, 0, 1_793_318_410);
+        for line in [
+            "tls on",
+            "route fallback-down",
+            "tls_server 9.9.9.9:853",
+            "tls_name dns.quad9.net",
+            "tls_open 1",
+            "tls_answers 7",
+            "tls_handshakes 2",
+            "tls_errors 1",
+            "fallback 3",
+            "fallback_today 1",
+            "fallback_since 1793318400",
+        ] {
+            assert!(text.lines().any(|l| l == line), "no {line:?} in\n{text}");
+        }
+        assert!(text.lines().all(|l| l.split(' ').count() == 2), "{text}");
     }
 
     #[test]
@@ -193,6 +274,7 @@ mod tests {
                 would_block: 1,
                 blocked: 1,
                 learned: 1,
+                fallback: 0,
             }
         );
         stats.count(Verdict::Allow, false, Some(OCT_31));

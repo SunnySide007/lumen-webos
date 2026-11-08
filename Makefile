@@ -54,6 +54,8 @@ guard:
 	cd shell && cargo build --release --target $(TARGET) -p lumen-guard
 	mkdir -p dist/guard
 	install -m 0755 $(GUARD) dist/guard/lumen-guard
+	# Mozilla's roots are built in (webpki-roots); their terms go with them.
+	install -m 0644 shell/crates/lumen-guard/webpki-roots-LICENSE.txt dist/guard/
 	@ls -l dist/guard/lumen-guard
 
 # The remote's control binary for the TV (tools/remote.sh install); not part

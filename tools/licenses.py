@@ -25,6 +25,10 @@ ALLOWED = {
     "BSD-2-Clause",
     "BSD-3-Clause",
     "BSL-1.0",
+    # Community Data License Agreement, Permissive 2.0: webpki-roots, Mozilla's
+    # root certificates as data. It asks only that its text go with the data
+    # when the data is shared, and puts nothing on what is built with it.
+    "CDLA-Permissive-2.0",
     "GPL-3.0-or-later",
     "ISC",
     "MIT",

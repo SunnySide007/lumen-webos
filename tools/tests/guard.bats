@@ -207,7 +207,7 @@ connmans() {
     [ "$status" -eq 0 ]
     [ -z "$output" ]
     wait_for 'goes through Guard'
-    grep -qxF "guard --listen 127.0.0.2:53 --upstream 192.0.2.1:53 --rules $T/guard/rules --log $T/guard --status $T/guard/status --dscp 7 --mode-file $T/guard/mode --owner $T/guard/owner.txt --learn $T/guard/learn" "$CALLS"
+    grep -qxF "guard --listen 127.0.0.2:53 --upstream 192.0.2.1:53 --rules $T/guard/rules --log $T/guard --status $T/guard/status --dscp 7 --mode-file $T/guard/mode --owner $T/guard/owner.txt --learn $T/guard/learn --tls-file $T/guard/tls" "$CALLS"
     [ "$(cat "$T/guard/lumen-guard.pid")" -gt 1 ]
     [ "$(cat "$T/guard/resolv.conf")" = "$OURS" ]
     grep -qxF "mount --bind $T/guard/resolv.conf $T/misc/resolv.conf" "$CALLS"
@@ -935,6 +935,26 @@ guardctl() {
     [ "$status" -eq 0 ]
     [ ! -e "$m" ]
     guardctl block maybe
+    [ "$status" -eq 1 ]
+}
+
+@test "guard.sh tls trial, on and off write and remove the TLS file, root's alone" {
+    fake_tv
+    guardctl tls trial
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"until the TV next boots"* ]]
+    f="$R/var/lib/lumen/guard/tls"
+    [ "$(cat "$f")" = "tls $(cat /proc/sys/kernel/random/boot_id)" ]
+    [[ "$(ls -l "$f")" == "-rw-------"* ]]
+    guardctl tls on
+    [ "$status" -eq 0 ]
+    [ "$(cat "$f")" = "tls" ]
+    [ ! -e "$f.tmp" ]
+    guardctl tls off
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"in clear"* ]]
+    [ ! -e "$f" ]
+    guardctl tls maybe
     [ "$status" -eq 1 ]
 }
 

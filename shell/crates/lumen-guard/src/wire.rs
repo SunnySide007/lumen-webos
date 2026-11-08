@@ -135,6 +135,72 @@ pub fn sinkhole_answer(query: &[u8], q: &Question, ttl: u32) -> Vec<u8> {
     out
 }
 
+/// The longest UDP answer the asker of `query` takes: 512 bytes (RFC 1035),
+/// or the size its EDNS record offers (RFC 6891), at most `MAX_MESSAGE`.
+/// A TLS answer has no such limit, so a longer one goes back truncated.
+pub fn udp_limit(query: &[u8]) -> usize {
+    const PLAIN: usize = 512;
+    const TYPE_OPT: u16 = 41;
+    let count = |at: usize| match query.get(at..at + 2) {
+        Some(n) => usize::from(u16::from_be_bytes([n[0], n[1]])),
+        None => 0,
+    };
+    let (qd, an, ns, ar) = (count(4), count(6), count(8), count(10));
+    if ar == 0 || query.len() < HEADER {
+        return PLAIN;
+    }
+    let mut off = HEADER;
+    for _ in 0..qd {
+        let Some(end) = skip_name(query, off) else {
+            return PLAIN;
+        };
+        off = end + 4;
+    }
+    for i in 0..an + ns + ar {
+        let Some(end) = skip_name(query, off) else {
+            return PLAIN;
+        };
+        let Some(fixed) = query.get(end..end + 10) else {
+            return PLAIN;
+        };
+        let rtype = u16::from_be_bytes([fixed[0], fixed[1]]);
+        if i >= an + ns && rtype == TYPE_OPT {
+            let size = usize::from(u16::from_be_bytes([fixed[2], fixed[3]]));
+            return size.clamp(PLAIN, MAX_MESSAGE);
+        }
+        off = end + 10 + usize::from(u16::from_be_bytes([fixed[8], fixed[9]]));
+    }
+    PLAIN
+}
+
+/// The offset just past the name at `off`, without reading it.
+fn skip_name(msg: &[u8], mut off: usize) -> Option<usize> {
+    loop {
+        let len = usize::from(*msg.get(off)?);
+        match len & 0xC0 {
+            0xC0 => return Some(off + 2).filter(|end| *end <= msg.len()),
+            0 if len == 0 => return Some(off + 1),
+            0 => off += 1 + len,
+            _ => return None,
+        }
+    }
+}
+
+/// `answer` cut down to its header and question with TC set (RFC 2181,
+/// 9), so the asker asks again over TCP; just the header if its question
+/// can't be read.
+pub fn truncated(answer: &[u8]) -> Vec<u8> {
+    let mut out = answer[..HEADER.min(answer.len())].to_vec();
+    out.resize(HEADER, 0);
+    out[2] |= 0x02;
+    out[6..].fill(0);
+    match first_question(answer) {
+        Ok(Some(q)) if question_count(answer) == 1 => out.extend_from_slice(&answer[HEADER..q.end]),
+        _ => out[4..6].fill(0),
+    }
+    out
+}
+
 /// Reads a possibly compressed name at `off`; returns it, the offset just
 /// past it in the message (past the first pointer, if it used one), and
 /// whether it used one.
@@ -413,6 +479,56 @@ mod tests {
         assert_eq!(a[3] & 0x0F, REFUSED);
         assert_eq!(question_count(&a), 0);
         assert!(!is_query(&a));
+    }
+
+    /// `msg` with an EDNS OPT record offering `size` bytes over UDP.
+    fn with_edns(mut msg: Vec<u8>, size: u16) -> Vec<u8> {
+        msg[11] = 1; // ARCOUNT
+        msg.push(0); // the root name
+        msg.extend_from_slice(&41u16.to_be_bytes());
+        msg.extend_from_slice(&size.to_be_bytes());
+        msg.extend_from_slice(&[0, 0, 0, 0, 0, 0]); // TTL, RDLENGTH
+        msg
+    }
+
+    #[test]
+    fn the_udp_limit_follows_edns() {
+        let plain = query(1, "www.example", 1);
+        assert_eq!(udp_limit(&plain), 512);
+        assert_eq!(udp_limit(&with_edns(plain.clone(), 1232)), 1232);
+        // Below the minimum, or above Guard's buffer: clamped.
+        assert_eq!(udp_limit(&with_edns(plain.clone(), 100)), 512);
+        assert_eq!(udp_limit(&with_edns(plain.clone(), 65000)), MAX_MESSAGE);
+        // A record that runs past the end, or no OPT: the plain limit.
+        let mut cut = with_edns(plain.clone(), 1232);
+        cut.truncate(cut.len() - 8);
+        assert_eq!(udp_limit(&cut), 512);
+        let mut not_opt = with_edns(plain, 1232);
+        let at = not_opt.len() - 10;
+        not_opt[at + 1] = 1;
+        assert_eq!(udp_limit(&not_opt), 512);
+        assert_eq!(udp_limit(&[0; 4]), 512);
+    }
+
+    #[test]
+    fn truncated_answers_keep_the_question_and_set_tc() {
+        let q = query(0x0A0B, "big.example", 1);
+        let mut answer = q.clone();
+        answer[2] |= 0x80;
+        answer[7] = 3; // ANCOUNT
+        answer[11] = 1; // ARCOUNT
+        answer.extend(std::iter::repeat_n(0xEE, 900));
+        let t = truncated(&answer);
+        assert_eq!(&t[..2], &[0x0A, 0x0B]);
+        assert!(!is_query(&t));
+        assert_ne!(t[2] & 0x02, 0);
+        assert_eq!(question_count(&t), 1);
+        assert_eq!(&t[6..12], &[0; 6]);
+        assert_eq!(&t[HEADER..], &q[HEADER..]);
+        // An unreadable question: the header alone.
+        let t = truncated(&answer[..HEADER + 3]);
+        assert_eq!(t.len(), HEADER);
+        assert_eq!(question_count(&t), 0);
     }
 
     #[test]

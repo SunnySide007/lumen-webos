@@ -8,10 +8,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::args::Config;
 use crate::control::{Control, Mode};
+use crate::dot::{Queue, Tls};
 use crate::lookups::Lookups;
 use crate::rules::{Rules, Verdict};
 use crate::status::{self, Info, Stats};
 use crate::sys;
+use crate::upstream::{Failure, Route, Upstream};
 use crate::wire::{self, Type};
 
 /// How long an asker may keep Guard's sinkhole answer: a name the owner
@@ -33,13 +35,21 @@ pub struct Guard {
     lookups: Mutex<Lookups>,
     stats: Mutex<Stats>,
     started: u64,
+    /// The TLS client and its workers' queue (stage G3).
+    pub tls: Tls,
+    pub queue: Queue,
+    upstream: Mutex<Upstream>,
 }
 
 impl Guard {
-    pub fn new(config: Config, rules: Rules) -> Self {
+    pub fn new(config: Config, rules: Rules, tls: Tls) -> Self {
         let lookups = Lookups::open(&config.log, config.max_log_bytes);
-        let control = Control::new(config.mode);
+        let control = Control::new(config.mode, config.tls);
+        let upstream = Upstream::new(tls.servers.len(), config.clock_floor);
         Self {
+            tls,
+            queue: Queue::new(),
+            upstream: Mutex::new(upstream),
             config,
             rules,
             control: Mutex::new(control),
@@ -70,6 +80,58 @@ impl Guard {
         for line in said {
             crate::say!("{line}");
         }
+        if let Some(path) = &self.config.tls_file {
+            let said = lock(&self.control).poll_tls(path);
+            if let Some(line) = said {
+                crate::say!("{line}");
+            }
+        }
+    }
+
+    /// Whether the owner's switch sends lookups over TLS.
+    pub fn tls_wanted(&self) -> bool {
+        lock(&self.control).tls()
+    }
+
+    /// Where a lookup to forward goes now (upstream.rs); says a change.
+    pub fn route(&self) -> Route {
+        let wanted = self.tls_wanted();
+        let (route, said) = lock(&self.upstream).route(wanted, unix_now(), Instant::now());
+        if let Some(line) = said {
+            crate::say!("{line}");
+        }
+        route
+    }
+
+    /// Counts a lookup sent to the router in clear: a fallback when the
+    /// route says so.
+    pub fn went_clear(&self, route: Route) {
+        if let Route::Fallback(_) = route {
+            lock(&self.upstream).went_clear();
+            lock(&self.stats).count_fallback(sys::local_date(unix_now()));
+        }
+    }
+
+    /// The TLS server a new connection goes to.
+    pub fn tls_server(&self) -> usize {
+        lock(&self.upstream)
+            .server()
+            .min(self.tls.servers.len() - 1)
+    }
+
+    pub fn tls_failed(&self, server: usize, failure: Failure) {
+        let said = lock(&self.upstream).failed(server, failure, Instant::now());
+        lock(&self.stats).tls_errors += 1;
+        crate::say!("{said}");
+    }
+
+    pub fn tls_answered(&self) {
+        lock(&self.upstream).succeeded();
+        lock(&self.stats).tls_answers += 1;
+    }
+
+    pub fn tls_handshake(&self) {
+        lock(&self.stats).tls_handshakes += 1;
     }
 
     /// Decides, logs and counts one query. In log mode everything goes
@@ -144,6 +206,15 @@ impl Guard {
                 control.owner.len(),
             )
         };
+        let tls = self.tls_wanted();
+        let (route, fallback_since, server) = {
+            let upstream = lock(&self.upstream);
+            (
+                upstream.peek(tls, now, Instant::now()),
+                upstream.fallback_since(),
+                upstream.server().min(self.tls.servers.len() - 1),
+            )
+        };
         let text = {
             let mut stats = lock(&self.stats);
             stats.roll(sys::local_date(now));
@@ -158,6 +229,12 @@ impl Guard {
                 learning_until,
                 learned,
                 owner_rules,
+                tls,
+                route: route.word(),
+                tls_server: self.tls.servers[server],
+                tls_name: &self.config.tls_name,
+                tls_open: self.tls.open.load(std::sync::atomic::Ordering::Relaxed),
+                fallback_since,
             };
             status::render(&info, &stats, dropped, now)
         };
