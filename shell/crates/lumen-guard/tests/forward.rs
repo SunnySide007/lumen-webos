@@ -665,3 +665,360 @@ fn bad_arguments_exit_2_and_say_why() {
     let out = Command::new(GUARD).arg("--listen").output().unwrap();
     assert_eq!(out.status.code(), Some(2));
 }
+
+// Stage G3: DNS over TLS. A local rustls server with the test certificate in
+// tests/fixtures/dot (dot.lumen.test, signed by a test CA) stands in for
+// Quad9; the fake router above is the fallback in clear.
+
+const DOT_NAME: &str = "dot.lumen.test";
+/// The DoT server pads answers for names with this label past 4,096 bytes.
+const BIG: &str = "big";
+
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/dot")
+        .join(name)
+}
+
+/// The TLS flags pointing Guard at `dot`, trusting the test CA.
+fn tls_args(dot: SocketAddr) -> Vec<String> {
+    vec![
+        "--tls-server".to_owned(),
+        dot.to_string(),
+        "--tls-name".to_owned(),
+        DOT_NAME.to_owned(),
+        "--tls-ca".to_owned(),
+        fixture("ca.der").display().to_string(),
+    ]
+}
+
+fn strs(args: &[String]) -> Vec<&str> {
+    args.iter().map(String::as_str).collect()
+}
+
+struct DotServer {
+    addr: SocketAddr,
+    got: Arc<Mutex<Vec<Vec<u8>>>>,
+    connections: Arc<Mutex<usize>>,
+}
+
+impl DotServer {
+    fn start() -> Self {
+        use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+        let cert = CertificateDer::from(fs::read(fixture("server.der")).unwrap());
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+            fs::read(fixture("server.key.der")).unwrap(),
+        ));
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let config = Arc::new(
+            rustls::ServerConfig::builder_with_provider(provider)
+                .with_protocol_versions(&[&rustls::version::TLS13])
+                .unwrap()
+                .with_no_client_auth()
+                .with_single_cert(vec![cert], key)
+                .unwrap(),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let connections = Arc::new(Mutex::new(0));
+        let (seen, counted) = (Arc::clone(&got), Arc::clone(&connections));
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { continue };
+                *counted.lock().unwrap() += 1;
+                let (config, seen) = (Arc::clone(&config), Arc::clone(&seen));
+                thread::spawn(move || {
+                    let conn = rustls::ServerConnection::new(config).unwrap();
+                    let mut tls = rustls::StreamOwned::new(conn, stream);
+                    loop {
+                        let mut len = [0; 2];
+                        if tls.read_exact(&mut len).is_err() {
+                            return;
+                        }
+                        let mut msg = vec![0; usize::from(u16::from_be_bytes(len))];
+                        if tls.read_exact(&mut msg).is_err() {
+                            return;
+                        }
+                        seen.lock().unwrap().push(msg.clone());
+                        if mentions(&msg, SILENT) {
+                            continue;
+                        }
+                        let pad = if mentions(&msg, BIG) { 5000 } else { 0 };
+                        let answer = canned_answer(&msg, pad);
+                        let mut framed = (answer.len() as u16).to_be_bytes().to_vec();
+                        framed.extend_from_slice(&answer);
+                        if tls.write_all(&framed).and_then(|()| tls.flush()).is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+        Self {
+            addr,
+            got,
+            connections,
+        }
+    }
+
+    fn received(&self) -> Vec<Vec<u8>> {
+        self.got.lock().unwrap().clone()
+    }
+
+    fn saw(&self, name: &str) -> bool {
+        self.received().iter().any(|q| mentions(q, name))
+    }
+
+    fn connections(&self) -> usize {
+        *self.connections.lock().unwrap()
+    }
+}
+
+fn tc(answer: &[u8]) -> bool {
+    answer[2] & 0x02 != 0
+}
+
+#[test]
+fn tls_on_sends_lookups_over_tls_and_reuses_connections() {
+    let router = Upstream::start(0);
+    let dot = DotServer::start();
+    let mut args = tls_args(dot.addr);
+    args.extend(["--tls".to_owned(), "on".to_owned()]);
+    let guard = Guard::start("tls", router.addr, &strs(&args));
+
+    // One at a time, as the TV mostly asks: the bytes come back unchanged.
+    for i in 0..20u16 {
+        let (q, answer) = guard.ask(0x2000 + i, &format!("n{i}.netflix.com"), 1);
+        assert_eq!(answer, canned_answer(&q, 0));
+    }
+    // A name no rule covers: log mode forwards it, over TLS too.
+    let (q, answer) = guard.ask(0x2100, "nobody.example", 28);
+    assert_eq!(answer, canned_answer(&q, 0));
+    // Too long for a UDP asker without EDNS: truncated, so it asks over TCP,
+    // where the whole answer, longer than 4,096 bytes, comes through.
+    let q = query(0x2200, "big.netflix.com", 1);
+    let answer = guard.udp(&q, Duration::from_secs(5)).unwrap();
+    assert!(tc(&answer) && ancount(&answer) == 0 && answer[..2] == q[..2]);
+    assert!(answer.len() <= 512);
+    assert_eq!(guard.tcp(&q), canned_answer(&q, 5000));
+
+    // Block mode: a blocked name gets Guard's sinkhole and never reaches TLS.
+    guard.control("mode", "block\n");
+    eventually("block mode", || guard.sinkholed(0x2300, "wait.example"));
+    assert!(guard.sinkholed(0x2301, "ads.example"));
+
+    assert!(dot.saw("n0") && dot.saw("n19") && dot.saw("nobody") && dot.saw(BIG));
+    assert!(!dot.saw("ads"));
+    assert!(router.received().is_empty(), "something went in clear");
+    // Connections are reused: one per worker at most.
+    assert!(
+        (1..=3).contains(&dot.connections()),
+        "{} connections",
+        dot.connections()
+    );
+
+    let (_, state, stderr) = guard.stop();
+    assert_eq!(status_value(&state, "tls"), "on");
+    assert_eq!(status_value(&state, "route"), "tls");
+    assert_eq!(status_value(&state, "tls_name"), DOT_NAME);
+    assert_eq!(status_value(&state, "tls_server"), dot.addr.to_string());
+    let answers: u64 = status_value(&state, "tls_answers").parse().unwrap();
+    assert!(answers >= 24, "{state}");
+    let handshakes: u64 = status_value(&state, "tls_handshakes").parse().unwrap();
+    assert!((1..=3).contains(&handshakes), "{state}");
+    assert_eq!(status_value(&state, "tls_errors"), "0");
+    assert_eq!(status_value(&state, "fallback"), "0");
+    assert_eq!(status_value(&state, "fallback_since"), "0");
+    assert!(stderr.contains("upstream tls"), "{stderr}");
+    assert!(!stderr.contains("FALLBACK"), "{stderr}");
+}
+
+#[test]
+fn tls_falls_back_in_clear_while_the_clock_is_wrong() {
+    let router = Upstream::start(0);
+    let dot = DotServer::start();
+    let mut args = tls_args(dot.addr);
+    // Any clock before 2100 counts as wrong here, as 2019 does on the B9.
+    args.extend(["--tls", "on", "--clock-floor", "4102444800"].map(str::to_owned));
+    let guard = Guard::start("tls-clock", router.addr, &strs(&args));
+    let (q, answer) = guard.ask(0x3000, "www.netflix.com", 1);
+    assert_eq!(answer, canned_answer(&q, 0));
+    let q = query(0x3001, "www.netflix.com", 28);
+    assert_eq!(guard.tcp(&q), canned_answer(&q, 0));
+    assert!(router.saw("www"));
+    assert!(dot.received().is_empty() && dot.connections() == 0);
+
+    let (_, state, stderr) = guard.stop();
+    assert_eq!(status_value(&state, "route"), "fallback-clock");
+    let fallback: u64 = status_value(&state, "fallback").parse().unwrap();
+    assert!(fallback >= 2, "{state}");
+    assert_ne!(status_value(&state, "fallback_since"), "0");
+    assert!(
+        stderr.contains("FALLBACK") && stderr.contains("clock"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn tls_falls_back_in_clear_when_the_server_is_down() {
+    let router = Upstream::start(0);
+    // Nothing listens there.
+    let down: SocketAddr = format!("127.0.0.1:{}", free_port()).parse().unwrap();
+    let mut args = tls_args(down);
+    args.extend(["--tls".to_owned(), "on".to_owned()]);
+    let guard = Guard::start("tls-down", router.addr, &strs(&args));
+    let (q, answer) = guard.ask(0x4000, "www.netflix.com", 1);
+    assert_eq!(answer, canned_answer(&q, 0));
+    // Within the backoff, straight to the router.
+    let start = Instant::now();
+    let (q, answer) = guard.ask(0x4001, "www.youtube.com", 1);
+    assert_eq!(answer, canned_answer(&q, 0));
+    assert!(start.elapsed() < Duration::from_secs(1));
+    assert!(router.saw("youtube"));
+
+    let (_, state, stderr) = guard.stop();
+    assert_eq!(status_value(&state, "route"), "fallback-down");
+    let errors: u64 = status_value(&state, "tls_errors").parse().unwrap();
+    assert!(errors >= 1, "{state}");
+    let fallback: u64 = status_value(&state, "fallback").parse().unwrap();
+    assert!(fallback >= 2, "{state}");
+    assert!(stderr.contains(&format!("tls: connect {down}")), "{stderr}");
+    assert!(
+        stderr.contains("FALLBACK") && stderr.contains("for 10 s"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn tls_never_sends_a_query_to_a_server_it_cannot_check() {
+    let router = Upstream::start(0);
+    let dot = DotServer::start();
+    // The certificate is for dot.lumen.test, not this name.
+    let mut wrong_name = tls_args(dot.addr);
+    wrong_name[3] = "other.lumen.test".to_owned();
+    // Mozilla's roots, which don't hold the test CA.
+    let mut built_in = tls_args(dot.addr);
+    built_in.truncate(4);
+    for (name, mut args, why) in [
+        ("tls-name", wrong_name, "certificate"),
+        ("tls-roots", built_in, "UnknownIssuer"),
+    ] {
+        args.extend(["--tls".to_owned(), "on".to_owned()]);
+        let guard = Guard::start(name, router.addr, &strs(&args));
+        let (q, answer) = guard.ask(0x5000, "www.netflix.com", 1);
+        assert_eq!(answer, canned_answer(&q, 0), "{name}");
+        let (_, state, stderr) = guard.stop();
+        assert_eq!(status_value(&state, "route"), "fallback-down", "{name}");
+        assert_eq!(status_value(&state, "tls_answers"), "0", "{name}");
+        assert!(
+            stderr.contains("handshake with") && stderr.contains(why),
+            "{name}: {stderr}"
+        );
+    }
+    assert!(dot.connections() >= 2);
+    assert!(
+        dot.received().is_empty(),
+        "a query reached an unchecked server"
+    );
+    assert!(router.saw("www"));
+}
+
+#[test]
+fn the_tls_file_switches_the_route() {
+    let router = Upstream::start(0);
+    let dot = DotServer::start();
+    let dir = std::env::temp_dir().join(format!("lumen-guard-it-tls-file-{}", std::process::id()));
+    let mut args = tls_args(dot.addr);
+    args.extend([
+        "--tls-file".to_owned(),
+        dir.join("tls").display().to_string(),
+    ]);
+    let guard = Guard::start("tls-file", router.addr, &strs(&args));
+    assert_eq!(status_value(&guard.status(), "tls"), "off");
+    // Whether a fresh name goes over TLS (else in clear).
+    let n = std::cell::Cell::new(0u16);
+    let over_tls = || {
+        n.set(n.get() + 1);
+        let label = format!("q{}x", n.get());
+        guard.ask(0x6000 + n.get(), &format!("{label}.netflix.com"), 1);
+        assert!(dot.saw(&label) != router.saw(&label), "{label}");
+        dot.saw(&label)
+    };
+    assert!(!over_tls());
+
+    guard.control("tls", "tls\n");
+    eventually("route tls", over_tls);
+    // A trial for another boot is over: clear again.
+    guard.control("tls", "tls 00000000-0000-0000-0000-000000000000\n");
+    eventually("trial over", || !over_tls());
+    guard.control("tls", "tls\n");
+    eventually("route tls again", over_tls);
+    // The undo: the file goes, and so does TLS.
+    guard.remove("tls");
+    eventually("route clear", || !over_tls());
+    let (_, state, stderr) = guard.stop();
+    // Off is not a fallback.
+    assert_eq!(status_value(&state, "fallback"), "0");
+    assert!(
+        stderr.contains("upstream tls, as the TLS file says"),
+        "{stderr}"
+    );
+}
+
+/// Guard's resident memory with TLS on, after bursts of lookups that open
+/// every worker's connection. The B9's figure comes from the TV; this one
+/// keeps G3 from growing unnoticed (privacy.md, "Lumen Guard").
+#[test]
+fn memory_with_tls_stays_small() {
+    let router = Upstream::start(0);
+    let dot = DotServer::start();
+    let mut args = tls_args(dot.addr);
+    args.extend(["--tls".to_owned(), "on".to_owned()]);
+    let guard = Guard::start("tls-rss", router.addr, &strs(&args));
+    // Resident in all, and the part that is Guard's own (heap and stacks)
+    // rather than pages of the binary and the C library.
+    let rss = || {
+        let status = fs::read_to_string(format!("/proc/{}/status", guard.child.id())).unwrap();
+        let kb = |key: &str| {
+            status
+                .lines()
+                .find_map(|l| l.strip_prefix(key))
+                .and_then(|v| v.trim().trim_end_matches("kB").trim().parse::<u64>().ok())
+                .unwrap()
+        };
+        (kb("VmRSS:"), kb("RssAnon:"))
+    };
+    let before = rss();
+    for round in 0..10u16 {
+        let askers: Vec<_> = (0..20u16)
+            .map(|i| {
+                let listen = guard.listen;
+                thread::spawn(move || {
+                    let q = query(round * 100 + i, &format!("r{round}-{i}.netflix.com"), 1);
+                    let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
+                    sock.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                    sock.send_to(&q, listen).unwrap();
+                    let mut buf = [0; 4096];
+                    sock.recv_from(&mut buf).is_ok()
+                })
+            })
+            .collect();
+        for asker in askers {
+            assert!(asker.join().unwrap());
+        }
+    }
+    let after = rss();
+    eprintln!(
+        "lumen-guard with TLS: VmRSS {} kB (RssAnon {} kB) at start, {} kB ({} kB) after 200 lookups over {} connections",
+        before.0,
+        before.1,
+        after.0,
+        after.1,
+        dot.connections()
+    );
+    // G1 measured 940 kB on the B9; a debug build is larger than the TV's.
+    assert!(after.0 < 8 * 1024, "{after:?} kB");
+    assert!(after.1 < 2 * 1024, "{after:?} kB");
+    assert!(router.received().is_empty());
+}

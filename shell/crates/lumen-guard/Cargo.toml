@@ -1,6 +1,6 @@
 [package]
 name = "lumen-guard"
-description = "Lumen Guard: a log-only DNS forwarder for rooted LG webOS TVs"
+description = "Lumen Guard: a DNS forwarder with default deny and DNS over TLS for rooted LG webOS TVs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,6 +10,11 @@ publish = false
 [dependencies]
 # Only in src/sys.rs: DSCP marks, poll, SIGTERM and the local date.
 libc.workspace = true
+# Only in src/dot.rs: DNS over TLS to Quad9 (stage G3). The same rustls,
+# features and ring backend as lumen-remote, so the TV carries one copy;
+# client side, TLS 1.3 only, Mozilla's roots built in.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+webpki-roots = "1.0.11"
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

@@ -150,7 +150,7 @@ From the setting down to the wire; each catches what the one above misses.
 | 5 | Addresses | hard-coded endpoints, public resolvers | iptables `OUTPUT` rules; LG-owned addresses only, never AWS or CDN ranges (the store is on AWS: five us-west-2 addresses) | possible: netfilter measured. Decided: one reject for LG's 156.147.0.0/16 (`LG-NET-KR`) once a capture shows the store doesn't need it |
 | 6 | Identifiers | the MAC inside the TV's IPv6 address | IPv6 off in LG's settings | done 2026-10-28: `ipv6Enable` false, no IPv6 address on `wlan0` |
 | 7 | The home network | other devices reaching the TV's services | iptables `INPUT` rules for ports nobody uses; SSH by key only | port 11111 closed by S1. Decided: 3000/3001, DLNA (1103, 1537, 1551, 1830, 1833, 1973), AirPlay 7000 and HomeKit, one at a time with a casting check; `--syn` for ports inside the ephemeral range |
-| 8 | The ISP | lookups readable on the wire | Guard forwards to Quad9 over DNS over TLS (G3) | decided (P4). Until G3, the Nest's DNS points at Quad9 for the whole house |
+| 8 | The ISP | lookups readable on the wire | Guard forwards to Quad9 over DNS over TLS (G3) | decided (P4). G3 built 2026-11-08 (lane K), off until tried on the TV and the owner's yes. Until then, the Nest's DNS points at Quad9 for the whole house |
 
 Layer 7 matters more on a rooted set. Updates stay blocked (safety rule 8),
 so the TV never gets LG's security fixes. In October 2026 a chain giving
@@ -179,8 +179,15 @@ start, the lookups, the kill switch, a Wi-Fi drop and a hung Guard.
 lumen-guard --listen ADDR:PORT --upstream ADDR:PORT --rules DIR --log DIR --status FILE
             [--mode log|block] [--mode-file FILE] [--owner FILE] [--learn FILE]
             [--dscp N] [--max-log-bytes N]
+            [--tls on|off] [--tls-file FILE] [--tls-server ADDR:PORT]...
+            [--tls-name NAME] [--tls-ca FILE] [--clock-floor UNIX]
 lumen-guard --probe ADDR:PORT [--name NAME]
 ```
+
+**G3 was built on 2026-11-08** (lane K) and is off on the TV until the
+owner's yes: Guard forwards to Quad9 over DNS over TLS, with a logged
+fallback to the router in clear. The "Upstream" bullet below says how; its
+trial plan is under "G3 on the TV".
 
 **G2 was built on 2026-11-08** (lane H) and is off on the TV until the
 owner's yes: blocking by default, the rules in `profiles/guard/`, the
@@ -243,6 +250,60 @@ plan is under "G2 on the TV".
   bytes, TCP answers streamed through in pieces of that size. No cache, no
   recursion. With no answer within 3 s nothing is sent back, and the asker
   retries.
+- **Upstream (G3, P4):** with the owner's TLS switch off, as above: the
+  router, in clear. With it on, what Guard forwards goes to Quad9 over DNS
+  over TLS (RFC 7858): `9.9.9.9:853`, then `149.112.112.112:853`, checked as
+  `dns.quad9.net` against Mozilla's roots built into the binary
+  (webpki-roots), TLS 1.3 only, with rustls and ring on plain blocking
+  sockets (`dot.rs`). Three worker threads take the lookups from a queue of
+  at most 64; each keeps one connection open and reuses it, one query at a
+  time, and closes it after 15 s unused, so at most three connections are
+  open. TLS 1.3 session tickets make a new connection after the first a
+  resumption. A UDP asker gets a TLS answer longer than it can take (512
+  bytes, or its EDNS size) truncated, so it asks again over TCP. A query
+  goes to a server only once its certificate has passed.
+  - **The fallback**, in clear through the router, the same way G2
+    forwards, in two cases only. While the TV's clock reads before
+    2026-11-01 (`--clock-floor`; the B9 boots at 2019-01-01 until LG's
+    time server answers), at once, without trying TLS, so the boot's first
+    lookups, the time server's among them, never wait on it; a certificate
+    refused as expired or not yet valid counts the same. And when Quad9
+    can't be reached or won't complete a checked handshake within 1.5 s:
+    that lookup goes to the router at once, the next tries the other
+    address, and once both have failed, lookups go to the router for 10 s,
+    doubling after each further failure up to 5 min, then TLS is tried
+    again.
+  - **Logged and shown:** Guard's log (the hook's,
+    `/var/lib/lumen/log/lumen-guard.log`) has a line for every failure
+    (`tls: …; this lookup goes in clear through the router`), for the start
+    of each fallback (`FALLBACK: …`, with the reason) and for its end
+    (`upstream tls again after N s of fallback, in which M lookups went in
+    clear`). The status file adds `tls` (the switch), `route` (`tls`,
+    `clear`, `fallback-clock` or `fallback-down`), `tls_server`,
+    `tls_name`, `tls_open`, `tls_answers`, `tls_handshakes`, `tls_errors`,
+    `fallback`, `fallback_today` (lookups sent in clear while the switch was
+    on) and `fallback_since`.
+  - **Only allowed names leave in clear** in block mode, since nothing else
+    is forwarded at all (decision 11). Log mode forwards everything, so its
+    fallback does too: log mode keeps G1's promise that nothing it does
+    changes what resolves.
+  - **The switch** (decision 12): `/var/lib/lumen/guard/tls`, read as the
+    mode file is: `tls` (`guard.sh tls on`, across reboots, the family's
+    yes), `tls <boot id>` (`guard.sh tls trial`, until the next boot), no
+    file or `clear` (`guard.sh tls off`, the undo, within a second).
+  - **Not covered:** what reaches connman rather than Guard (above: its own
+    lookups, its online check, and programs started before the mount)
+    still goes to the router in clear, unlogged, as in G1. No EDNS padding
+    (RFC 8467) is added, since Guard passes queries through unchanged.
+  - **Tested** in `cargo test` against a local rustls server with a test
+    certificate (`tests/fixtures/dot`), never the real Quad9: answers over
+    TLS and connection reuse, the truncated UDP answer and its TCP retry,
+    block mode keeping blocked names off TLS, the fallback for the clock and
+    for a server that is down, no query sent to a server whose certificate
+    has the wrong name or an unknown issuer, the switch file, and the
+    memory below. By hand from the PC on 2026-11-08: four lookups through
+    the real Quad9 (`dns.quad9.net`, Mozilla's roots) answered in 21 to
+    75 ms, with no fallback.
 - **Rules (G2, decision 11):** a name resolves only when a rule allows it.
   [profiles/guard/](../../profiles/guard/README.md) holds `allowlist.txt`
   (the generic list: the store, DRM, the paid apps, casting and Lumen's
@@ -363,13 +424,29 @@ plan is under "G2 on the TV".
   then prints connman's file. After that, `tools/guard.sh install` adds the
   hook and `remove` takes it away. `tools/uninstall-all.sh` runs
   `guard-undo.sh` before it deletes `/var/lib/lumen`.
-- **Small surface:** about 2,500 lines of Rust besides its tests, doc
-  comments included (G1 was about 1,400): `std`, and the `libc` crate in one
-  module (`sys.rs`: the DSCP mark, `poll`, SIGTERM, the local date, the
-  effective uid and the `getauxval` shim), with `unsafe` denied everywhere
-  else. Two threads, UDP and TCP; under 4 MB resident was the target, and
-  the B9 measured 940 kB for G1 on 2026-10-31. G2's rules add about 1,000
-  names in hash tables; its memory on the TV is not measured yet.
+- **Small surface:** about 3,500 lines of Rust besides its tests, doc
+  comments included (G1 was about 1,400, G2 about 2,500): `std`, and the
+  `libc` crate in one module (`sys.rs`: the DSCP mark, `poll`, SIGTERM, the
+  local date, the effective uid and the `getauxval` shim), with `unsafe`
+  denied everywhere else; for G3, rustls (with ring, rustls-webpki,
+  rustls-pki-types, untrusted, subtle, zeroize, getrandom, once_cell and
+  cfg-if under it) and webpki-roots in one module (`dot.rs`), no async
+  runtime. rustls and ring are the same versions and features as
+  `lumen-remote`'s (R4), one copy of each in `Cargo.lock`. Five threads: UDP, TCP and three TLS workers. Under 4 MB
+  resident was the target, and the B9 measured 940 kB for G1 on
+  2026-10-31. G2's rules add about 1,000 names in hash tables; G2's and
+  G3's memory on the TV are not measured yet.
+- **Size, measured 2026-11-08** (not on the TV): the armv7 binary
+  (`tools/dev.sh make guard`, stripped) is 1,297,584 bytes, against
+  453,800 for G2; rustls, ring and Mozilla's roots are the difference. It
+  needs nothing newer than glibc 2.12, and ring's `getrandom` is a weak
+  symbol, so on the B9's glibc 2.24 it falls back to the system call. On
+  the PC (x86_64, release builds, the shipped rules, 100 lookups): G2
+  2,536 kB resident; G3 with TLS off 3,412 kB, nearly all of it pages of
+  the binary and the C library, with 96 kB its own (anonymous). With TLS on
+  (`memory_with_tls_stays_small`, 200 lookups in bursts over three
+  connections): 3,844 kB resident, 332 kB of it anonymous, 52 kB more than
+  at start with one connection. The B9's figure comes from the trial.
 - **The same rules on the PC:** `tools/guard/rules.py` decides as
   `rules.rs` does (`tools/tests/test_guard_rules.py` holds both to the
   cases in `tools/tests/fixtures/guard-g2`). `tools/guard.sh log` shows
@@ -382,10 +459,10 @@ plan is under "G2 on the TV".
 | Suffix rules | no | yes | yes |
 | Record of blocked names | no | in syslog | its own log |
 | Catches programs with their own resolver | no | with the same nat rule | with the nat rule |
-| Encrypted upstream | no | no | yes (G3) |
+| Encrypted upstream | no | no | yes (G3), with a logged fallback |
 | Counts for the shell | no | by parsing logs | yes |
 | Reads `allowlist.txt` as it is | through a converter | through a converter | yes |
-| New code running as root | none | none, but another C parser of network input | about 2,500 lines of Rust |
+| New code running as root | none | none, but another C parser of network input | about 3,500 lines of Rust, and rustls with ring |
 
 ### G2 on the TV
 
@@ -439,6 +516,73 @@ tiers):
 Not built in G2 yet: the `OUTPUT` reject for 156.147.0.0/16, which waits
 for a capture that shows the store doesn't need it.
 
+### G3 on the TV
+
+Built and tested off the TV on 2026-11-08 (lane K, "Upstream" above).
+Nothing of it has run on the TV. It runs after G2's trial: G3's binary is
+G2's plus TLS, and with no TLS file it forwards as G2 does. Each step with
+its undo; the TV steps are tier B, in the night window (nothing lights the
+panel), and the family's switch is tier C.
+
+1. **PC only.** `tools/dev.sh make check`, then `tools/dev.sh make guard`
+   (`dist/guard/`, with webpki-roots' licence beside the binary).
+2. **Tier A.** `tools/backup.sh`.
+3. **Tier B.** `tools/guard.sh push`: the G3 binary, the rules and the
+   hook's inert copy (which now passes `--tls-file`). The running Guard is
+   untouched. Undo: push from a checkout without G3.
+4. **Tier B.** Restart Guard on it: `guard-undo.sh`, then `guard-apply.sh`.
+   `tools/guard.sh status`: `TLS file: none`, `tls off`, `route clear`,
+   and the mode G2's trial left. Guard's `VmRSS` (`/proc/<pid>/status`).
+   Undo: `guard-undo.sh`, or a reboot (the installed hook then starts the
+   binary as before, without the TLS file).
+5. **Tier B.** `tools/guard.sh tls trial` (TLS until the next boot). Within
+   a second: `route tls`; then `tools/tv.sh run 'getent hosts
+   us.lgtvsdp.com'` resolves, `tls_answers` grows, `fallback 0`, and the
+   log says `upstream tls`. Time a lookup on the TV (`time
+   /var/lib/lumen/guard/lumen-guard --probe 127.0.0.2:53 --name
+   www.netflix.com`) against the same with TLS off. After 10 minutes of the
+   TV's own lookups, `VmRSS` again, and `tls_open` at most 3. Undo:
+   `tools/guard.sh tls off` (within a second), or a reboot.
+6. **Tier B, same window.** Quad9 unreachable: `tools/tv.sh run 'iptables
+   -I OUTPUT -p tcp --dport 853 -j REJECT'`. A lookup still resolves
+   (through the router), `route fallback-down`, the log has `tls: connect
+   9.9.9.9:853`, then `149.112.112.112:853`, then `FALLBACK: … for 10 s`.
+   Then `tools/tv.sh run 'iptables -D OUTPUT -p tcp --dport 853 -j
+   REJECT'`: within the backoff, `route tls` and `upstream tls again after
+   N s of fallback, in which M lookups went in clear`. Undo: the `-D`
+   command, or a reboot.
+7. **Tier B, same window.** The clock, without touching the TV's: a second
+   Guard on a spare loopback port that believes the clock is wrong,
+   `tools/tv.sh run 'd=/var/lib/lumen/guard/g3-clock; mkdir -p $d &&
+   (/var/lib/lumen/guard/lumen-guard --listen 127.0.0.2:5354 --upstream
+   <router>:53 --rules /var/lib/lumen/guard/rules --log $d --status $d/status
+   --tls on --clock-floor 4102444800 2>$d/err & echo $! >$d/pid); sleep 1;
+   /var/lib/lumen/guard/lumen-guard --probe 127.0.0.2:5354; kill $(cat
+   $d/pid); sleep 1; cat $d/err; grep -E "^(route|fallback)" $d/status'`:
+   an answer, `route fallback-clock`, and a `FALLBACK` line naming the
+   clock. Undo: `tools/tv.sh run 'rm -r /var/lib/lumen/guard/g3-clock'`.
+8. **Tier A, same window.** What leaves the TV: `tools/capture.sh start
+   1`, the TV's lookups for a few minutes, `stop`, `fetch`, and
+   `tools/capture/summarize.py`. Port 853 goes only to Quad9; port 53 goes
+   to the router only from what reaches connman rather than Guard
+   ("Upstream", not covered), and from Guard only during step 6's
+   fallback. `tools/capture.sh clean` afterwards.
+9. **End of the window.** `tools/guard.sh tls off` before 06:00, so the
+   family's daytime runs as G2 until the owner's yes; a real remote press
+   does the same when the run yields.
+10. **Tier B, after a backup.** `tools/guard.sh install` (the G3 hook,
+    passing `--tls-file`; with no TLS file it runs as G2), a reboot over
+    SSH, then a cold boot: the hook starts Guard with the TLS file absent,
+    `route clear`. Undo: `tools/guard.sh remove`, then install from a
+    checkout without G3.
+11. **Tier C: the owner's one yes.** `tools/guard.sh tls on`, with steps 4
+    to 8's results (the lookup times, the memory, the fallback's log lines,
+    the capture). After the next cold boot, the log shows the clock
+    fallback (`FALLBACK: … the clock (1546…) reads before 1793491200`) and
+    its end (`upstream tls again after N s …`) once LG's time server has
+    answered; Netflix, YouTube, Plex and casting work. Undo: `tools/guard.sh
+    tls off`.
+
 ## Stages
 
 Each is undone by a reboot until it becomes a boot hook, and each ends with
@@ -452,7 +596,7 @@ Each is undone by a reboot until it becomes a boot hook, and each ends with
 | G1 | Guard, log only: forwards everything | a week of names across power-offs, summarised like the capture. Built 2026-10-30 (`shell/crates/lumen-guard`, `profiles/privacy/lumen-guard`, `tools/guard.sh`). The redirect design was tried by hand on the B9 on 2026-10-31 and failed open as designed. The hook was rebuilt around `resolv.conf`, a design proven by hand the same day. The new hook passed its by-hand run on 2026-10-31 15:25 to 15:54 UTC: one read-only mount, both rules, 940 kB resident, Netflix's own resolver (8.8.8.8) caught by the rules, the kill switch failing open in 5 s, a Wi-Fi drop survived, a hung Guard failing open in 2 min 51 s, nothing left after `guard-undo.sh`. P11 decided and tried by hand the same day; the hook now names connman second. **Installed** after a backup (`Lumen-backups/20261031T160857Z`): `tools/guard.sh install` at 16:10 UTC (hook SHA-256 `75d2ae6d…`), then a reboot over SSH at 16:10:51. The hook started 37 s into the boot and Guard was answering a second later: both nameserver lines, the read-only mount, both rules, 104 lookups in its first 90 s with no upstream error or timeout; S1's hook ran alongside as before. After that boot the owner checked Netflix, YouTube and casting: all work. The week of log runs from 2026-10-31 16:11 UTC. **Reinstalled** with its log in `/var/lib/lumen/log` rather than `/tmp`, after the same backup as S1's (`20261031T170258Z`): `tools/guard.sh install` at 17:07 UTC (hook SHA-256 `3ca099ec…`, binary `bcb81e80…`); its one run found Guard running and did nothing. After a reboot at 17:09:56 UTC, Guard started from the new binary at 17:10:29 with both nameserver lines, the mount and both rules, and answered 43 lookups in its first minute with no upstream error or timeout. Its log is in a `drwx------` folder of root's, and nothing of Lumen's was left in `/tmp`. The owner's check passed again, and the week of log goes on (the lookup log was kept) |
 | S2 | S1's additions (decision 11), each after a read-only look at its values: LG's ACR consent flags off (`acrOnAllowed`, `acrAdAllowed`, `additional1Allowed`) and `acr2` held down from boot; UEI's `iconnectivity` held down by a do-nothing stand-in mounted over it in RAM; the `INPUT` rules for 3000/3001, the DLNA ports, 7000 and HomeKit, one at a time | each checked with casting, Netflix and the store; then folded into `lumend` (decision 14) |
 | G2 | Guard blocks by default (decision 11): only the allowlist resolves; suffix carve-outs from Lumen's measured names and the imported lists (hagezi, Perflyst, Glasshouse's names, each in its own file with its license); learning windows started from the owner's devices; the owner's own additions kept off the public repository; `OUTPUT` reject for 156.147.0.0/16 once a capture clears it | the store-safe check and the checklist pass, also after a cold boot; a learning window adds and drops a name. **Built 2026-11-08** off the TV (lane H): block mode, `profiles/guard/`, the owner's file, learning windows and the mode switch, `store-safe-check.sh --stage 5`; tested in `cargo test` and the tool tests, not yet on the TV ("G2 on the TV"). The address rule is not built |
-| G3 | Encrypted upstream (P4): Quad9 over DNS over TLS (`dns.quad9.net`), rustls with ring and webpki-roots on a plain socket. Clear through the router only while the clock is implausible after a power cut or Quad9 is unreachable, logged and shown | lookups leave the TV only to Quad9, except the logged fallback |
+| G3 | Encrypted upstream (P4): Quad9 over DNS over TLS (`dns.quad9.net`), rustls with ring and webpki-roots on a plain socket. Clear through the router only while the clock is implausible after a power cut or Quad9 is unreachable, logged and shown | lookups leave the TV only to Quad9, except the logged fallback. **Built 2026-11-08** off the TV (lane K): the TLS upstream, its fallback and the owner's switch (`tools/guard.sh tls`); tested in `cargo test` against a local TLS server and by hand against Quad9 from the PC; armv7 binary 1,297,584 bytes; not yet on the TV ("G3 on the TV"). What reaches connman rather than Guard still goes to the router in clear |
 | G4 | Senders stopped, one job per check | each job's effect is recorded; the checklist passes |
 | G5 | Privacy panel in the shell, read-only (decision 12): what is blocked, what was denied, each layer's state, the fallback if used | the owner sees today's blocked and denied names and counts on the TV, and nothing on the TV can loosen them |
 

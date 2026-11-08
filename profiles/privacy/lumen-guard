@@ -1,10 +1,11 @@
 #!/bin/sh
-# Lumen Guard, stage G2 (docs/specs/privacy.md, "Lumen Guard"), as a Homebrew
+# Lumen Guard, stage G3 (docs/specs/privacy.md, "Lumen Guard"), as a Homebrew
 # Channel boot hook: /var/lib/webosbrew/init.d/lumen-guard (run-parts allows no
 # dot in the name). At each boot it starts lumen-guard, a DNS forwarder that
 # logs every lookup it gets to /var/lib/lumen/guard/lookups.log with its
 # rules' verdict, and blocks only while the owner's mode file says so
-# (tools/guard.sh block). Once Guard answers, the hook points the TV's
+# (tools/guard.sh block), forwarding over TLS only while the owner's TLS file
+# says so (tools/guard.sh tls). Once Guard answers, the hook points the TV's
 # resolver at it: a file naming 127.0.0.2, then
 # connman's 127.0.0.1, is bind mounted over connman's /var/lib/misc/resolv.conf,
 # which /etc/resolv.conf links to. Two nat rules also send Guard the lookups programs make to other
@@ -212,12 +213,15 @@ OUT=$(log_to)
             ;;
     esac
 
-    # The owner's files (tools/guard.sh block, owner, learn): Guard reads
-    # each within a second of a change and only if it is root's alone. With
-    # no mode file it only logs.
+    # The owner's files (tools/guard.sh block, owner, learn, tls): Guard
+    # reads each within a second of a change and only if it is root's alone.
+    # With no mode file it only logs; with no TLS file it forwards to the
+    # router in clear (G3: with `tls` in it, to Quad9 over TLS, the router
+    # then only the fallback while the clock is wrong or Quad9 is down).
     "$BIN" --listen "$LISTEN" --upstream "$up:53" --rules "$DIR/rules" \
         --log "$DIR" --status "$DIR/status" --dscp "$DSCP" \
-        --mode-file "$DIR/mode" --owner "$DIR/owner.txt" --learn "$DIR/learn" &
+        --mode-file "$DIR/mode" --owner "$DIR/owner.txt" --learn "$DIR/learn" \
+        --tls-file "$DIR/tls" &
     pid=$!
     echo "$pid" >"$PIDFILE"
     say "Guard started (pid $pid), upstream $up:53"

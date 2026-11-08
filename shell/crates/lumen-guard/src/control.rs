@@ -1,5 +1,9 @@
-//! The three files through which only the owner changes a running Guard
+//! The four files through which only the owner changes a running Guard
 //! (decision 12), read again whenever they change, within a second:
+//!
+//! * the TLS file (`--tls-file`, stage G3): `tls` sends what Guard forwards
+//!   to the TLS server; `tls <boot id>` does until the next boot only;
+//!   `clear` sends it to the router as G1 and G2 did. With no file, `--tls`.
 //!
 //! * the mode file (`--mode-file`): `block` blocks; `block <boot id>`
 //!   blocks until the next boot only, for a trial that a reboot undoes;
@@ -122,22 +126,38 @@ impl Watched {
     }
 }
 
-/// What the mode file says, given this boot's id.
-pub fn parse_mode(text: &str, boot_id: Option<&str>) -> Result<Mode, String> {
+/// A switch file: `on`, `on <boot id>` (this boot only, so a reboot ends a
+/// trial), or `off`, in the words given; a trial for another boot is `off`.
+fn parse_switch<T: Copy>(
+    text: &str,
+    boot_id: Option<&str>,
+    (on_word, on): (&str, T),
+    (off_word, off): (&str, T),
+) -> Result<T, String> {
     let mut words = text.split_whitespace();
-    let mode = match words.next() {
-        Some("block") => Mode::Block,
-        Some("log") => Mode::Log,
-        Some(other) => return Err(format!("unknown mode {other:?}")),
+    let value = match words.next() {
+        Some(w) if w == on_word => on,
+        Some(w) if w == off_word => off,
+        Some(other) => return Err(format!("unknown word {other:?}")),
         None => return Err("empty".to_owned()),
     };
     match (words.next(), words.next()) {
-        (None, _) => Ok(mode),
-        (Some(id), None) if Some(id) == boot_id => Ok(mode),
+        (None, _) => Ok(value),
+        (Some(id), None) if Some(id) == boot_id => Ok(value),
         // For another boot: the trial it was written for is over.
-        (Some(_), None) => Ok(Mode::Log),
-        (Some(_), Some(_)) => Err("more than a mode and a boot id".to_owned()),
+        (Some(_), None) => Ok(off),
+        (Some(_), Some(_)) => Err("more than a word and a boot id".to_owned()),
     }
+}
+
+/// What the mode file says, given this boot's id.
+pub fn parse_mode(text: &str, boot_id: Option<&str>) -> Result<Mode, String> {
+    parse_switch(text, boot_id, ("block", Mode::Block), ("log", Mode::Log))
+}
+
+/// What the TLS file says (G3): `tls`, `tls <boot id>` or `clear`.
+pub fn parse_tls(text: &str, boot_id: Option<&str>) -> Result<bool, String> {
+    parse_switch(text, boot_id, ("tls", true), ("clear", false))
 }
 
 /// A learning window, `<start> <end>`, at most `MAX_WINDOW` long.
@@ -174,11 +194,19 @@ pub struct Control {
     watch_mode: Watched,
     watch_owner: Watched,
     watch_learn: Watched,
+    /// From `--tls`, when there is no TLS file.
+    default_tls: bool,
+    /// Whether lookups go to the TLS server (G3), as the files ask.
+    tls: bool,
+    watch_tls: Watched,
 }
 
 impl Control {
-    pub fn new(default_mode: Mode) -> Self {
+    pub fn new(default_mode: Mode, default_tls: bool) -> Self {
         Self {
+            default_tls,
+            tls: default_tls,
+            watch_tls: Watched::default(),
             default_mode,
             wanted: default_mode,
             refused: None,
@@ -199,6 +227,31 @@ impl Control {
             Mode::Log
         } else {
             self.wanted
+        }
+    }
+
+    /// Whether the owner's switch sends lookups over TLS.
+    pub fn tls(&self) -> bool {
+        self.tls
+    }
+
+    /// Reads the TLS file again if it changed; returns what to say.
+    pub fn poll_tls(&mut self, path: &Path) -> Option<String> {
+        let (tls, why) = match self.watch_tls.poll(path) {
+            Change::Same => return None,
+            Change::Gone => (self.default_tls, None),
+            Change::Now(Ok(text)) => match parse_tls(&text, self.boot_id.as_deref()) {
+                Ok(tls) => (tls, None),
+                Err(why) => (self.default_tls, Some(format!("{}: {why}", path.display()))),
+            },
+            Change::Now(Err(why)) => (self.default_tls, Some(format!("TLS file not read: {why}"))),
+        };
+        let changed = tls != self.tls;
+        self.tls = tls;
+        let word = if tls { "tls" } else { "clear" };
+        match why {
+            Some(why) => Some(format!("{why}; upstream {word}")),
+            None => changed.then(|| format!("upstream {word}, as the TLS file says")),
         }
     }
 
@@ -397,6 +450,47 @@ mod tests {
     }
 
     #[test]
+    fn the_tls_switch_and_boot_ids() {
+        let id = Some("abc");
+        assert_eq!(parse_tls("tls\n", id), Ok(true));
+        assert_eq!(parse_tls("clear", id), Ok(false));
+        assert_eq!(parse_tls("tls abc", id), Ok(true));
+        assert_eq!(parse_tls("tls old", id), Ok(false));
+        assert!(parse_tls("block", id).is_err());
+        assert!(parse_tls("", id).is_err());
+    }
+
+    #[test]
+    fn follows_the_tls_file() {
+        let dir = temp_dir("tls");
+        let path = dir.join("tls");
+        let mut c = Control::new(Mode::Log, false);
+        assert_eq!(c.poll_tls(&path), None);
+        assert!(!c.tls());
+        write(&path, "tls\n");
+        assert!(c.poll_tls(&path).unwrap().contains("upstream tls"));
+        assert!(c.tls());
+        assert_eq!(c.poll_tls(&path), None);
+        // Writable by others: it doesn't count, and --tls says.
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
+        assert!(c.poll_tls(&path).unwrap().contains("writable by others"));
+        assert!(!c.tls());
+        write(&path, "tls\n");
+        c.poll_tls(&path);
+        assert!(c.tls());
+        fs::remove_file(&path).unwrap();
+        assert!(c.poll_tls(&path).unwrap().contains("upstream clear"));
+        assert!(!c.tls());
+        // --tls on and no file: on; a file saying clear turns it off.
+        let mut c = Control::new(Mode::Log, true);
+        assert!(c.tls());
+        write(&path, "clear\n");
+        c.poll_tls(&path);
+        assert!(!c.tls());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn windows() {
         assert_eq!(parse_window("100 1000\n"), Ok((100, 1000)));
         assert!(parse_window("100 100").is_err());
@@ -411,7 +505,7 @@ mod tests {
         let dir = temp_dir("mode");
         let (mode, owner) = (dir.join("mode"), dir.join("owner.txt"));
         let rules = store_rules();
-        let mut c = Control::new(Mode::Log);
+        let mut c = Control::new(Mode::Log, false);
         let poll = |c: &mut Control| c.poll(&rules, Some(&mode), Some(&owner), None, 0);
         assert!(poll(&mut c).is_empty());
         assert_eq!(c.mode(), Mode::Log);
@@ -447,7 +541,7 @@ mod tests {
         write(&mode, "block\n");
         fs::set_permissions(&mode, fs::Permissions::from_mode(0o666)).unwrap();
         let rules = store_rules();
-        let mut c = Control::new(Mode::Log);
+        let mut c = Control::new(Mode::Log, false);
         let said = c.poll(&rules, Some(&mode), None, None, 0);
         assert_eq!(c.mode(), Mode::Log);
         assert!(
@@ -473,7 +567,7 @@ mod tests {
         let dir = temp_dir("learn");
         let learn = dir.join("learn");
         let rules = store_rules();
-        let mut c = Control::new(Mode::Block);
+        let mut c = Control::new(Mode::Block, false);
         write(&learn, "1000 1900\n");
         // Before the window (the clock is behind): nothing learned.
         c.poll(&rules, None, None, Some(&learn), 999);

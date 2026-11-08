@@ -1,9 +1,10 @@
 #!/bin/sh
 # Installs, checks or removes Lumen Guard on the TV, and is the owner's way
 # to change a running Guard (docs/specs/privacy.md, "Lumen Guard"; decision
-# 12: only the owner, from the PC, loosens the TV). Stage G2: Guard decides
+# 12: only the owner, from the PC, loosens the TV). Stage G3: Guard decides
 # every name by profiles/guard's rules and the owner's own file; it blocks
-# only once the owner switches blocking on.
+# only once the owner switches blocking on, and forwards to Quad9 over TLS
+# only once the owner switches TLS on.
 # Build the binary first: tools/dev.sh make guard
 #
 #   tools/guard.sh status    whether the hook and binary are installed and
@@ -33,6 +34,14 @@
 #   tools/guard.sh block on      block from now on, across reboots: the
 #                                family's yes (tier C)
 #   tools/guard.sh block off     log only, as G1 did
+#   tools/guard.sh tls trial     forward to Quad9 over DNS over TLS until the
+#                                TV next boots (a reboot is the undo, as is
+#                                `tls off`); the router only as the logged
+#                                fallback while the clock is wrong or Quad9
+#                                can't be reached (stage G3)
+#   tools/guard.sh tls on        the same across reboots: the family's yes
+#                                (tier C)
+#   tools/guard.sh tls off       forward to the router in clear, as G2 did
 #   tools/guard.sh learn [MIN]   open a learning window of MIN minutes (default
 #                                15, at most 60): names no rule covers resolve,
 #                                and are logged as learned. One at a time
@@ -194,6 +203,7 @@ cmd_status() {
         if [ -f $dir/lumen-guard ]; then echo "on the TV:    binary $(sha256sum < $dir/lumen-guard | cut -d" " -f1)"; else echo "on the TV:    no binary"; fi
         if [ -f $dir/owner.txt ]; then echo "on the TV:    owner file $(sha256sum < $dir/owner.txt | cut -d" " -f1)"; else echo "on the TV:    no owner file"; fi
         if [ -f $dir/mode ]; then echo "mode file: $(cat $dir/mode)"; else echo "mode file: none (log only)"; fi
+        if [ -f $dir/tls ]; then echo "TLS file: $(cat $dir/tls)"; else echo "TLS file: none (the router, in clear)"; fi
         pid=$(cat $dir/lumen-guard.pid 2>/dev/null)
         if [ -n "$pid" ] && tr "\0" " " 2>/dev/null </proc/$pid/cmdline | grep -q "lumen-guard --listen"; then echo "Guard: running, pid $pid"; else echo "Guard: not running"; fi
         grep -H "^nameserver" /etc/resolv.conf || echo "/etc/resolv.conf names no nameserver"
@@ -270,6 +280,29 @@ cmd_block() {
         *) die "usage: tools/guard.sh block on|trial|off" ;;
     esac
     echo "a running Guard reads it within a second (tools/guard.sh status: mode, block_refused)"
+}
+
+cmd_tls() {
+    case ${1:-} in
+        on)
+            write_control tls tls
+            echo "Quad9 over TLS from now on, across reboots; tools/guard.sh tls off undoes it"
+            ;;
+        trial)
+            id=$("$TV" run "cat /proc/sys/kernel/random/boot_id" </dev/null | tr -d '\r')
+            case $id in
+                '' | *[!0-9a-f-]*) die "no boot id from the TV ('$id')" ;;
+            esac
+            write_control tls "tls $id"
+            echo "Quad9 over TLS until the TV next boots; tools/guard.sh tls off, or a reboot, undoes it"
+            ;;
+        off)
+            "$TV" run "rm -f $DIR/tls" </dev/null || die "could not remove $DIR/tls on the TV"
+            echo "TLS off: Guard forwards to the router in clear"
+            ;;
+        *) die "usage: tools/guard.sh tls on|trial|off" ;;
+    esac
+    echo "a running Guard reads it within a second (tools/guard.sh status: tls, route, fallback)"
 }
 
 cmd_learn() {
@@ -410,6 +443,7 @@ case ${1:-} in
     remove) cmd_remove ;;
     log) cmd_log ;;
     block) cmd_block "${2:-}" ;;
+    tls) cmd_tls "${2:-}" ;;
     learn) cmd_learn "${2:-15}" ;;
     learned) cmd_learned ;;
     keep) shift; cmd_keep "$@" ;;

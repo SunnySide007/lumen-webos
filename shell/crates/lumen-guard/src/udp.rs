@@ -1,5 +1,7 @@
 //! The UDP side, on the main thread. A query the rules refuse in block mode
-//! gets Guard's own answer at once. Every other query goes upstream on a
+//! gets Guard's own answer at once. A query the TLS route takes goes to the
+//! TLS workers (dot.rs), which answer it from a copy of the listening socket.
+//! Every other query goes upstream on a
 //! socket of its own (a fresh source port, the DSCP mark), and the first
 //! datagram back with the query's ID goes to the asker unchanged. No answer
 //! within 3 s and nothing is sent back: the asker retries. The loop also
@@ -9,10 +11,13 @@
 use std::io::{self, ErrorKind};
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::os::fd::AsFd;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::dot::{Job, Reply};
 use crate::guard::{Action, Guard, Throttle};
 use crate::sys::{self, Interest, Poller};
+use crate::upstream::Route;
 use crate::wire::{self, MAX_MESSAGE};
 
 /// Queries waiting for the upstream at once; more are dropped (and retried).
@@ -49,6 +54,8 @@ pub fn serve(guard: &Guard, listen: &UdpSocket) -> io::Result<()> {
     let mut status_errors = Throttle::new("status file");
     let mut receive_errors = Throttle::new("udp receive");
     let mut upstream_errors = Throttle::new("udp upstream");
+    // The TLS workers answer from the listening socket too.
+    let reply = Arc::new(listen.try_clone()?);
 
     while !sys::stopping() {
         let now = Instant::now();
@@ -120,6 +127,23 @@ pub fn serve(guard: &Guard, listen: &UdpSocket) -> io::Result<()> {
                     let _ = listen.send_to(&answer, client);
                     continue;
                 }
+                let route = guard.route();
+                if route == Route::Tls {
+                    let job = Job {
+                        msg: msg.to_vec(),
+                        reply: Reply::Udp {
+                            sock: Arc::clone(&reply),
+                            client,
+                            limit: wire::udp_limit(msg),
+                        },
+                        deadline: Instant::now() + UPSTREAM_TIMEOUT,
+                    };
+                    if !guard.queue.push(job) {
+                        guard.upstream_error();
+                    }
+                    continue;
+                }
+                guard.went_clear(route);
                 if pending.len() >= MAX_PENDING {
                     guard.upstream_error();
                     continue;
