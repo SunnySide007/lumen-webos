@@ -310,18 +310,22 @@ look: "<word>" is not a feature; left out
 ```
 
 * The first, once at start-up, before SDL starts: the Phase 4 features this
-  run has. All are on unless the launch parameters' `"look"` says otherwise,
-  in words applied in order: `{"look":"plain"}` turns every one off (the
-  home screen as before Phase 4), `{"look":"-dither,-tilt"}` those two,
-  `{"look":"plain,hero"}` leaves the hero alone on, and `full` turns
-  everything on again. Before the home (2026-11-08) the line ended
+  run has. All but the dither are on (`Look::DEFAULT`, since 2026-11-08:
+  the dither cost the B9 about 12.5 ms a frame) unless the launch
+  parameters' `"look"` says otherwise, in words applied in order:
+  `{"look":"plain"}` turns every one off (the home screen as before
+  Phase 4), `{"look":"-tilt,-light"}` those two, `{"look":"plain,hero"}`
+  leaves the hero alone on, `{"look":"dither"}` adds the dither, and `full`
+  turns everything on, the dither too. Before the home (2026-11-08) the line ended
   `; art <full|half> size` and had no `shadow` or `sheen`; `half` is now an
   unknown word. Before the Control Center (2026-11-08) it ended at `sheen`.
   `tools/frame-stats.sh` reads all three forms.
   `tools/tv.sh launch <app id> '<json>'` passes them (close the shell
   first: a running app is not started again); a Home press passes LG's
-  own, which have no `"look"`, so the full look. `tools/sim.ps1 -Look`
-  does the same on the PC.
+  own, which have no `"look"`, so the default look. `tools/sim.ps1 -Look`
+  does the same on the PC. `tools/bench/looks.sh` passes no `"look"` for
+  its `full`, so on builds since the default changed its `full` runs are
+  the default; `{"look":"full"}` is the look with the dither.
 * The second, for each word that names no feature, or a `"look"` that is
   not text: it changes nothing. A typo must never keep the TV's Home from
   starting.
@@ -453,8 +457,9 @@ These cost little or nothing per frame and do the most for the look:
    everything those quads cover; where the time goes is not measured yet.
    Until it is made cheap (a small dither texture in place of the
    arithmetic, or one pass over the finished frame), the default look
-   should leave it off; the home's branch owns the look switches and makes
-   that change.
+   leaves it off: `Look::DEFAULT`, on the home's branch since 2026-11-08.
+   `{"look":"dither"}` or `full` turns it on, for a pair against the
+   default.
 3. **Kerning.** Inter wasn't kerned: fontdue reads kerning only from a `kern`
    table, and Inter keeps it in GPOS. The 72 px shelf title shows it most.
    Done on 2026-10-23 (e823515): the pairs are pulled out of GPOS ahead of

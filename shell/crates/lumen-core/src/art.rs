@@ -178,7 +178,16 @@ pub struct Look {
 }
 
 impl Look {
-    /// Every effect on: the default.
+    /// The default, what a Home press gets (LG's launch parameters have no
+    /// `"look"`): every effect but the dither, which cost the B9 about
+    /// 12.5 ms a frame and half its frame rate (docs/device/bench.md,
+    /// "Measured", 2026-11-08).
+    pub const DEFAULT: Self = Self {
+        dither: false,
+        ..Self::FULL
+    };
+
+    /// Every effect on, the dither too.
     pub const FULL: Self = Self {
         hero: true,
         dither: true,
@@ -207,15 +216,15 @@ impl Look {
         dim: false,
     };
 
-    /// Reads a look such as `plain`, `-dither,-tilt` or `plain,+hero`, from
-    /// the full look: words split by commas or spaces, applied in order.
+    /// Reads a look such as `plain`, `-tilt,-light` or `plain,+hero`, from
+    /// the default look: words split by commas or spaces, applied in order.
     /// `plain` turns every effect off and `full` every one on; an effect's
     /// name turns it on, or off after a `-`, and a `+`
     /// before it changes nothing. Also returns the words that name nothing,
     /// which change nothing either: a typo must not keep the TV's Home from
     /// starting.
     pub fn parse(text: &str) -> (Self, Vec<String>) {
-        let mut look = Self::FULL;
+        let mut look = Self::DEFAULT;
         let mut unknown = Vec::new();
         for word in text
             .split(|c: char| c == ',' || c.is_whitespace())
@@ -256,7 +265,7 @@ impl Look {
 
 impl Default for Look {
     fn default() -> Self {
-        Self::FULL
+        Self::DEFAULT
     }
 }
 
@@ -477,11 +486,21 @@ mod tests {
     }
 
     #[test]
-    fn a_look_is_full_unless_turned_off() {
-        assert_eq!(Look::parse(""), (Look::FULL, vec![]));
-        assert_eq!(Look::default(), Look::FULL);
+    fn a_look_is_everything_but_the_dither_unless_it_says() {
+        assert_eq!(Look::parse(""), (Look::DEFAULT, vec![]));
+        assert_eq!(Look::default(), Look::DEFAULT);
+        assert_eq!(
+            Look {
+                dither: true,
+                ..Look::DEFAULT
+            },
+            Look::FULL
+        );
+        assert_eq!(Look::parse("dither").0, Look::FULL);
+        assert_eq!(Look::parse("full").0, Look::FULL);
+        assert_eq!(Look::parse("-dither").0, Look::DEFAULT);
         assert_eq!(Look::parse("plain").0, Look::PLAIN);
-        let (look, unknown) = Look::parse("-dither,-tilt");
+        let (look, unknown) = Look::parse("full,-dither,-tilt");
         assert!(unknown.is_empty());
         assert_eq!(
             look,
@@ -505,17 +524,17 @@ mod tests {
         assert_eq!(Look::parse("plain,full").0, Look::FULL);
         let (look, _) = Look::parse("-fade,-slide,-dim");
         assert!(!look.fade && !look.slide && !look.dim && look.tilt);
-        assert_eq!(Look::parse("-light,light").0, Look::FULL, "in order");
+        assert_eq!(Look::parse("-light,light").0, Look::DEFAULT, "in order");
     }
 
     #[test]
     fn words_that_name_nothing_change_nothing() {
-        let (look, unknown) = Look::parse("-dither,sparkle,-plain,-full,");
+        let (look, unknown) = Look::parse("-tilt,sparkle,-plain,-full,");
         assert_eq!(
             look,
             Look {
-                dither: false,
-                ..Look::FULL
+                tilt: false,
+                ..Look::DEFAULT
             }
         );
         assert_eq!(unknown, ["sparkle", "-plain", "-full"]);

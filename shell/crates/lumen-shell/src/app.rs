@@ -204,7 +204,7 @@ impl Options {
                 (self.look, self.look_unknown) = Look::parse(text);
             }
             Some(other) => {
-                self.look = Look::FULL;
+                self.look = Look::DEFAULT;
                 self.look_unknown = vec![other.to_string()];
             }
             None => {}
@@ -674,9 +674,11 @@ mod tests {
 
     #[test]
     fn the_launch_parameters_look_turns_features_off() {
-        // LG's own parameters, as a Home press gives them: the full look.
+        // LG's own parameters, as a Home press gives them: the default
+        // look, everything but the dither.
         let home = parse(&[r#"{"@system_native_app": true, "launchType": "homeKey", "nid": "x"}"#]);
-        assert_eq!((home.look, home.look_unknown.len()), (Look::FULL, 0));
+        assert_eq!((home.look, home.look_unknown.len()), (Look::DEFAULT, 0));
+        assert_eq!(parse(&[r#"{"look":"full"}"#]).look, Look::FULL);
         assert_eq!(parse(&[r#"{"look":"plain"}"#]).look, Look::PLAIN);
         let some = parse(&["--windowed", r#"{"look":"-dither,-tilt"}"#]);
         assert_eq!(
@@ -702,9 +704,9 @@ mod tests {
         let number = parse(&[r#"{"look":3}"#]);
         assert_eq!(
             (number.look, number.look_unknown),
-            (Look::FULL, vec!["3".to_owned()])
+            (Look::DEFAULT, vec!["3".to_owned()])
         );
-        assert_eq!(parse(&[r#"{"look":"plain""#]).look, Look::FULL);
+        assert_eq!(parse(&[r#"{"look":"plain""#]).look, Look::DEFAULT);
     }
 
     #[test]

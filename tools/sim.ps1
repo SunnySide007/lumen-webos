@@ -25,7 +25,8 @@
 
   -Look passes the look as the TV's launch parameters would, as
   {"look":"<look>"}: "plain" is the home screen without Phase 4's features,
-  "-dither,-tilt" every feature but those. All are on without it.
+  "-tilt,-light" the default but those, "full" every feature with the
+  dither. Without it, all but the dither are on, as on the TV.
 
 .EXAMPLE
   pwsh tools/sim.ps1
