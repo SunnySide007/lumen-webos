@@ -18,7 +18,7 @@ firmware 05.50.00, unless it says otherwise.
 | 2. Speed | Not started. |
 | 3. Design | **Started early, at the owner's ask** (2026-11-08): the new home in its own session and worktree (`home-design`, cut from `claude/dither-fix`). Builds come to the bench; no other session touches the TV. |
 | 4. Privacy | Guard G1 logging since 2026-10-31. **G2 (lane H) merged** (5180f96): default deny behind the owner's mode file, off. Trial steps 2 to 4 (backup, push, restart in log mode) run in the first night window; blocking for the family is the owner's tier C yes. |
-| 5. Finish | **R3, Lumen Remote for Windows, merged** (cfe8be4), tested against lumen-ctl's fake TV. Its TV checklist waits for the owner. |
+| 5. Finish | **R3, Lumen Remote for Windows, merged** (cfe8be4), tested against lumen-ctl's fake TV. **R4, the phone's paired HTTPS door, merged** (2026-11-08, after a security review). Both TV checklists wait for the owner; R4's needs the Pixel in the same sitting, and lumen-remote is stopped again afterwards until the owner keeps it. |
 
 ## On the TV
 
