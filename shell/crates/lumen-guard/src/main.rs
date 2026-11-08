@@ -1,17 +1,22 @@
 //! Lumen Guard: a small DNS forwarder that runs as root on the TV, sees every
-//! lookup the TV makes, and logs each one with the verdict the block rules
-//! would give. This is stage G1 of docs/specs/privacy.md: it answers nothing
-//! itself and forwards everything, unchanged.
+//! lookup the TV makes, and logs each one with its rules' verdict. Stage G2 of
+//! docs/specs/privacy.md: a name resolves only when a rule allows it. In log
+//! mode (G1's behaviour) it forwards everything unchanged all the same; in
+//! block mode it answers what the rules don't allow itself, with a sinkhole.
+//! The owner switches the mode, adds rules and opens learning windows through
+//! files only root can write (control.rs).
 //!
-//! Two threads: UDP (and the status file) on the main thread, TCP on another.
-//! The boot hook (profiles/privacy/lumen-guard) starts it, sends the TV's DNS
-//! to it with a nat rule once it answers, and removes the rule when it exits.
+//! Two threads: UDP (with the status file and the owner's files) on the main
+//! thread, TCP on another. The boot hook (profiles/privacy/lumen-guard) starts
+//! it, points the TV's resolver and a nat rule at it once it answers, and puts
+//! them back when it exits.
 
 // Only `sys` may use `unsafe`; `forbid` can't be lifted for one module, so the
 // rest of the crate is held to it with `deny`.
 #![deny(unsafe_code)]
 
 mod args;
+mod control;
 mod guard;
 mod lookups;
 mod rules;
@@ -79,14 +84,17 @@ fn run(config: Config) -> ExitCode {
     }
 
     let guard = Guard::new(config, rules);
-    let (allow, exact, block) = guard.rules().counts();
+    let (allow, block, firmware) = guard.rules().counts();
     say!(
-        "{} listening on {} (udp, tcp), upstream {}, dscp {}, mode log; rules: {allow} allow, {exact} exact allow, {block} block",
+        "{} listening on {} (udp, tcp), upstream {}, dscp {}; rules: {allow} allow, {block} block, {firmware} firmware",
         env!("CARGO_PKG_VERSION"),
         guard.config.listen,
         guard.config.upstream,
         guard.config.dscp,
     );
+    // The owner's files, and so the mode, before the first query.
+    guard.poll_control();
+    say!("mode {}", guard.mode().word());
 
     // Either loop failing ends both, so the hook removes the nat rule.
     let result = thread::scope(|scope| {

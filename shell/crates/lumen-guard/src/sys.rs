@@ -7,7 +7,8 @@
 //! * a TCP connect with that mark on the very first packet;
 //! * `poll`, so two threads can wait on many sockets without spinning;
 //! * a SIGTERM handler, so Guard writes its status before it ends;
-//! * the local date, for the counts since midnight.
+//! * the local date, for the counts since midnight;
+//! * the effective user, which the owner's control files must belong to.
 //!
 //! It also gives the TV build the one C function its old glibc lacks,
 //! `getauxval`, as lumen-shell's `compat.rs` does.
@@ -199,6 +200,20 @@ pub fn local_date(unix: u64) -> Option<Date> {
         month: u8::try_from(tm.tm_mon + 1).ok()?,
         day: u8::try_from(tm.tm_mday).ok()?,
     })
+}
+
+/// The process's effective user id.
+pub fn euid() -> u32 {
+    // SAFETY: geteuid takes nothing, cannot fail and touches no memory.
+    unsafe { libc::geteuid() }
+}
+
+/// This boot's id (`/proc/sys/kernel/random/boot_id`), which a trial's mode
+/// file names so that a reboot ends the trial; `None` if the kernel lacks it.
+pub fn boot_id() -> Option<String> {
+    let id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+    let id = id.trim();
+    (!id.is_empty() && !id.contains(char::is_whitespace)).then(|| id.to_owned())
 }
 
 /// Looks `kind` up in a raw auxiliary vector of native-endian `word`-byte

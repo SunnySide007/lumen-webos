@@ -51,7 +51,7 @@ webOS 4 that tier blocks `lgtvsdp.com`, which is the Content Store.
 ## Stage 3: block TV software updates
 
 Turn on **Block TV software updates**. Then check that every name in
-[required-blocks.txt](required-blocks.txt) resolves to `0.0.0.0` on the TV:
+[required-blocks.txt](../guard/required-blocks.txt) resolves to `0.0.0.0` on the TV:
 `tools/store-safe-check.sh` does this, and fails until they all do. The
 Phase 0 survey found none of them blocked, despite Homebrew Channel's flag.
 

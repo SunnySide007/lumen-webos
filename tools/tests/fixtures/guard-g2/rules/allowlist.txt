@@ -1,0 +1,16 @@
+# Shared by rules.rs's tests and tools/tests/test_guard_rules.py: the same
+# files must give the verdicts in ../cases.txt in Rust and in Python.
+us.lgtvsdp.com          # store
+=lgtvsdp.com            # apex only
+Netflix.COM             # case does not matter
+amazon.com
+=lone.example.net
+plex.tv
+googleapis.com
+www.amazon.com
+lgeapi.com
+youtube.com
+spotify.com
+lumen.invalid
+nextlgsdp.com
+shared.example          # also a carve-out below: the allow wins

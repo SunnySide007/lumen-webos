@@ -1,0 +1,3 @@
+# Firmware hosts: blocked whatever any other rule says.
+snu.lge.com
+SU.lge.com              # comment

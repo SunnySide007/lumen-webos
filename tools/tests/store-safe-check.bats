@@ -62,18 +62,22 @@ setup() {
 
 @test "the shipped profile is consistent" {
     hosts="$BATS_TEST_TMPDIR/hosts"
-    profile="$BATS_TEST_DIRNAME/../../profiles/glasshouse"
+    profile="$BATS_TEST_DIRNAME/../../profiles/guard"
+    candidates="$BATS_TEST_DIRNAME/../../profiles/glasshouse/b9-aggressive.hosts"
     awk '{ sub(/#.*/, ""); if ($1 != "") print "0.0.0.0\t" $1 }' "$profile/required-blocks.txt" >"$hosts"
-    awk '!/^[ \t]*#/ && $1 == "0.0.0.0" { print "0.0.0.0\t" $2 }' "$profile/b9-aggressive.hosts" >>"$hosts"
+    awk '!/^[ \t]*#/ && $1 == "0.0.0.0" { print "0.0.0.0\t" $2 }' "$candidates" >>"$hosts"
     # Every research candidate, sinkholed at once, must still be store-safe.
-    awk '/^#[ \t]*0\.0\.0\.0[ \t]/ { print "0.0.0.0\t" $3 }' "$profile/b9-aggressive.hosts" >>"$hosts"
+    awk '/^#[ \t]*0\.0\.0\.0[ \t]/ { print "0.0.0.0\t" $3 }' "$candidates" >>"$hosts"
     run "$CHECK" --hosts-file "$hosts"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"firmware hosts sinkholed: 5 of 5"* ]]
+    [[ "$output" == *"firmware hosts sinkholed: 6 of 6"* ]]
+    [[ "$output" == *"custom-list hosts sinkholed: 0 of 0"* ]]
 }
 
 @test "bad arguments exit 2" {
-    run "$CHECK" --stage 5 --hosts-file "$FIX/hosts-pass"
+    run "$CHECK" --stage 6 --hosts-file "$FIX/hosts-pass"
+    [ "$status" -eq 2 ]
+    run "$CHECK" --stage 5 --hosts-file /dev/null --owner /nonexistent
     [ "$status" -eq 2 ]
     run "$CHECK" --hosts-file /nonexistent
     [ "$status" -eq 2 ]
@@ -217,4 +221,68 @@ EOF
     FAKE_HOSTS="$FIX/hosts-pass" run "$CHECK" --profile "$PROFILE" --stage 3
     [ "$status" -eq 1 ]
     [[ "$output" == *"FAIL snu.lge.com resolves to 192.0.2.50, not a sinkhole"* ]]
+}
+
+# Stage 5: Lumen Guard blocks (G2). Its rules are checked with
+# tools/guard/rules.py; live, Guard's own answers must sinkhole.
+
+@test "stage 5: the shipped Guard rules pass offline" {
+    run "$CHECK" --hosts-file /dev/null --stage 5 --owner /dev/null
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Guard's rules keep the store, DRM and the paid apps"* ]]
+    [[ "$output" == *"firmware hosts: Guard blocks them (checked live)"* ]]
+    [[ "$output" == *"PASS (stage 5)"* ]]
+}
+
+@test "stage 5: an owner file that blocks a paid app fails" {
+    owner="$BATS_TEST_TMPDIR/owner.txt"
+    printf '!=www.youtube.com\n=snu.lge.com\n' >"$owner"
+    run "$CHECK" --hosts-file /dev/null --stage 5 --owner "$owner"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"FAIL guard rules: www.youtube.com is not allowed (owner)"* ]]
+    [[ "$output" != *"snu.lge.com is not blocked"* ]]
+    [[ "$output" == *"FAIL (stage 5)"* ]]
+}
+
+@test "stage 5: Guard rules without an allowlist fail" {
+    p="$BATS_TEST_TMPDIR/profile"
+    mkdir -p "$p"
+    : >"$p/allowlist.txt"
+    cp "$BATS_TEST_DIRNAME/../../profiles/guard/required-blocks.txt" "$p/"
+    run "$CHECK" --profile "$p" --hosts-file /dev/null --stage 5 --owner /dev/null
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"FAIL guard rules: allowlist.txt holds no allow rule"* ]]
+}
+
+guard_getent() {
+    cat >"$BATS_TEST_TMPDIR/bin/getent" <<'EOF'
+#!/bin/sh
+case "$2" in
+    "${FAKE_SILENT:-none}") ;;
+    *.lge.com | lumen-default-deny.example | eligibility-panelresearch.googlevideo.com)
+        echo "0.0.0.0         $2" ;;
+    *) echo "192.0.2.9       $2" ;;
+esac
+EOF
+    chmod +x "$BATS_TEST_TMPDIR/bin/getent"
+}
+
+@test "live stage 5: Guard's sinkholes pass" {
+    fake_tv
+    guard_getent
+    FAKE_HOSTS=/dev/null run "$CHECK" --stage 5 --owner /dev/null
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"ok   allow www.youtube.com -> 192.0.2.9"* ]]
+    [[ "$output" == *"ok   block nsu.lge.com -> 0.0.0.0"* ]]
+    [[ "$output" == *"ok   block lumen-default-deny.example -> 0.0.0.0"* ]]
+    [[ "$output" == *"ok   block eligibility-panelresearch.googlevideo.com -> 0.0.0.0"* ]]
+    [[ "$output" == *"PASS (stage 5)"* ]]
+}
+
+@test "live stage 5: no answer for a blocked name means Guard is not blocking" {
+    fake_tv
+    guard_getent
+    FAKE_HOSTS=/dev/null FAKE_SILENT=lumen-default-deny.example run "$CHECK" --stage 5 --owner /dev/null
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"FAIL block lumen-default-deny.example: no answer (is Guard blocking?)"* ]]
 }

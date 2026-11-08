@@ -1,0 +1,6 @@
+# The owner's file: the allowlist's syntax, plus ! to block.
+=ads.example            # let one imported name through
+household.example       # an app the household uses
+!=ichnaea.netflix.com   # one of Netflix's logging names, blocked
+!tracker.amazon.com     # a subtree under amazon.com, blocked
+=snu.lge.com            # no effect: the firmware hosts stay blocked

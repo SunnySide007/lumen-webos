@@ -1,5 +1,6 @@
 #!/bin/sh
-# Undoes Lumen Guard, stage G1, without a reboot (docs/specs/privacy.md):
+# Undoes Lumen Guard without a reboot (docs/specs/privacy.md). To stop only
+# its blocking, tools/guard.sh block off is enough:
 #
 #   tools/tv.sh script profiles/privacy/guard-undo.sh
 #

@@ -1,0 +1,8 @@
+# An imported list: plain names are exact, *. is a subtree, and a hosts
+# line's sinkhole address is skipped.
+*.rdx2.lgtvsdp.com
+us.nextlgsdp.com
+0.0.0.0 ads.example *.track.example
+:: v6.example
+192.0.2.1 not-a-sinkhole.example
+*.lgtvsdp.com           # wider than the allowlist's us.lgtvsdp.com

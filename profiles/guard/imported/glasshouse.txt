@@ -1,0 +1,66 @@
+# Glasshouse's ad and telemetry host names, imported for Lumen Guard
+# (decision 11). Source: https://github.com/rorygallagher2024/glasshouse,
+# server/lib/privacy.js at commit ca170fa31ee3edcaf403aa71f8fc988870e50b07
+# (2026-11-08): the "ads & telemetry" tier, ADBLOCK_ADS and ADBLOCK_REGIONAL.
+# Copyright (c) 2026 Rory Gallagher, MIT License: LICENSE.glasshouse here.
+#
+# Only the names are taken, listed in Lumen's import syntax: a plain name
+# blocks that name, `*.name` the name and every name under it. Glasshouse
+# blocks its regional names with LG's region and country prefixes in front
+# (aic, eic, kic, eu, us...); `*.` covers those. Its "everything" tier is not
+# imported: it blocks the Content Store (lgtvsdp.com, lgeapi.com), and its
+# firmware hosts are in ../required-blocks.txt.
+
+# ADBLOCK_ADS: LG's ad servers
+ad.lgsmartad.com
+ibis.lgappstv.com
+ibs.lgappstv.com
+lgsmartad.com
+rdx.lgtvcommon.com
+aic.lgtvcommon.com
+smartad.lge.com
+smartclip.com
+smartclip-services.com
+yumenetworks.com
+
+# ADBLOCK_ADS: Alphonso, LG Ad Solutions' screen recognition (ACR)
+alphonso.tv
+prov-lg.alphonso.tv
+prov.alphonso.tv
+eulacheck.alphonso.tv
+bl-server.alphonso.tv
+clockskew.alphonso.tv
+acrdb.alphonso.tv
+ads.alphonso.tv
+api.alphonso.tv
+tvads.alphonso.tv
+sync.alphonso.tv
+tr.alphonso.tv
+tn.alphonso.tv
+insights.alphonso.tv
+bwlkup.alphonso.tv
+eu-acr86.alphonso.tv
+
+# ADBLOCK_ADS: LG's remote diagnostics upload servers
+rone-aic.lge.com
+rone-eic.lge.com
+rone-kic.lge.com
+rone-saic.lge.com
+rone-tv-aic.lge.com
+rone-tv-cic.lge.com
+rone-tv-eic.lge.com
+rone-tv-kic.lge.com
+rone-tv-saic.lge.com
+
+# ADBLOCK_REGIONAL: reports, beacons and the store's request log, which the
+# firmware names with a region or country prefix
+*.info.lgsmartad.com
+*.rdx2.lgtvsdp.com
+*.rdx2.nextlgsdp.com
+*.elastic.lgwebostv.com
+*.ibs.lgappstv.com
+*.ibsstat.lgappstv.com
+*.cdpbeacon.lgtvcommon.com
+*.cdpsvc.lgtvcommon.com
+*.wau.lgtvcommon.com
+*.api.adts.lgtvcommon.com

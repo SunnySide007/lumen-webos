@@ -1,7 +1,7 @@
 #!/bin/sh
 # Proves the TV's blocking is store-safe: nothing on the allowlist is
 # sinkholed, and everything that must be blocked is. Run it after every
-# privacy change (profiles/glasshouse/aggressive.md).
+# privacy change (profiles/glasshouse/aggressive.md, docs/specs/privacy.md).
 #
 #   tools/store-safe-check.sh                     the TV's /etc/hosts, plus live
 #                                                 lookups on the TV (tools/tv.sh)
@@ -12,7 +12,15 @@
 #                    1 or 2: nothing required yet, only the allowlist is checked
 #                    3: also the firmware hosts (required-blocks.txt)
 #                    4: also b9-aggressive.hosts' active entries (the default)
-#   --profile DIR    rules to check against (default profiles/glasshouse)
+#                    5: Lumen Guard blocks (G2): its rules must keep every name
+#                       it has to resolve and block the firmware hosts
+#                       (tools/guard/rules.py --check, with the owner's file),
+#                       and live, Guard's answers must sinkhole the firmware
+#                       hosts and a name no rule allows; the hosts file need
+#                       not list them
+#   --profile DIR    rules to check against (default profiles/guard)
+#   --owner FILE     the owner's Guard rules, for stage 5 (default
+#                    private/guard/owner.txt, when it exists)
 #
 # A name is sinkholed when a hosts line maps it to 0.0.0.0, 127.x, :: or ::1.
 # It fails if any line sinkholes an allowlisted name, and counts a block only
@@ -22,9 +30,11 @@ set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TV_SH=${LUMEN_TV_SH:-$ROOT/tools/tv.sh}
-PROFILE=$ROOT/profiles/glasshouse
+PROFILE=$ROOT/profiles/guard
 STAGE=4
 HOSTS_FILE=
+OWNER=${LUMEN_GUARD_OWNER:-$ROOT/private/guard/owner.txt}
+OWNER_SET=
 
 usage() {
     sed -n '2,/^set -eu$/{/^set -eu$/d;s/^# \{0,1\}//;p;}' "$0"
@@ -40,18 +50,36 @@ while [ $# -gt 0 ]; do
         --hosts-file) [ $# -ge 2 ] || die "--hosts-file needs a file"; HOSTS_FILE=$2; shift 2 ;;
         --stage) [ $# -ge 2 ] || die "--stage needs 1 to 4"; STAGE=$2; shift 2 ;;
         --profile) [ $# -ge 2 ] || die "--profile needs a directory"; PROFILE=$2; shift 2 ;;
+        --owner) [ $# -ge 2 ] || die "--owner needs a file"; OWNER=$2; OWNER_SET=1; shift 2 ;;
         -h | --help | help) usage; exit 0 ;;
         *) usage >&2; die "unknown argument: $1" ;;
     esac
 done
 
-case $STAGE in 1 | 2 | 3 | 4) ;; *) die "--stage must be 1, 2, 3 or 4, not $STAGE" ;; esac
+case $STAGE in 1 | 2 | 3 | 4 | 5) ;; *) die "--stage must be 1 to 5, not $STAGE" ;; esac
 ALLOW=$PROFILE/allowlist.txt
 REQUIRED=$PROFILE/required-blocks.txt
-CUSTOM=$PROFILE/b9-aggressive.hosts
-for f in "$ALLOW" "$REQUIRED" "$CUSTOM"; do
+for f in "$ALLOW" "$REQUIRED"; do
     [ -f "$f" ] || die "no $f"
 done
+# Glasshouse's custom list, if this profile has one (profiles/guard has not:
+# Guard blocks by default instead).
+CUSTOM=$PROFILE/b9-aggressive.hosts
+[ -f "$CUSTOM" ] || CUSTOM=/dev/null
+if [ -n "$OWNER_SET" ] && [ ! -e "$OWNER" ]; then
+    die "no such owner file: $OWNER"
+fi
+
+# A Python 3 that runs: on Windows `python3` may be the Store's placeholder.
+python_cmd() {
+    for p in ${LUMEN_PYTHON:-} python3 python; do
+        if "$p" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+            echo "$p"
+            return 0
+        fi
+    done
+    return 1
+}
 
 status=0
 tmp=$(mktemp -d)
@@ -59,8 +87,25 @@ trap 'rm -rf "$tmp"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Stage 5: Guard's own rules, as Guard reads them (tools/guard/rules.py is
+# held to rules.rs by tools/tests/test_guard_rules.py).
+if [ "$STAGE" -ge 5 ]; then
+    py=$(python_cmd) || die "stage 5 needs Python 3 (tools/guard/rules.py)"
+    set -- --check --rules "$PROFILE"
+    [ -f "$OWNER" ] && set -- "$@" --owner "$OWNER"
+    if "$py" -I "$ROOT/tools/guard/rules.py" "$@"; then
+        if [ -f "$OWNER" ]; then
+            echo "Guard's rules keep the store, DRM and the paid apps, and block the firmware hosts (with $OWNER)"
+        else
+            echo "Guard's rules keep the store, DRM and the paid apps, and block the firmware hosts (no owner file)"
+        fi
+    else
+        status=1
+    fi
+fi
+
 if [ -n "$HOSTS_FILE" ]; then
-    [ -f "$HOSTS_FILE" ] || die "no such hosts file: $HOSTS_FILE"
+    [ -e "$HOSTS_FILE" ] || die "no such hosts file: $HOSTS_FILE"
     cp "$HOSTS_FILE" "$tmp/hosts"
     source="$HOSTS_FILE"
 else
@@ -138,21 +183,23 @@ END {
         }
     }
     nreq = 0; okreq = 0
-    if (stage >= 3) for (n in required) {
+    if (stage == 3 || stage == 4) for (n in required) {
         nreq++
         if ((n in sunk) && !(n in real)) okreq++
         else { printf "FAIL firmware host not sinkholed: %s\n", n; fails++ }
     }
     ncus = 0; okcus = 0
-    if (stage >= 4) for (n in custom) {
+    if (stage == 4) for (n in custom) {
         ncus++
         if ((n in sunk) && !(n in real)) okcus++
         else { printf "FAIL custom-list host not sinkholed: %s\n", n; fails++ }
     }
     printf "%s: %d sinkholed names, %d of them allowlisted\n", source, nsunk, nbad
-    if (stage >= 3) printf "firmware hosts sinkholed: %d of %d\n", okreq, nreq
+    if (stage >= 5) print "firmware hosts: Guard blocks them (checked live)"
+    else if (stage >= 3) printf "firmware hosts sinkholed: %d of %d\n", okreq, nreq
     else print "firmware hosts: not checked before stage 3"
-    if (stage >= 4) printf "custom-list hosts sinkholed: %d of %d\n", okcus, ncus
+    if (stage >= 5) print "custom-list hosts: none at stage 5 (Guard blocks by default)"
+    else if (stage >= 4) printf "custom-list hosts sinkholed: %d of %d\n", okcus, ncus
     else print "custom-list hosts: not checked before stage 4"
     exit (fails > 0 ? 1 : 0)
 }
@@ -173,7 +220,16 @@ if [ -z "$HOSTS_FILE" ]; then
         if [ "$STAGE" -ge 3 ]; then
             awk '{ sub(/#.*/, ""); if ($1 != "") print "block " tolower($1) }' "$REQUIRED"
         fi
-        if [ "$STAGE" -ge 4 ]; then
+        if [ "$STAGE" -ge 5 ]; then
+            # A name no rule allows (RFC 2606's .example, so a leak gets
+            # NXDOMAIN), and Lumen's exact carve-outs: only Guard sinkholes
+            # them.
+            echo "block lumen-default-deny.example"
+            if [ -f "$PROFILE/carve-outs.txt" ]; then
+                awk '{ sub(/#.*/, "") } $1 ~ /^=/ { print "block " tolower(substr($1, 2)) }' \
+                    "$PROFILE/carve-outs.txt" | head -n 2
+            fi
+        elif [ "$STAGE" -ge 4 ]; then
             awk '!/^[ \t]*#/ && ($1 == "0.0.0.0" || $1 == "::") { print "block " tolower($2) }' "$CUSTOM" |
                 sort -u | head -n 3
         fi
@@ -202,15 +258,18 @@ LOOKUP
     done <"$tmp/names" >>"$tmp/lookup.sh"
     "$TV_SH" script "$tmp/lookup.sh" >"$tmp/lookups" || die "live lookups on the TV failed"
     # shellcheck disable=SC2016 # awk program, not shell
-    awk '
+    awk -v stage="$STAGE" '
     function sinkhole(a) { return a == "0.0.0.0" || a ~ /^127\./ || a == "::" || a == "::0" || a == "::1" || a == "0:0:0:0:0:0:0:0" || a == "0:0:0:0:0:0:0:1" }
     $1 == "tool" { tool = $2; printf "live lookups on the TV (%s):\n", $2; next }
     NF == 3 && $3 == "end" {
         key = $1 " " $2
         names++
         # No answer for a name that must work is a failure: DNS down, or an
-        # upstream blocker, breaks the store just as a sinkhole does.
+        # upstream blocker, breaks the store just as a sinkhole does. At
+        # stage 5 Guard answers every name it blocks, so silence means it
+        # is not blocking.
         if (!(key in got) && $1 == "allow") { printf "FAIL allow %s: no answer\n", $2; fails++ }
+        else if (!(key in got) && stage >= 5) { printf "FAIL block %s: no answer (is Guard blocking?)\n", $2; fails++ }
         else if (!(key in got)) { printf "WARN %s %s: no answer (not in /etc/hosts?)\n", $1, $2 }
         else if ($1 == "allow" && bad[key]) { printf "FAIL %s resolves to a sinkhole (%s)\n", $2, addrs[key]; fails++ }
         else if ($1 == "block" && !sunkall[key]) { printf "FAIL %s resolves to %s, not a sinkhole\n", $2, addrs[key]; fails++ }

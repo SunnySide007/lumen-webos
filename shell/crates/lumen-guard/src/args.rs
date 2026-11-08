@@ -4,19 +4,32 @@
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 
+use crate::control::Mode;
 use crate::lookups::DEFAULT_MAX_BYTES;
 
 pub const USAGE: &str = "\
 usage: lumen-guard --listen ADDR:PORT --upstream ADDR:PORT --rules DIR --log DIR
-                   --status FILE [--mode log] [--dscp N] [--max-log-bytes N]
+                   --status FILE [--mode log|block] [--mode-file FILE]
+                   [--owner FILE] [--learn FILE] [--dscp N] [--max-log-bytes N]
        lumen-guard --probe ADDR:PORT [--name NAME]
 
-Forwards every DNS query that reaches --listen (UDP and TCP) to --upstream
-unchanged, and logs it to DIR/lookups.log with the verdict the rules in --rules
-would give. --mode block is stage G2 and not built. --dscp marks the packets
-Guard sends upstream (0 to 63, default 7; 0 marks nothing) so the TV's nat rule
-can leave them alone. --max-log-bytes is the size at which lookups.log moves to
-lookups.log.1 (default 4 MiB).
+Takes the DNS queries that reach --listen (UDP and TCP) and logs each to
+DIR/lookups.log with the verdict of the rules in --rules: a name resolves only
+when a rule allows it. In log mode (the default) every query goes to
+--upstream unchanged all the same; in block mode a name no rule allows gets
+0.0.0.0 or :: from Guard itself, and nothing goes upstream.
+
+--mode-file, --owner and --learn name the owner's control files, read again
+within a second of a change: the mode (`block`, `block <boot id>` for this
+boot only, or `log`; without the file, --mode), the owner's own rules, and a
+learning window (`<start> <end>` in unix seconds, an hour at most) during which
+names no rule covers resolve. Each counts only if Guard's own user owns it and
+no one else can write it. Guard never blocks while the rules would block the
+store, DRM or the paid apps.
+
+--dscp marks the packets Guard sends upstream (0 to 63, default 7; 0 marks
+nothing) so the TV's nat rule can leave them alone. --max-log-bytes is the size
+at which lookups.log moves to lookups.log.1 (default 4 MiB).
 
 --probe asks ADDR:PORT for NAME (default lumen-probe.invalid) and exits 0 on
 any answer within 2 s, 1 otherwise.
@@ -35,6 +48,11 @@ pub struct Config {
     pub rules: PathBuf,
     pub log: PathBuf,
     pub status: PathBuf,
+    /// The mode while there is no mode file.
+    pub mode: Mode,
+    pub mode_file: Option<PathBuf>,
+    pub owner: Option<PathBuf>,
+    pub learn: Option<PathBuf>,
     pub dscp: u8,
     pub max_log_bytes: u64,
 }
@@ -48,6 +66,7 @@ pub enum Command {
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
     let (mut listen, mut upstream, mut rules, mut log, mut status) = (None, None, None, None, None);
+    let (mut mode, mut mode_file, mut owner, mut learn) = (Mode::Log, None, None, None);
     let (mut dscp, mut max_log_bytes) = (DEFAULT_DSCP, DEFAULT_MAX_BYTES);
     let (mut probe, mut name) = (None, None);
     let mut run_flags = false;
@@ -64,13 +83,16 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             "--rules" => rules = Some(PathBuf::from(value)),
             "--log" => log = Some(PathBuf::from(value)),
             "--status" => status = Some(PathBuf::from(value)),
-            "--mode" => match value.as_str() {
-                "log" => {}
-                "block" => {
-                    return Err("--mode block is stage G2 and not built; G1 only logs".to_owned());
-                }
-                other => return Err(format!("--mode must be log, not {other}")),
-            },
+            "--mode" => {
+                mode = match value.as_str() {
+                    "log" => Mode::Log,
+                    "block" => Mode::Block,
+                    other => return Err(format!("--mode must be log or block, not {other}")),
+                };
+            }
+            "--mode-file" => mode_file = Some(PathBuf::from(value)),
+            "--owner" => owner = Some(PathBuf::from(value)),
+            "--learn" => learn = Some(PathBuf::from(value)),
             "--dscp" => {
                 dscp = value
                     .parse()
@@ -106,6 +128,10 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         rules: rules.ok_or_else(|| missing("--rules"))?,
         log: log.ok_or_else(|| missing("--log"))?,
         status: status.ok_or_else(|| missing("--status"))?,
+        mode,
+        mode_file,
+        owner,
+        learn,
         dscp,
         max_log_bytes,
     };
@@ -176,11 +202,22 @@ mod tests {
         assert_eq!(config.status, PathBuf::from("/var/lib/lumen/guard/status"));
         assert_eq!(config.dscp, 7);
         assert_eq!(config.max_log_bytes, 4 << 20);
+        assert_eq!(config.mode, Mode::Log);
+        assert_eq!(
+            (config.mode_file, config.owner, config.learn),
+            (None, None, None)
+        );
 
         let mut more = args(TV);
         more.extend(args(&[
             "--mode",
-            "log",
+            "block",
+            "--mode-file",
+            "/var/lib/lumen/guard/mode",
+            "--owner",
+            "/var/lib/lumen/guard/owner.txt",
+            "--learn",
+            "/var/lib/lumen/guard/learn",
             "--dscp",
             "0",
             "--max-log-bytes",
@@ -190,13 +227,19 @@ mod tests {
             panic!("not a run");
         };
         assert_eq!((config.dscp, config.max_log_bytes), (0, 1000));
+        assert_eq!(config.mode, Mode::Block);
+        assert_eq!(
+            config.owner,
+            Some(PathBuf::from("/var/lib/lumen/guard/owner.txt"))
+        );
+        assert!(config.mode_file.is_some() && config.learn.is_some());
     }
 
     #[test]
-    fn refuses_block_mode_and_bad_values() {
+    fn refuses_bad_values() {
         for extra in [
-            &["--mode", "block"][..],
-            &["--mode", "loud"],
+            &["--mode", "loud"][..],
+            &["--learn"],
             &["--dscp", "64"],
             &["--dscp", "-1"],
             &["--max-log-bytes", "0"],
