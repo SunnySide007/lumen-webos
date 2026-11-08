@@ -1,0 +1,96 @@
+# The home's page turn and Back, for d7de95e and later: about 41 s, the
+# same every run. Opens nothing.
+#
+# OK only on the Other apps tile, which turns the page and launches
+# nothing: a held right ends on it, the row's last tile, whatever the row
+# holds. Back only from the Other apps page (back to its tile) and from a
+# chip (back to the row); never on the row, where it would reopen what was
+# playing if the shell was hidden and shown again during the run. Holds stay
+# under 1.5 s, as in pattern-45s.txt.
+#
+# One block is 10.18 s; four of them are 40.7 s.
+repeat off
+
+hold right 1300
+wait 400
+tap ok
+wait 800
+taps right 4 300
+wait 300
+taps down 2 450
+wait 300
+taps up 2 450
+wait 400
+tap back
+wait 800
+tap down
+wait 400
+taps left 3 300
+wait 300
+tap back
+wait 600
+hold left 1300
+wait 400
+
+hold right 1300
+wait 400
+tap ok
+wait 800
+taps right 4 300
+wait 300
+taps down 2 450
+wait 300
+taps up 2 450
+wait 400
+tap back
+wait 800
+tap down
+wait 400
+taps left 3 300
+wait 300
+tap back
+wait 600
+hold left 1300
+wait 400
+
+hold right 1300
+wait 400
+tap ok
+wait 800
+taps right 4 300
+wait 300
+taps down 2 450
+wait 300
+taps up 2 450
+wait 400
+tap back
+wait 800
+tap down
+wait 400
+taps left 3 300
+wait 300
+tap back
+wait 600
+hold left 1300
+wait 400
+
+hold right 1300
+wait 400
+tap ok
+wait 800
+taps right 4 300
+wait 300
+taps down 2 450
+wait 300
+taps up 2 450
+wait 400
+tap back
+wait 800
+tap down
+wait 400
+taps left 3 300
+wait 300
+tap back
+wait 600
+hold left 1300
+wait 400

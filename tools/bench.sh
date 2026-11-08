@@ -19,6 +19,7 @@
 #       --params JSON   launch parameters, such as '{"look":"plain"}'
 #       --runs N        how many runs (default 3)
 #       --name NAME     the report folder's suffix
+#       --pattern FILE  the moves to play (default tools/bench/pattern-45s.txt)
 #       --settle        the last run also stays settled for 5 min, then reads
 #                       the shell's RSS and idle CPU
 #       --force         run outside a lab window: only when the owner says
@@ -315,6 +316,7 @@ cleanup() {
 
 cmd_run() {
     IPK='' PARAMS='{}' RUNS=3 NAME=run SETTLE=0 FORCE=0 KEEP=0
+    MOVES=$BENCH/pattern-45s.txt
     while [ $# -gt 0 ]; do
         case $1 in
             --ipk) IPK=$2; shift 2 ;;
@@ -322,6 +324,7 @@ cmd_run() {
             --runs) RUNS=$2; shift 2 ;;
             --name) NAME=$2; shift 2 ;;
             --settle) SETTLE=1; shift ;;
+            --pattern) MOVES=$2; shift 2 ;;
             --force) FORCE=1; shift ;;
             *) die "unknown option for run: $1" ;;
         esac
@@ -329,6 +332,7 @@ cmd_run() {
     case $RUNS in [1-9]) ;; *) die "--runs must be 1 to 9" ;; esac
     case $NAME in *[!A-Za-z0-9._-]* | '') die "--name: letters, digits, . _ - only" ;; esac
     [ -z "$IPK" ] || [ -f "$IPK" ] || die "no such IPK: $IPK"
+    [ -f "$MOVES" ] || die "no such pattern: $MOVES"
     [ -n "$(last_good_ipk)" ] || die "no last good build: run tools/bench.sh last-good first"
     [ -f "$ROOT/dist/ctl/lumen-ctl" ] || die "no dist/ctl/lumen-ctl: tools/dev.sh make ctl"
     if [ "$FORCE" = 0 ]; then
@@ -355,13 +359,14 @@ cmd_run() {
         [ -z "$IPK" ] || echo "ipk sha256 $(sha256sum <"$IPK" | cut -d' ' -f1)"
         echo "launch $launch"
         echo "runs $RUNS"
+        echo "pattern ${MOVES#"$ROOT"/} $(sha256sum <"$MOVES" | cut -c1-12)"
         echo "last good $(cat "$LAST_GOOD/binary.sha256")"
         tv check </dev/null | grep -E '"(modelName|firmwareVersion)"' | tr -d ' ,'
     } >"$OUT/run.txt"
     say "report in ${OUT#"$ROOT"/}"
 
     tv push "$ROOT/dist/ctl/lumen-ctl" "$CTL" >/dev/null
-    tv push "$BENCH/pattern-45s.txt" "$PATTERN" >/dev/null
+    tv push "$MOVES" "$PATTERN" >/dev/null
     tv run "chmod 0700 $CTL" </dev/null
 
     if [ -n "$IPK" ]; then

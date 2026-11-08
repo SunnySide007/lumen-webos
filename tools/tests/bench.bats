@@ -116,6 +116,8 @@ SAVER=com.webos.app.screensaver
     [[ "$output" == *"--name"* ]]
     run sh "$BENCH" run --ipk /nonexistent.ipk
     [[ "$output" == *"no such IPK"* ]]
+    run sh "$BENCH" run --pattern /nonexistent.txt
+    [[ "$output" == *"no such pattern"* ]]
     run sh "$BENCH" frobnicate
     [[ "$output" == *"unknown command"* ]]
 }
