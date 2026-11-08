@@ -55,6 +55,29 @@ build, parameters, model and firmware), each run's log, frame-stats output,
 the robot's lines and screenshots, `run<N>.json`, `summary.json` (the
 median of the runs) and `gate.md`.
 
+## App launch times and target 5
+
+`tools/bench.sh apps` (in a lab window) takes each app, by default Netflix,
+YouTube and plx-native, through: a cold launch (closed first if it runs),
+5 s in front, a robot Home press, then a warm launch and Home again.
+
+* **Launch time** runs from the launch call to the app manager naming the
+  app as the one in front, polled about every 50 ms on the TV's
+  `/proc/uptime` (10 ms steps). It misses the app's own loading once in
+  front (a splash, a profile screen) and the panel's queue. `luna-send
+  -i`'s life events are logged but not timed, since its piped output may
+  be buffered.
+* **Target 5** runs from the robot's Home press (its own stamp on the TV's
+  clock, written microseconds after the event; the kernel's stamp on the
+  robot's node is the same clock) to the stamp of the shell's next
+  `foreground: first frame after …` line, logged right after that frame's
+  swap. The panel's queue after the swap (up to two refreshes) is stated,
+  not measured.
+* **Automatic undo:** a Home press that leaves Lumen out of front brings it
+  back by a launch; if that fails too, the run stops (exit 4).
+* An HDMI input is left out for now: switching to one may wake other
+  devices over HDMI-CEC, which the family would notice.
+
 ## The robot remote
 
 `lumen-ctl play FILE`, `lumen-ctl key NAME` and `lumen-ctl watch-remote
