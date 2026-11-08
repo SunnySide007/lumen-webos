@@ -144,7 +144,7 @@ From the setting down to the wire; each catches what the one above misses.
 |---|---|---|---|---|
 | 1 | LG's switches | ACR, ad profiles, recommendations | LG Settings | done |
 | 2 | LG Home out of the way | launcher, beacon and promotion calls at their source | the shell as home (Phase 3) | measure with layer 3's log once the shell owns Home |
-| 3 | Names | everything not allowlisted (decision 11), with suffix carve-outs | Lumen Guard, below | G1 (log only) built; rebuilt around `resolv.conf` after its first by-hand run (2026-10-31); the new hook passed by hand the same day and runs as a boot hook since 16:10 UTC. G2 blocks by default |
+| 3 | Names | everything not allowlisted (decision 11), with suffix carve-outs | Lumen Guard, below | G1 (log only) built; rebuilt around `resolv.conf` after its first by-hand run (2026-10-31); the new hook passed by hand the same day and runs as a boot hook since 16:10 UTC. G2 (default deny) built 2026-11-08, off until tried on the TV and the owner's yes |
 | 4 | Senders | LG jobs that report | stop them at run time, one per check, from the list above; never `tvdataexchanger` or `alwaysready` | measured; four proposed for S1 |
 | 5 | Addresses | hard-coded endpoints, public resolvers | iptables `OUTPUT` rules; LG-owned addresses only, never AWS or CDN ranges (the store is on AWS: five us-west-2 addresses) | possible: netfilter measured. Decided: one reject for LG's 156.147.0.0/16 (`LG-NET-KR`) once a capture shows the store doesn't need it |
 | 6 | Identifiers | the MAC inside the TV's IPv6 address | IPv6 off in LG's settings | done 2026-10-28: `ipv6Enable` false, no IPv6 address on `wlan0` |
@@ -176,13 +176,19 @@ start, the lookups, the kill switch, a Wi-Fi drop and a hung Guard.
 
 ```text
 lumen-guard --listen ADDR:PORT --upstream ADDR:PORT --rules DIR --log DIR --status FILE
-            [--mode log] [--dscp N] [--max-log-bytes N]
+            [--mode log|block] [--mode-file FILE] [--owner FILE] [--learn FILE]
+            [--dscp N] [--max-log-bytes N]
 lumen-guard --probe ADDR:PORT [--name NAME]
 ```
 
+**G2 was built on 2026-11-08** (lane H) and is off on the TV until the
+owner's yes: blocking by default, the rules in `profiles/guard/`, the
+owner's own file, learning windows, and the switch, all below. Its trial
+plan is under "G2 on the TV".
+
 - **Loopback only:** it listens on 127.0.0.2:53, UDP and TCP. TCP takes one
   query per connection (RFC 1035's two-byte length), 3 s to send it, at
-  most 32 connections at once. `--mode block` is G2 and refused for now.
+  most 32 connections at once.
 - **What reaches it**, as measured on the B9 on 2026-10-31 (b9.md,
   "Resolver"):
   - Most lookups, through `resolv.conf`. The hook bind-mounts a file
@@ -230,21 +236,64 @@ lumen-guard --probe ADDR:PORT [--name NAME]
     TCP lookups would loop back to it. One shared UDP port would also
     serialise queries or rewrite their IDs.
 - **Passes bytes through:** it reads only the first question's name
-  (compression pointers followed, loops refused) and type. Each UDP query
-  goes upstream unchanged from a socket of its own, and the first answer
-  with its ID comes back unchanged; messages up to 4,096 bytes, TCP answers
-  streamed through in pieces of that size. No cache, no recursion. With no
-  answer within 3 s nothing is sent back, and the asker retries.
-- **Rules:** `allowlist.txt`, `required-blocks.txt` and `b9-aggressive.hosts`
-  as they are, read as `store-safe-check.sh` and `summarize.py` read them:
-  an allowlist `name` covers the name and every name under it, `=name` that
-  name only; required blocks and uncommented hosts lines with a sinkhole
-  address are exact blocks; commented hosts lines are candidates, not
-  blocks; the allowlist wins. G1 only logs the verdict; in G2 a blocked name
-  gets 0.0.0.0 and ::, as from the hosts file.
+  (compression pointers followed, loops refused), type and class. Each UDP
+  query it forwards goes upstream unchanged from a socket of its own, and
+  the first answer with its ID comes back unchanged; messages up to 4,096
+  bytes, TCP answers streamed through in pieces of that size. No cache, no
+  recursion. With no answer within 3 s nothing is sent back, and the asker
+  retries.
+- **Rules (G2, decision 11):** a name resolves only when a rule allows it.
+  [profiles/guard/](../../profiles/guard/README.md) holds `allowlist.txt`
+  (the generic list: the store, DRM, the paid apps, casting and Lumen's
+  probes, each with its reason; moved from `profiles/glasshouse`, with G1's
+  measured names added), `carve-outs.txt` (Lumen's names under an allowed
+  suffix that stay blocked), `imported/` (hagezi's LG list, GPL-3.0;
+  Perflyst's SmartTV list, MIT; Glasshouse's ad and telemetry names, MIT;
+  each in its own file with source, commit and license) and
+  `required-blocks.txt` (the firmware hosts, now with `snu-dev.lge.com`).
+  The owner's own file (decision 12) is not in the repository. The
+  firmware hosts are blocked whatever; then the owner's rules decide; then
+  the most specific rule of the lists (an exact rule over a suffix, a
+  longer suffix over a shorter one, an allow over a block of the same
+  rule); a name no rule covers is blocked. `b9-aggressive.hosts` is no
+  longer read: its candidates are blocked by default.
+- **Blocked names** get Guard's own answer, as from a hosts file: 0.0.0.0
+  for A, `::` for AAAA, no record (NOERROR) for any other type, with a TTL
+  of 60 s, so a name the owner allows resolves within a minute. Nothing
+  goes upstream for them. In block mode only a standard query with one
+  readable question goes upstream at all: another opcode gets REFUSED, and
+  two questions or an unreadable one FORMERR. In log mode everything goes
+  upstream, as in G1.
+- **Never the store:** Guard refuses to block while its rules, with the
+  owner's file, would block a name it must resolve: the store
+  (`us.lgtvsdp.com`, `lgtvsdp.com`, `us.lgeapi.com`), DRM
+  (`www.googleapis.com`), Netflix, Prime Video, Plex, YouTube and Spotify
+  as `store-safe-check.sh` asks for them, and the hook's
+  `heartbeat.lumen.invalid` (`MUST_RESOLVE` in `rules.rs`). It keeps to
+  logging and says why (`block_refused` in its status), and an owner file
+  that would do it is refused whole, the earlier one kept.
+- **The owner's controls** (decision 12): three files in
+  `/var/lib/lumen/guard`, read within a second of a change, and only when
+  root owns them and no one else can write them, so nothing but the
+  owner's SSH key loosens the TV. `tools/guard.sh` writes them.
+  - `mode`: `block` blocks across reboots (`guard.sh block on`, the
+    family's yes); `block <boot id>` blocks until the next boot only
+    (`guard.sh block trial`, so a reboot undoes it); no file, or `log`, only
+    logs (`guard.sh block off`, the undo, within a second).
+  - `owner.txt`: the owner's rules, the allowlist's syntax plus `!name` and
+    `!=name` to block. Kept in `private/guard/owner.txt` on the PC, which
+    git ignores, and in the owner's backups with the rest of `/var`.
+  - `learn`: a learning window (decision 11), `<start> <end>` by the TV's
+    clock, an hour at most, one at a time. While it is open, names no rule
+    covers resolve and are logged as `learn`; carve-outs, the imported
+    lists and the firmware hosts stay blocked. A window from before a reboot
+    or a clock jump is inert by its times. `guard.sh learn 15` opens one,
+    `learned` lists what it learned, and `keep NAME` (into the owner's file,
+    pushed and checked) or `drop NAME` decide. At most 512 names a window.
 - **Log:** `/var/lib/lumen/guard/lookups.log`, one line per lookup,
-  `<unix seconds> <type> <name> <verdict>` with verdict `allow` or
-  `would-block` (`block` in G2), moved to `lookups.log.1` at 4 MB
+  `<unix seconds> <type> <name> <verdict>` with verdict `allow`, `learn`,
+  `block` in block mode, or `would-block` in log mode (the rules say no, and
+  the lookup goes upstream all the same), moved to `lookups.log.1` at 4 MB
   (`--max-log-bytes`), so two files at most. Names come off the wire in
   lower case, any octet but a letter, digit, `-` or `_` written `\DDD`, so
   a line can't be forged; a query whose question can't be read is logged
@@ -257,11 +306,12 @@ lumen-guard --probe ADDR:PORT [--name NAME]
   at every boot, it outlives a power-off, which is what the capture lacked.
   tcpdump stays for addresses used without a lookup.
 - **Counts for the shell:** `/var/lib/lumen/guard/status`, plain `key value`
-  lines rewritten whole every 10 s and when SIGTERM ends Guard: lookups and
-  would-blocks since start and since local midnight, the start time,
-  upstream, mode, DSCP and error counts. For `tools/guard.sh status` and a
-  Privacy panel that says what was blocked today (G5, Phase 4's Control
-  Center).
+  lines rewritten whole every 10 s and when SIGTERM ends Guard: lookups,
+  would-blocks, blocks and learned lookups since start and since local
+  midnight, the mode and why blocking was refused, the open window's end and
+  the names it learned, the owner's rule count, the start time, upstream,
+  DSCP and error counts. For `tools/guard.sh status` and a Privacy panel
+  that says what was blocked today (G5, Phase 4's Control Center).
 - **Started** by `profiles/privacy/lumen-guard` in
   `/var/lib/webosbrew/init.d`. It does nothing while the kill switch exists,
   returns at once and logs to `/var/lib/lumen/log/lumen-guard.log`, keeping
@@ -312,11 +362,19 @@ lumen-guard --probe ADDR:PORT [--name NAME]
   then prints connman's file. After that, `tools/guard.sh install` adds the
   hook and `remove` takes it away. `tools/uninstall-all.sh` runs
   `guard-undo.sh` before it deletes `/var/lib/lumen`.
-- **Small surface:** about 1,400 lines of Rust besides its tests: `std`, and
-  the `libc` crate in one module (`sys.rs`: the DSCP mark, `poll`, SIGTERM,
-  the local date and the `getauxval` shim), with `unsafe` denied everywhere
+- **Small surface:** about 2,500 lines of Rust besides its tests, doc
+  comments included (G1 was about 1,400): `std`, and the `libc` crate in one
+  module (`sys.rs`: the DSCP mark, `poll`, SIGTERM, the local date, the
+  effective uid and the `getauxval` shim), with `unsafe` denied everywhere
   else. Two threads, UDP and TCP; under 4 MB resident was the target, and
-  the B9 measured 940 kB on 2026-10-31.
+  the B9 measured 940 kB for G1 on 2026-10-31. G2's rules add about 1,000
+  names in hash tables; its memory on the TV is not measured yet.
+- **The same rules on the PC:** `tools/guard/rules.py` decides as
+  `rules.rs` does (`tools/tests/test_guard_rules.py` holds both to the
+  cases in `tools/tests/fixtures/guard-g2`). `tools/guard.sh log` shows
+  each logged name with what these rules decide now and which rule, and
+  `tools/store-safe-check.sh --stage 5` checks the rules, with the owner's
+  file, before anything changes on the TV, and then Guard's live answers.
 
 | | Glasshouse hosts | dnsmasq, static | Lumen Guard |
 |---|---|---|---|
@@ -326,7 +384,59 @@ lumen-guard --probe ADDR:PORT [--name NAME]
 | Encrypted upstream | no | no | yes (G3) |
 | Counts for the shell | no | by parsing logs | yes |
 | Reads `allowlist.txt` as it is | through a converter | through a converter | yes |
-| New code running as root | none | none, but another C parser of network input | about 1,400 lines of Rust |
+| New code running as root | none | none, but another C parser of network input | about 2,500 lines of Rust |
+
+### G2 on the TV
+
+Built and tested off the TV on 2026-11-08 (lane H): `cargo test` (the
+rules, the owner's files, block mode end to end over UDP and TCP on
+loopback), `tools/tests/test_guard_rules.py`, `guard.bats` and
+`store-safe-check.bats`. Nothing of it has run on the TV. What G1's week
+says the shipped rules do with its 94 names: 67 allowed (the store,
+Netflix with its logging, Prime Video's API, YouTube), 27 blocked, 1,588
+of its 8,211 lookups (LG Home's beacon, content and promotion calls, LG's
+ad and AI names, UEI, Amazon's device metrics and Prime Video's and
+YouTube's telemetry, doubleclick, Apple's media CDN, and reverse lookups).
+`tools/guard.sh log` shows that table for any log.
+
+The trial, in the order it runs, each step with its undo (safety.md's
+tiers):
+
+1. **PC only.** `tools/dev.sh make guard`, then
+   `tools/store-safe-check.sh --hosts-file /dev/null --stage 5` passes.
+2. **Tier A.** `tools/backup.sh`.
+3. **Tier B, lab window.** `tools/guard.sh push`: the new binary, the
+   rules folder and the hook's inert copy. The running Guard is untouched.
+   Undo: push from a checkout without G2.
+4. **Tier B.** Restart Guard on it in log mode: `guard-undo.sh`, then
+   `guard-apply.sh`; `tools/guard.sh status` shows `mode log` and
+   `block_refused none`. The installed G1 hook also starts the new binary
+   after a reboot, in log mode (its flags are a subset). Undo:
+   `guard-undo.sh`, or a reboot.
+5. **Tier A, days.** The log-mode preview: the family uses the TV as
+   usual, including Prime Video and Plex playback, Spotify and casting,
+   which G1's week did not show. `tools/guard.sh log` then lists every
+   name the rules would block; any a paid app needs goes into
+   `allowlist.txt` (with its reason) before step 6.
+6. **Tier B, lab window, with the undo armed.** `tools/guard.sh block
+   trial`: blocking until the next boot. `tools/store-safe-check.sh
+   --stage 5` live, and the Netflix, YouTube, Plex and casting checks. The
+   run ends with `tools/guard.sh block off`, and a real remote press
+   yields to it. Undo: `block off` (within a second), or a reboot.
+7. **Tier B, same window.** The learning window: `tools/guard.sh learn 5`,
+   look up a name no rule covers (`example.com`), `learned` lists it,
+   `keep example.com` makes it resolve, `drop example.com` blocks it again.
+8. **Tier B.** After a backup, `tools/guard.sh install` (the hook with
+   the owner's files), a reboot over SSH, then a cold boot: the hook
+   starts Guard with its control files, the trial's mode file is spent,
+   and step 6's checks pass again under `block trial`. Guard's resident
+   memory is measured. Undo: `tools/guard.sh remove`, then install from a
+   checkout without G2.
+9. **Tier C: the owner's one yes.** `tools/guard.sh block on`, with steps
+   5 to 8's results in front of the owner. Undo: `tools/guard.sh block off`.
+
+Not built in G2 yet: the `OUTPUT` reject for 156.147.0.0/16, which waits
+for a capture that shows the store doesn't need it.
 
 ## Stages
 
@@ -340,7 +450,7 @@ Each is undone by a reboot until it becomes a boot hook, and each ends with
 | S1 | Quick fixes. Owner, in LG Settings: IPv6 off. By hand over SSH, undone by a reboot: `initctl stop` for `uploadd`, `rdxd`, `crashreportd` and `remotelogger`; an `INPUT` rule rejecting tcp 11111 from the LAN; P9 and P10's answers. Then one boot hook for whatever passed. `nsu.lge.com` waits for Guard (G2) | each checked; the checklist passes, also after a cold boot with the hook. Applied by hand 2026-10-28 06:30 UTC with `profiles/privacy/s1-apply.sh` (undo: `s1-undo.sh` or a reboot): the four jobs stayed stopped, tcp 11111 no longer answers from the LAN, DIAL still does; the owner's checklist passed the same day. A full backup (`tools/backup.sh`) was taken at 06:52 UTC, before any boot hook. The boot hook (`profiles/privacy/lumen-privacy`, SHA-256 `35747be3…`) was installed with `tools/privacy-hook.sh install` at 07:00 UTC, the first persistent change. After a reboot at 07:03:49 UTC it added the rule and stopped all four jobs at 07:04:23, about 37 s into the boot; tcp 11111 again didn't answer from the LAN, and DIAL did. The owner's quick check came after the reboot of 2026-10-31 16:10 UTC, with S1's and Guard's hooks both running: Netflix, YouTube and casting all work. **Reinstalled** with its log in `/var/lib/lumen/log` rather than `/tmp`, after a backup (`Lumen-backups/20261031T170258Z`): `tools/privacy-hook.sh install` at 17:05 UTC (SHA-256 `b1d9b4c8…`), staged in `/var/lib/lumen/stage` and checked there. After a reboot at 17:09:56 UTC it added the rule and stopped all four jobs at 17:10:29, logging only to `/var/lib/lumen/log/lumen-privacy.log` with the install run kept as `.log.1`; the owner's check passed again |
 | G1 | Guard, log only: forwards everything | a week of names across power-offs, summarised like the capture. Built 2026-10-30 (`shell/crates/lumen-guard`, `profiles/privacy/lumen-guard`, `tools/guard.sh`). The redirect design was tried by hand on the B9 on 2026-10-31 and failed open as designed. The hook was rebuilt around `resolv.conf`, a design proven by hand the same day. The new hook passed its by-hand run on 2026-10-31 15:25 to 15:54 UTC: one read-only mount, both rules, 940 kB resident, Netflix's own resolver (8.8.8.8) caught by the rules, the kill switch failing open in 5 s, a Wi-Fi drop survived, a hung Guard failing open in 2 min 51 s, nothing left after `guard-undo.sh`. P11 decided and tried by hand the same day; the hook now names connman second. **Installed** after a backup (`Lumen-backups/20261031T160857Z`): `tools/guard.sh install` at 16:10 UTC (hook SHA-256 `75d2ae6d…`), then a reboot over SSH at 16:10:51. The hook started 37 s into the boot and Guard was answering a second later: both nameserver lines, the read-only mount, both rules, 104 lookups in its first 90 s with no upstream error or timeout; S1's hook ran alongside as before. After that boot the owner checked Netflix, YouTube and casting: all work. The week of log runs from 2026-10-31 16:11 UTC. **Reinstalled** with its log in `/var/lib/lumen/log` rather than `/tmp`, after the same backup as S1's (`20261031T170258Z`): `tools/guard.sh install` at 17:07 UTC (hook SHA-256 `3ca099ec…`, binary `bcb81e80…`); its one run found Guard running and did nothing. After a reboot at 17:09:56 UTC, Guard started from the new binary at 17:10:29 with both nameserver lines, the mount and both rules, and answered 43 lookups in its first minute with no upstream error or timeout. Its log is in a `drwx------` folder of root's, and nothing of Lumen's was left in `/tmp`. The owner's check passed again, and the week of log goes on (the lookup log was kept) |
 | S2 | S1's additions (decision 11), each after a read-only look at its values: LG's ACR consent flags off (`acrOnAllowed`, `acrAdAllowed`, `additional1Allowed`) and `acr2` held down from boot; UEI's `iconnectivity` held down by a do-nothing stand-in mounted over it in RAM; the `INPUT` rules for 3000/3001, the DLNA ports, 7000 and HomeKit, one at a time | each checked with casting, Netflix and the store; then folded into `lumend` (decision 14) |
-| G2 | Guard blocks by default (decision 11): only the allowlist resolves; suffix carve-outs from Lumen's measured names and the imported lists (hagezi, Perflyst, Glasshouse's names, each in its own file with its license); learning windows started from the owner's devices; the owner's own additions kept off the public repository; `OUTPUT` reject for 156.147.0.0/16 once a capture clears it | the store-safe check and the checklist pass, also after a cold boot; a learning window adds and drops a name |
+| G2 | Guard blocks by default (decision 11): only the allowlist resolves; suffix carve-outs from Lumen's measured names and the imported lists (hagezi, Perflyst, Glasshouse's names, each in its own file with its license); learning windows started from the owner's devices; the owner's own additions kept off the public repository; `OUTPUT` reject for 156.147.0.0/16 once a capture clears it | the store-safe check and the checklist pass, also after a cold boot; a learning window adds and drops a name. **Built 2026-11-08** off the TV (lane H): block mode, `profiles/guard/`, the owner's file, learning windows and the mode switch, `store-safe-check.sh --stage 5`; tested in `cargo test` and the tool tests, not yet on the TV ("G2 on the TV"). The address rule is not built |
 | G3 | Encrypted upstream (P4): Quad9 over DNS over TLS (`dns.quad9.net`), rustls with ring and webpki-roots on a plain socket. Clear through the router only while the clock is implausible after a power cut or Quad9 is unreachable, logged and shown | lookups leave the TV only to Quad9, except the logged fallback |
 | G4 | Senders stopped, one job per check | each job's effect is recorded; the checklist passes |
 | G5 | Privacy panel in the shell, read-only (decision 12): what is blocked, what was denied, each layer's state, the fallback if used | the owner sees today's blocked and denied names and counts on the TV, and nothing on the TV can loosen them |

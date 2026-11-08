@@ -21,6 +21,11 @@ class GuardLogTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
+        os.makedirs(os.path.join(self.dir.name, 'rules', 'imported'))
+        self.write('rules/allowlist.txt', 'netflix.com\nlumen.invalid\n')
+        self.write('rules/carve-outs.txt', '=logs.netflix.com\n')
+        self.write('rules/required-blocks.txt', 'snu.lge.com\n')
+        self.write('rules/imported/list.txt', '*.ads.example\n')
 
     def write(self, name, text):
         path = os.path.join(self.dir.name, name)
@@ -28,14 +33,12 @@ class GuardLogTest(unittest.TestCase):
             f.write(text)
         return path
 
-    def profile(self):
-        return ['--allowlist', self.write('allow.txt', 'netflix.com\n'),
-                '--required', self.write('req.txt', 'snu.lge.com\n'),
-                '--hosts', self.write('h.hosts', '# 0.0.0.0\tmaybe.example\n')]
-
-    def run_main(self, *logs):
+    def run_main(self, *logs, owner=None):
+        args = [*logs, '--rules', os.path.join(self.dir.name, 'rules')]
+        if owner:
+            args += ['--owner', self.write('owner.txt', owner)]
         with redirect_stdout(io.StringIO()) as out:
-            code = lookups.main([*logs, *self.profile()])
+            code = lookups.main(args)
         self.assertEqual(code, 0)
         return out.getvalue()
 
@@ -43,21 +46,34 @@ class GuardLogTest(unittest.TestCase):
         old = self.write('lookups.log.1', f'{T0} A www.netflix.com allow\n'
                                           f'{T0 + 1} AAAA www.netflix.com allow\n')
         new = self.write('lookups.log', f'{T0 + 60} A www.netflix.com allow\n'
-                                        f'{T0 + 61} A snu.lge.com would-block\n'
-                                        f'{T0 + 62} A maybe.example allow\n'
-                                        f'{T0 + 63} - - allow\n')
+                                        f'{T0 + 61} A snu.lge.com block\n'
+                                        f'{T0 + 62} A new.example learn\n'
+                                        f'{T0 + 63} A x.ads.example would-block\n'
+                                        f'{T0 + 64} A logs.netflix.com allow\n'
+                                        f'{T0 + 65} - - block\n')
         report = self.run_main(old, new)
-        self.assertIn('2 file(s), 6 lookups of 4 names', report)
-        self.assertIn('Would-block: 1 lookups of 1 names.', report)
+        self.assertIn('2 file(s), 8 lookups of 6 names', report)
+        self.assertIn('Logged block or would-block: 3 lookups of 3 names; '
+                      'learned: 1 lookups of 1 names.', report)
+        self.assertIn('These G2 rules block 4 lookups of 4 names.', report)
         self.assertIn('| www.netflix.com | 3 | A, AAAA | 2026-10-30 00:00:00Z | 2026-10-30 00:01:00Z '
-                      '| allow | allow |', report)
-        self.assertIn('| snu.lge.com | 1 | A |', report)
-        self.assertIn('| would-block | block |', report)
-        self.assertIn('| maybe.example | 1 | A |', report)
-        self.assertIn('| allow | candidate |', report)
+                      '| allow | allow | allowlist |', report)
+        self.assertIn('| block | block | required |', report)
+        self.assertIn('| new.example | 1 | A |', report)
+        self.assertIn('| learn | block | default |', report)
+        self.assertIn('| would-block | block | list |', report)
+        # Allowed when Guard logged it, carved out now.
+        self.assertIn('| logs.netflix.com | 1 | A |', report)
+        self.assertIn('| allow | block | carve-outs |', report)
         self.assertIn('| - | 1 | - |', report)
         # Most looked-up first.
         self.assertLess(report.index('www.netflix.com'), report.index('snu.lge.com'))
+
+    def test_the_owners_file_counts(self):
+        log = self.write('lookups.log', f'{T0} A new.example learn\n')
+        report = self.run_main(log, owner='=new.example\n')
+        self.assertIn('| learn | allow | owner |', report)
+        self.assertIn('These G2 rules block 0 lookups of 0 names.', report)
 
     def test_bad_lines_are_skipped_and_counted(self):
         log = self.write('lookups.log', f'{T0} A a.example allow\nhalf a line\n'

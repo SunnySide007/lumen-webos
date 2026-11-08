@@ -6,8 +6,8 @@
 Reads classic pcap files (link types Linux SLL 113, SLL2 276, Ethernet 1 and
 raw IP 101) and reports, for each name the TV looked up (DNS over UDP or TCP)
 or sent in a TLS ClientHello (SNI): how often, first and last seen, how it was
-seen, and whether profiles/glasshouse lists it as allowed or blocked. A second
-table lists the addresses the TV connected to (TCP SYN, QUIC) that no DNS
+seen, and whether profiles/guard and profiles/glasshouse list it as allowed
+or blocked. A second table lists the addresses the TV connected to (TCP SYN, QUIC) that no DNS
 answer in the capture returned.
 
 DNS counts are queries by apps. The TV's apps ask the connman proxy on 127.0.0.1,
@@ -46,8 +46,12 @@ LAN_NETS = [ipaddress.ip_network(n) for n in (
     '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16',
     'fc00::/7', 'fe80::/10')]
 
+# The allowlist and firmware hosts are Guard's now (profiles/guard); the
+# candidate hosts list stays in profiles/glasshouse, as history (decision 13).
 PROFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       '..', '..', 'profiles', 'glasshouse')
+                       '..', '..', 'profiles', 'guard')
+HOSTS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     '..', '..', 'profiles', 'glasshouse', 'b9-aggressive.hosts')
 
 
 class PcapError(Exception):
@@ -352,7 +356,7 @@ class Summary:
 
 
 class Lists:
-    """profiles/glasshouse rules: allowlist suffixes and block entries."""
+    """Guard's allowlist and firmware hosts, and the Glasshouse-era candidates."""
 
     def __init__(self, allow=(), exact=(), block=(), candidate=()):
         self.allow, self.exact = set(allow), set(exact)
@@ -475,7 +479,7 @@ def main(argv=None):
     parser.add_argument('pcaps', nargs='+', help='pcap files from tools/capture.sh fetch')
     parser.add_argument('--allowlist', default=os.path.join(PROFILE, 'allowlist.txt'))
     parser.add_argument('--required', default=os.path.join(PROFILE, 'required-blocks.txt'))
-    parser.add_argument('--hosts', default=os.path.join(PROFILE, 'b9-aggressive.hosts'))
+    parser.add_argument('--hosts', default=HOSTS)
     args = parser.parse_args(argv)
     summary = Summary()
     for path in args.pcaps:

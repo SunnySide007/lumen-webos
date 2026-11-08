@@ -28,14 +28,22 @@ profile:
 * hagezi: `*.rdx2.lgtvsdp.com` and `*.rdx2.nextlgsdp.com`, LG's report
   uploads beside the store.
 * Perflyst: `us.nextlgsdp.com` and the other country names under
-  `nextlgsdp.com`, `smartshare.lgtvsdp.com`, `jp.lgtvsdp.com` and
-  `cert-test.sandbox.google.com`. Perflyst notes that blocking
-  `ngfts.lge.com` loses the store's thumbnails; Guard blocks it by default
-  all the same (no rule allows it), which the trial checks.
+  `nextlgsdp.com` (not used by the B9 in G1's week),
+  `device-metrics-us.amazon.com`, four `*.s3.amazonaws.com` and
+  `*.elb.amazonaws.com` names, three Android TV names under
+  `googleapis.com`, and `cert-test.sandbox.google.com`.
+* Perflyst also lists `customerevents.netflix.com`, `ichnaea.netflix.com`
+  and `tv-static.scdn.co`. The allowlist keeps those three by exact rules:
+  Netflix's logging stays allowed until the owner tries blocking it (P5),
+  and Spotify's TV files stay until a trial says otherwise.
+* Perflyst notes that blocking `ngfts.lge.com` loses the store's
+  thumbnails. Guard blocks it by default all the same (no rule allows it),
+  which the trial checks.
 * Glasshouse: the same report and beacon names, by region.
 
 None blocks a name Guard must resolve (`MUST_RESOLVE`), and Guard refuses to
-block if one ever did.
+block if one ever did. `python3 -I tools/guard/rules.py NAME...` says which
+rule decides a name.
 
 ## Refreshing
 

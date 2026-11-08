@@ -43,6 +43,9 @@ googleapis.com          # seed: Widevine provisioning and licences
 
 # --- Netflix (decision 11 and P5: its logging names stay allowed) ---
 netflix.com             # seed, G1: app, API, push and logs
+=customerevents.netflix.com # G1: Perflyst's list blocks these two of
+=ichnaea.netflix.com    # Netflix's logging names; P5 keeps them allowed
+                        # until the owner tries blocking them
 netflix.net             # G1: lg-tv-2019.prod.partner.netflix.net, the LG
                         # device partner config asked at every Netflix start
 nflxext.com             # seed, G1: assets
@@ -72,6 +75,8 @@ plex.direct             # seed: TLS names for the owner's Plex server
 # --- Spotify (Spotify Connect from the Pixel) ---
 spotify.com             # seed
 scdn.co                 # seed: audio and artwork CDN
+=tv-static.scdn.co      # Perflyst's list blocks it; by its name the TV app's
+                        # own files, so the store-safe side wins until tried
 spotifycdn.com          # seed
 spotifycdn.net          # seed
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Lumen Guard, stage G1, started by hand (docs/specs/privacy.md, "Lumen Guard"):
+# Lumen Guard, started by hand (docs/specs/privacy.md, "Lumen Guard"):
 #
 #   tools/guard.sh push
 #   tools/tv.sh script profiles/privacy/guard-apply.sh

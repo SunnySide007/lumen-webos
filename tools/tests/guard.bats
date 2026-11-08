@@ -207,7 +207,7 @@ connmans() {
     [ "$status" -eq 0 ]
     [ -z "$output" ]
     wait_for 'goes through Guard'
-    grep -qxF "guard --listen 127.0.0.2:53 --upstream 192.0.2.1:53 --rules $T/guard/rules --log $T/guard --status $T/guard/status --dscp 7" "$CALLS"
+    grep -qxF "guard --listen 127.0.0.2:53 --upstream 192.0.2.1:53 --rules $T/guard/rules --log $T/guard --status $T/guard/status --dscp 7 --mode-file $T/guard/mode --owner $T/guard/owner.txt --learn $T/guard/learn" "$CALLS"
     [ "$(cat "$T/guard/lumen-guard.pid")" -gt 1 ]
     [ "$(cat "$T/guard/resolv.conf")" = "$OURS" ]
     grep -qxF "mount --bind $T/guard/resolv.conf $T/misc/resolv.conf" "$CALLS"
@@ -736,7 +736,8 @@ esac
 EOF
     chmod +x "$T/tv.sh"
     echo "not really an ARM binary" >"$T/lumen-guard.bin"
-    export R LUMEN_TV_SH="$T/tv.sh" LUMEN_GUARD_BIN="$T/lumen-guard.bin" LUMEN_GUARD_OUT="$T/out"
+    export R LUMEN_TV_SH="$T/tv.sh" LUMEN_GUARD_BIN="$T/lumen-guard.bin" LUMEN_GUARD_OUT="$T/out" \
+        LUMEN_GUARD_OWNER="$T/private/guard/owner.txt"
     GUARDCTL="$BATS_TEST_DIRNAME/../guard.sh"
 }
 
@@ -760,9 +761,15 @@ guardctl() {
     d="$R/var/lib/lumen/guard"
     cmp "$T/lumen-guard.bin" "$d/lumen-guard"
     [ -x "$d/lumen-guard" ]
-    for f in allowlist.txt required-blocks.txt b9-aggressive.hosts; do
-        cmp "$BATS_TEST_DIRNAME/../../profiles/glasshouse/$f" "$d/rules/$f"
+    guard_profile="$BATS_TEST_DIRNAME/../../profiles/guard"
+    for f in allowlist.txt required-blocks.txt carve-outs.txt imported/hagezi-lgwebos.txt \
+        imported/perflyst-smarttv.txt imported/glasshouse.txt; do
+        cmp "$guard_profile/$f" "$d/rules/$f"
     done
+    # Only the rule files: no licence or README, and nothing left over.
+    [ "$(cd "$d/rules" && find . -type f | sort | tr '\n' ' ')" = \
+        "./allowlist.txt ./carve-outs.txt ./imported/glasshouse.txt ./imported/hagezi-lgwebos.txt ./imported/perflyst-smarttv.txt ./required-blocks.txt " ]
+    [ ! -e "$d/rules.new" ] && [ ! -e "$d/rules.old" ]
     cmp "$PROFILES/lumen-guard" "$d/boot-hook"
     [ ! -e "$R/var/lib/lumen/stage/guard" ]
     # Uploads go only to the root-only stage, never /tmp, and nothing goes
@@ -853,7 +860,8 @@ guardctl() {
     cmp "$R/var/lib/lumen/guard/lookups.log.1" "$T/out/lookups.log.1"
     [[ "$output" == *"3 lookups of 2 names"* ]]
     [[ "$output" == *"| www.netflix.com | 2 | A |"* ]]
-    [[ "$output" == *"| snu.lge.com | 1 | A |"*"| would-block | block |"* ]]
+    [[ "$output" == *"| snu.lge.com | 1 | A |"*"| would-block | block | required |"* ]]
+    [[ "$output" == *"| allow | allow | allowlist |"* ]]
 }
 
 @test "guard.sh log with no log on the TV says so" {
@@ -906,4 +914,130 @@ guardctl() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"Guard: running, pid $pid"* ]]
     [[ "$output" == *"no mount over resolv.conf"* ]]
+}
+
+# The owner's controls (G2): the mode file, the learning window and the
+# owner's own rules, written on the fake TV as Guard reads them.
+
+@test "guard.sh block trial, on and off write and remove the mode file, root's alone" {
+    fake_tv
+    guardctl block trial
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"until the TV next boots"* ]]
+    m="$R/var/lib/lumen/guard/mode"
+    [ "$(cat "$m")" = "block $(cat /proc/sys/kernel/random/boot_id)" ]
+    [[ "$(ls -l "$m")" == "-rw-------"* ]]
+    guardctl block on
+    [ "$status" -eq 0 ]
+    [ "$(cat "$m")" = "block" ]
+    [ ! -e "$m.tmp" ]
+    guardctl block off
+    [ "$status" -eq 0 ]
+    [ ! -e "$m" ]
+    guardctl block maybe
+    [ "$status" -eq 1 ]
+}
+
+@test "guard.sh block on refuses an owner file that would block a paid app" {
+    fake_tv
+    mkdir -p "$T/private/guard"
+    printf '!=www.youtube.com\n' >"$LUMEN_GUARD_OWNER"
+    guardctl block on
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"www.youtube.com is not allowed (owner)"* ]]
+    [ ! -e "$R/var/lib/lumen/guard/mode" ]
+}
+
+@test "guard.sh learn opens one window at a time, by the TV's clock, and learn stop closes it" {
+    fake_tv
+    guardctl learn
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"learning for 15 minutes"* ]]
+    l="$R/var/lib/lumen/guard/learn"
+    read -r start end <"$l"
+    [ $((end - start)) -eq 900 ]
+    [[ "$(ls -l "$l")" == "-rw-------"* ]]
+    guardctl learn 5
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"already open, until $end"* ]]
+    [ "$(cat "$l")" = "$start $end" ]
+    guardctl learn stop
+    [ "$status" -eq 0 ]
+    [ ! -e "$l" ]
+    guardctl learn 61
+    [ "$status" -eq 1 ]
+    guardctl learn soon
+    [ "$status" -eq 1 ]
+    # A window that has ended doesn't stop a new one.
+    echo "100 200" >"$l"
+    guardctl learn 1
+    [ "$status" -eq 0 ]
+    read -r start end <"$l"
+    [ $((end - start)) -eq 60 ]
+}
+
+@test "guard.sh learned lists the names the latest window learned" {
+    fake_tv
+    g="$R/var/lib/lumen/guard"
+    echo "2000 2900" >"$g/learn"
+    printf '1999 A before.example learn\n2001 A new.example learn\n2002 AAAA new.example learn\n2003 A cdn.example learn\n2004 A www.netflix.com allow\n2005 A odd|name learn\n' >"$g/lookups.log"
+    guardctl learned
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"2  new.example"* ]]
+    [[ "$output" == *"1  cdn.example"* ]]
+    [[ "$output" == *"odd characters, left out"* ]]
+    [[ "$output" != *"before.example"* ]]
+    [[ "$output" != *"www.netflix.com"* ]]
+    rm "$g/lookups.log"
+    guardctl learned
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"no names learned"* ]]
+}
+
+@test "guard.sh keep and drop change the owner's file here and push it to the TV, checked" {
+    fake_tv
+    guardctl keep new.example cdn.new.example
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"kept: new.example"* ]]
+    [[ "$output" == *"SHA-256 checked"* ]]
+    grep -q '^=new.example  # kept ' "$LUMEN_GUARD_OWNER"
+    grep -q '^=cdn.new.example  # kept ' "$LUMEN_GUARD_OWNER"
+    tv="$R/var/lib/lumen/guard/owner.txt"
+    cmp "$LUMEN_GUARD_OWNER" "$tv"
+    [[ "$(ls -l "$tv")" == "-rw-------"* ]]
+    [ ! -e "$R/var/lib/lumen/stage/guard.owner" ]
+    guardctl keep new.example
+    [[ "$output" == *"already kept: new.example"* ]]
+    [ "$(grep -c '^=new.example' "$LUMEN_GUARD_OWNER")" -eq 1 ]
+    guardctl drop new.example gone.example
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"dropped: new.example"* ]]
+    [[ "$output" == *"not in the owner's file: gone.example"* ]]
+    not grep -q '^=new.example' "$LUMEN_GUARD_OWNER"
+    grep -q '^=cdn.new.example' "$LUMEN_GUARD_OWNER"
+    cmp "$LUMEN_GUARD_OWNER" "$tv"
+    for bad in 'Up.Example' 'a b' '../x' '.x' 'x..y' "x';rm"; do
+        guardctl keep "$bad"
+        [ "$status" -eq 1 ]
+    done
+    guardctl keep
+    [ "$status" -eq 1 ]
+}
+
+@test "guard.sh keep refuses a push that would block the store, and owner pull fetches the TV's copy" {
+    fake_tv
+    mkdir -p "$T/private/guard"
+    printf '!lgtvsdp.com\n' >"$LUMEN_GUARD_OWNER"
+    guardctl keep new.example
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"us.lgtvsdp.com is not allowed (owner)"* ]]
+    [ ! -e "$R/var/lib/lumen/guard/owner.txt" ]
+    printf '=from-the-tv.example\n' >"$R/var/lib/lumen/guard/owner.txt"
+    guardctl owner pull
+    [ "$status" -eq 0 ]
+    [ "$(cat "$LUMEN_GUARD_OWNER")" = "=from-the-tv.example" ]
+    grep -q '^!lgtvsdp.com' "$LUMEN_GUARD_OWNER.bak"
+    guardctl owner
+    [ "$status" -eq 0 ]
+    cmp "$LUMEN_GUARD_OWNER" "$R/var/lib/lumen/guard/owner.txt"
 }

@@ -507,6 +507,11 @@ mod tests {
             "rr5---sn-bvvbaxivnuxqjvm-n5oe.googlevideo.com",
             "plex.direct",
             "lumen-probe.invalid",
+            // On Perflyst's list, kept by an exact rule: P5 for Netflix's
+            // logging, the store-safe side for Spotify's TV files.
+            "customerevents.netflix.com",
+            "ichnaea.netflix.com",
+            "tv-static.scdn.co",
         ]) {
             assert_eq!(v(name), Verdict::Allow, "{name}");
         }
@@ -535,6 +540,7 @@ mod tests {
             "us.rdx2.nextlgsdp.com",
             "us.nextlgsdp.com",
             "cert-test.sandbox.google.com",
+            "device-metrics-us.amazon.com",
             // Ad and telemetry hosts no rule allows.
             "static.doubleclick.net",
             "global.telemetry.insights.video.a2z.com",

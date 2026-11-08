@@ -1,5 +1,8 @@
 # profiles/glasshouse: aggressive, store-safe privacy (Phase 1)
 
+History: Glasshouse is never installed (decision 13), and Lumen Guard does
+the blocking ([profiles/guard](../guard/README.md)).
+
 How to configure [Glasshouse](https://github.com/rorygallagher2024/glasshouse)
 for a quiet TV that still updates Netflix and Prime Video. Status: the files
 are ready; the block list waits for the 24-hour capture of the B9.
@@ -7,8 +10,8 @@ are ready; the block list waits for the 24-hour capture of the B9.
 | File | What it is |
 |---|---|
 | [aggressive.md](aggressive.md) | The settings recipe, in four stages, with the cost of each and the manual checklist |
-| [allowlist.txt](allowlist.txt) | Names that must never be blocked (suffix rules, `=` for exact), each with its reason and source |
-| [required-blocks.txt](required-blocks.txt) | LG's firmware update hosts, which must be blocked |
+| [../guard/allowlist.txt](../guard/allowlist.txt) | Names that must never be blocked (suffix rules, `=` for exact), each with its reason and source. Moved to `profiles/guard` on 2026-11-08, where Lumen Guard's G2 reads it |
+| [../guard/required-blocks.txt](../guard/required-blocks.txt) | LG's firmware update hosts, which must be blocked; moved with it |
 | [b9-aggressive.hosts](b9-aggressive.hosts) | Lumen's extra hosts for Glasshouse's custom list. Research candidates only, all commented out until the capture confirms them |
 | [PINNED.md](PINNED.md) | The tested Glasshouse (0.118.0) and plx-native (0.8.0) builds, with SHA-256 |
 

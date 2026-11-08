@@ -12,6 +12,10 @@
 # Raw, unredacted recon output; only redacted copies go in docs/device/
 /tools/out/
 
+# The owner's own files, which say what the household uses: Lumen Guard's
+# owner rules (private/guard/owner.txt, decision 12)
+/private/
+
 # The owner's own Top Shelf art (shell/assets/README.md), packed if present
 /shell/assets/art-owner/
 

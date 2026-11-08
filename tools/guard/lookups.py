@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
 """Summarises Lumen Guard's lookup log as a markdown table of names.
 
-    python3 -I tools/guard/lookups.py tools/out/guard/lookups.log*
+    python3 -I tools/guard/lookups.py tools/out/guard/lookups.log* [--owner FILE]
 
 tools/guard.sh log fetches the files and runs this. Each log line is
 `<unix seconds> <type> <name> <verdict>`; this counts the lookups of each
 name, the types asked, when it was first and last seen (UTC), Guard's verdict
-at the time, and what this checkout's profiles/glasshouse lists say now
-(tools/capture/summarize.py's rules, so "candidate" rows show). Guard sits
-behind connman's cache, so a count is how often connman asked the router: at
-least once per answer's lifetime, not once per app lookup.
+at the time (allow, learn, block, or would-block in log mode), and what this
+checkout's G2 rules (profiles/guard, plus the owner's file if given) decide
+now, with the rule that decides: tools/guard/rules.py, the same rules as
+Guard's. Guard sits behind connman's cache only for the programs that still
+ask connman, so a count is at least once per answer's lifetime, not once per
+app lookup.
 """
 
 import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'capture'))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, '..', 'capture'))
+sys.path.insert(0, HERE)
 
-from summarize import PROFILE, Lists, Seen, cell, when  # noqa: E402
+from summarize import Seen, cell, when  # noqa: E402
+
+import rules  # noqa: E402
 
 
 class Name:
@@ -31,6 +37,7 @@ class Name:
 # The boot hook's own probes (profiles/privacy/lumen-guard: the watchdog's
 # heartbeat once a minute) end in this; they are Guard's, not the TV's.
 PROBE_SUFFIX = '.lumen.invalid'
+REFUSED = ('block', 'would-block')
 
 
 def read_log(paths):
@@ -55,46 +62,62 @@ def read_log(paths):
     return names, read, skipped, probes
 
 
-def render(names, read, skipped, probes, files, lists):
-    lookups = sum(n.seen.count for n in names.values())
-    blocked = {k: n for k, n in names.items() if 'would-block' in n.verdicts or 'block' in n.verdicts}
+def lookups_of(names):
+    return sum(n.seen.count for n in names.values())
+
+
+def render(names, read, skipped, probes, files, decide):
+    """`decide(name)` gives (verdict, source) under this checkout's rules."""
     first = min((n.seen.first for n in names.values()), default=None)
     last = max((n.seen.last for n in names.values()), default=None)
+    refused = {k: n for k, n in names.items() if n.verdicts & set(REFUSED)}
+    learned = {k: n for k, n in names.items() if 'learn' in n.verdicts}
+    now = {k: decide(k) for k in names if k != '-'}
+    blocked_now = {k: names[k] for k, (v, _) in now.items() if v == 'block'}
     out = ['# Guard lookups', '']
-    out.append(f'{files} file(s), {lookups} lookups of {len(names)} names, '
+    out.append(f'{files} file(s), {lookups_of(names)} lookups of {len(names)} names, '
                f'{when(first)} to {when(last)}; {skipped} of {read} lines skipped, '
                f'{probes} heartbeat probes (*{PROBE_SUFFIX}) left out. '
-               f'Would-block: {sum(n.seen.count for n in blocked.values())} lookups of '
-               f'{len(blocked)} names.')
-    out.append('Counts are connman\'s questions to the router (its cache answers the rest). '
-               'Verdict is what Guard logged; List is what this checkout\'s '
-               'profiles/glasshouse says now ("-" for a query Guard could not read).')
-    out += ['', '| Name | Lookups | Types | First seen | Last seen | Verdict | List |',
-            '|---|---:|---|---|---|---|---|']
+               f'Logged block or would-block: {lookups_of(refused)} lookups of '
+               f'{len(refused)} names; learned: {lookups_of(learned)} lookups of '
+               f'{len(learned)} names. These G2 rules block {lookups_of(blocked_now)} '
+               f'lookups of {len(blocked_now)} names.')
+    out.append('Counts are lookups that reached Guard. Logged is what Guard said at the time; '
+               'G2 is what this checkout\'s rules (profiles/guard and the owner\'s file, if '
+               'given) decide now, and Rule the rule that decides ("-" for a query Guard '
+               'could not read).')
+    out += ['', '| Name | Lookups | Types | First seen | Last seen | Logged | G2 | Rule |',
+            '|---|---:|---|---|---|---|---|---|']
     for name, n in sorted(names.items(), key=lambda x: (-x[1].seen.count, x[0])):
+        verdict, source = now.get(name, ('-', '-'))
         out.append(f'| {cell(name)} | {n.seen.count} | {cell(", ".join(sorted(n.types)))} '
                    f'| {when(n.seen.first)} | {when(n.seen.last)} '
-                   f'| {cell(", ".join(sorted(n.verdicts)))} '
-                   f'| {"" if name == "-" else lists.status(name)} |')
+                   f'| {cell(", ".join(sorted(n.verdicts)))} | {verdict} | {cell(source)} |')
     if not names:
-        out.append('| none | | | | | | |')
+        out.append('| none | | | | | | | |')
     return '\n'.join(out) + '\n'
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n', 1)[0])
     parser.add_argument('logs', nargs='+', help='lookups.log files from tools/guard.sh log')
-    parser.add_argument('--allowlist', default=os.path.join(PROFILE, 'allowlist.txt'))
-    parser.add_argument('--required', default=os.path.join(PROFILE, 'required-blocks.txt'))
-    parser.add_argument('--hosts', default=os.path.join(PROFILE, 'b9-aggressive.hosts'))
+    parser.add_argument('--rules', default=rules.PROFILE, help='default: profiles/guard')
+    parser.add_argument('--owner', help="the owner's file, if any")
     args = parser.parse_args(argv)
     try:
         names, read, skipped, probes = read_log(args.logs)
+        owner = None
+        if args.owner:
+            with open(args.owner, encoding='utf-8', errors='replace') as f:
+                owner = rules.parse_owner(f.read())
     except OSError as e:
         print(f'lookups.py: {e}', file=sys.stderr)
         return 1
-    lists = Lists.load(args.allowlist, args.required, args.hosts)
-    sys.stdout.write(render(names, read, skipped, probes, len(args.logs), lists))
+    profile = rules.Rules(args.rules)
+    for w in profile.warnings:
+        print(f'lookups.py: {w}', file=sys.stderr)
+    sys.stdout.write(render(names, read, skipped, probes, len(args.logs),
+                            lambda name: profile.decide(name, owner)))
     return 0
 
 
