@@ -21,8 +21,11 @@ The HDR loop pipeline (studio/README.md) has its own container,
 `tools/studio.sh`. `make check` skips its numpy tests; run them with
 `tools/studio.sh python3 -I -m unittest discover -s tools/tests -p 'test_studio*.py'`.
 
-`tools/tv.sh` and `tools/recon.sh` run on the host and act on the TV over
-SSH as root. Ask before running any of them.
+The TV scripts (`tools/tv.sh`, `recon.sh`, `backup.sh`, `bench.sh`,
+`guard.sh`, `remote.sh`, `lumend.sh`, `takeover.sh`) run on the host and
+act on the TV over SSH as root. What runs without asking follows the tiers
+in docs/safety.md, "Working without asking" (the owner's OK of
+2026-11-08). Anything outside them is asked first.
 
 ## Rules
 

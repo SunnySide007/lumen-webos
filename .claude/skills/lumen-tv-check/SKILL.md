@@ -1,6 +1,6 @@
 ---
 name: lumen-tv-check
-description: Checks a Lumen build on the owner's LG OLED B9 the same way every milestone does. Builds the IPK, installs and launches it, collects frame statistics from the app's log for a set number of seconds, closes the app and puts back what was installed before, then reports average, worst and percentile frame times with the TV's model and firmware. Use when a milestone's "done when" needs a measurement on the TV (hello-gles at 60 fps, the home screen's frame time while moving, a milestone's closing check) or when asked to "check it on the TV" or "measure the frame times". Every TV step waits for the owner's yes.
+description: Checks a Lumen build on the owner's LG OLED B9 the same way every milestone does. Builds the IPK, installs and launches it, collects frame statistics from the app's log for a set number of seconds, closes the app and puts back what was installed before, then reports average, worst and percentile frame times with the TV's model and firmware. Use when a milestone's "done when" needs a measurement on the TV (hello-gles at 60 fps, the home screen's frame time while moving, a milestone's closing check) or when asked to "check it on the TV" or "measure the frame times". TV steps follow the tiers and the lab window in docs/safety.md.
 ---
 
 # Lumen TV check
@@ -15,15 +15,18 @@ everything here.
 
 ## Rules
 
-1. **Ask before every TV step.** A TV step is any command that reaches the TV,
-   which here means every `tools/tv.sh` call. They are grouped into four:
-   **A** look and back up, **B** install, **C** launch and measure, **D** close
-   and restore. Before each, say in chat what it will run and change, and wait
-   for a clear yes. The repo's permission prompt on `tools/tv.sh` is not the
-   ask; it is a second gate. Building, making the restore IPK and reading the
-   log on this PC need no ask.
-2. **Start only when the owner says the TV is free.** The app takes over the
-   screen, and other sessions may be using the TV (pairing a pad, capturing).
+1. **Follow the tiers.** A TV step is any command that reaches the TV, which
+   here means every `tools/tv.sh` call. They are grouped into four: **A**
+   look and back up, **B** install, **C** launch and measure, **D** close and
+   restore. All four are tier A in [docs/safety.md, "Working without
+   asking"](../../../docs/safety.md#working-without-asking-from-2026-11-08)
+   (the owner's OK of 2026-11-08), so they run without a yes. Anything this
+   skill does not list is placed in its tier first, and asked if it is tier C
+   or fits no tier.
+2. **Run only in the lab window.** The app takes over the screen, so it runs
+   in a lab window (docs/safety.md), or when the owner says the TV is free. It
+   never starts with another app or an HDMI input in front, and a real remote
+   press stops it: go to step D at once.
 3. **Nothing persistent.** No boot hooks, no settings, no reboot, no file on the
    TV beyond the app's own directory and its log. Run only the TV commands
    listed here; anything else is a new ask.
@@ -71,7 +74,7 @@ sh tools/dev.sh make ipk
   has that same name, so it says nothing about which commit it is; the report
   records the commit instead.
 
-## 2. Step A: look, and back up what is there (ask first)
+## 2. Step A: look, and back up what is there
 
 Read-only on the TV.
 
@@ -123,7 +126,7 @@ sh tools/tv.sh run 'ls -d /media/developer/apps/usr/palm/applications/'$APP' 2>/
   the files, so the restore still matches the backup's binary.
 * **If it is not installed,** the restore is removing it.
 
-## 3. Step B: install (ask first)
+## 3. Step B: install
 
 ```sh
 sh tools/tv.sh install dist/${APP}_<version>_arm.ipk
@@ -131,7 +134,7 @@ sh tools/tv.sh install dist/${APP}_<version>_arm.ipk
 
 Expect `installed`. On `install failed` or `install timeout`, go to step D.
 
-## 4. Step C: launch and measure (ask first; the owner is at the remote)
+## 4. Step C: launch and measure (the owner or the robot remote moves)
 
 Agree first on what the owner does on the remote while the clock runs:
 
@@ -291,7 +294,7 @@ What the log holds, for reading the output:
   so; keep that sentence when you pass the numbers on. The key, launch and
   foreground figures are over single events.
 
-## 5. Step D: close and restore (ask first)
+## 5. Step D: close and restore
 
 ```sh
 sh tools/tv.sh close $APP
