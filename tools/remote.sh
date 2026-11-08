@@ -20,7 +20,7 @@
 #   tools/remote.sh remove     take the key's line out of authorized_keys and
 #                              delete /var/lib/lumen/remote/; every other line
 #                              stays, and it refuses if no key would be left
-#   tools/remote.sh config [bus=library|command] [keys=none|keymanager]
+#   tools/remote.sh config [bus=library|command] [keys=none|keymanager|uinput]
 #                              show or change /var/lib/lumen/remote/ctl.conf,
 #                              which the next session reads
 #   tools/remote.sh keys FILE | --remove
@@ -214,8 +214,8 @@ cmd_config() {
     for arg in "$@"; do
         case $arg in
             bus=library | bus=command) bus=${arg#bus=} ;;
-            keys=none | keys=keymanager) keys=${arg#keys=} ;;
-            *) die "config takes bus=library|command and keys=none|keymanager, not $arg" ;;
+            keys=none | keys=keymanager | keys=uinput) keys=${arg#keys=} ;;
+            *) die "config takes bus=library|command and keys=none|keymanager|uinput, not $arg" ;;
         esac
     done
     if [ -z "$bus$keys" ]; then
@@ -226,7 +226,7 @@ cmd_config() {
     [ -n "$bus" ] || bus=$(conf_value "$current" bus)
     [ -n "$keys" ] || keys=$(conf_value "$current" keys)
     case $bus in library | command) ;; *) bus='command' ;; esac
-    case $keys in none | keymanager) ;; *) keys=none ;; esac
+    case $keys in none | keymanager | uinput) ;; *) keys=none ;; esac
     conf=$(mktemp)
     trap 'rm -f "$conf"' EXIT
     printf '# Written by tools/remote.sh config.\nbus %s\nkeys %s\n' "$bus" "$keys" >"$conf"

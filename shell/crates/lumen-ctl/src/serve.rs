@@ -605,6 +605,7 @@ pub fn run(cfg: Serve) -> ! {
                 Box::new(NoKeys)
             }
         },
+        KeysKind::Uinput => Box::new(crate::robot::UinputKeys::new(crate::robot::SETTLE)),
     };
     let out = Arc::new(Out::new(Box::new(io::stdout())));
     let events = Arc::new(Events::new(Arc::clone(&out), Arc::clone(&log)));

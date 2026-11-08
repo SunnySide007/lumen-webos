@@ -11,7 +11,7 @@ use crate::keys::KEYS_FILE;
 use crate::log::LOG_FILE;
 
 pub const USAGE: &str = "\
-usage: lumen-ctl serve [--bus library|command] [--keys none|keymanager] [--log FILE]
+usage: lumen-ctl serve [--bus library|command] [--keys none|keymanager|uinput] [--log FILE]
        lumen-ctl probe [--bus library|command]
        lumen-ctl probe-keys [--bus library|command]
        lumen-ctl play FILE [--settle-ms N]
@@ -22,8 +22,9 @@ serve speaks Lumen Remote's protocol (remote/ui/src/protocol.ts) on stdin and
 stdout, one JSON object per line, until stdin ends or SIGTERM or SIGHUP comes.
 --bus picks how luna is reached: library (libluna-service2, with
 subscriptions) or command (/usr/bin/luna-send, polled). --keys picks the route
-for `key`: none, or keymanager (LG's createKeyEvent, from the template in
-/var/lib/lumen/remote/keys.json). Without the flags, /var/lib/lumen/remote/
+for `key`: none, keymanager (LG's createKeyEvent, from the template in
+/var/lib/lumen/remote/keys.json) or uinput (a virtual remote, as play
+makes). Without the flags, /var/lib/lumen/remote/
 ctl.conf decides (`bus command`, `keys none` lines), else command and none.
 --log is where each request and reply is logged (default
 /var/lib/lumen/remote/lumen-ctl.log, moved to .1 at 1 MiB).
@@ -71,6 +72,7 @@ impl BusKind {
 pub enum KeysKind {
     None,
     Keymanager,
+    Uinput,
 }
 
 impl KeysKind {
@@ -78,7 +80,10 @@ impl KeysKind {
         match value {
             "none" => Ok(Self::None),
             "keymanager" => Ok(Self::Keymanager),
-            other => Err(format!("--keys must be none or keymanager, not {other}")),
+            "uinput" => Ok(Self::Uinput),
+            other => Err(format!(
+                "--keys must be none, keymanager or uinput, not {other}"
+            )),
         }
     }
 }
@@ -304,7 +309,7 @@ mod tests {
 
     #[test]
     fn a_bad_settings_file_stops_serve() {
-        for bad in ["bus fake\n", "bus\n", "keys uinput\n", "colour blue\n"] {
+        for bad in ["bus fake\n", "bus\n", "keys usb\n", "colour blue\n"] {
             assert!(resolve(flags(&["serve"]), Some(bad)).is_err(), "{bad:?}");
         }
     }
@@ -313,7 +318,7 @@ mod tests {
     fn refuses_what_it_does_not_know() {
         for bad in [
             &["serve", "--bus", "dbus"][..],
-            &["serve", "--keys", "uinput"],
+            &["serve", "--keys", "usb"],
             &["serve", "--alive-ms", "5"],
             &["serve", "--shell", "sh"],
             &["serve", "--bus"],

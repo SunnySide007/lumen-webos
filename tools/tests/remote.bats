@@ -461,7 +461,7 @@ EOF
 
 @test "config refuses other values before it runs anything" {
     installed
-    for arg in bus=fake "keys=uinput" "bus=library;id" log=/tmp/x; do
+    for arg in bus=fake "keys=usb" "bus=library;id" log=/tmp/x; do
         remote config "$arg"
         [ "$status" -eq 1 ]
     done

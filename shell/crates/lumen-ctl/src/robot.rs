@@ -27,11 +27,15 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 
+use crate::bus::Bus;
+use crate::keys::KeyRoute;
+use crate::protocol::{ErrorCode, KEY_NAMES, Refusal};
 use crate::sys::uinput::{EV_KEY, EV_MSC, EV_SYN, Evdev, InputEvent, Uinput};
 
 pub const DEVICE_NAME: &str = "Lumen robot remote";
@@ -446,6 +450,58 @@ pub fn watch_remote(secs: u64, out: &mut impl Write) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// `serve --keys uinput`: the Remote's `key` verb on one virtual remote,
+/// made at the first press and kept for the session, so only that press
+/// waits `SETTLE` for the compositor to find it. A key the Magic Remote has
+/// no code for (`menu`) is refused as unavailable.
+pub struct UinputKeys {
+    device: Mutex<Option<Uinput>>,
+    settle: Duration,
+}
+
+impl UinputKeys {
+    pub fn new(settle: Duration) -> Self {
+        Self {
+            device: Mutex::new(None),
+            settle,
+        }
+    }
+}
+
+impl KeyRoute for UinputKeys {
+    fn name(&self) -> &'static str {
+        "uinput"
+    }
+
+    fn any(&self) -> bool {
+        KEY_NAMES.iter().any(|k| code_of(k).is_some())
+    }
+
+    fn press(&self, _: &dyn Bus, key: &'static str) -> Result<(), Refusal> {
+        let code = code_of(key).ok_or_else(|| {
+            Refusal::new(
+                ErrorCode::Unavailable,
+                format!("the remote has no code for {key}"),
+            )
+        })?;
+        let mut device = self.device.lock().unwrap_or_else(|e| e.into_inner());
+        if device.is_none() {
+            let codes: Vec<u16> = CODES.iter().map(|&(_, c)| c).collect();
+            let made = Uinput::create(DEVICE_NAME, &codes)
+                .map_err(|e| Refusal::new(ErrorCode::Failed, format!("/dev/uinput: {e}")))?;
+            *device = Some(made);
+            thread::sleep(self.settle);
+        }
+        let Some(dev) = device.as_mut() else {
+            return Err(Refusal::new(ErrorCode::Failed, "no virtual remote"));
+        };
+        let fail = |e: std::io::Error| Refusal::new(ErrorCode::Failed, format!("{key}: {e}"));
+        dev.emit(code, 1).map_err(fail)?;
+        thread::sleep(Duration::from_millis(TAP_MS));
+        dev.emit(code, 0).map_err(fail)
+    }
+}
+
 /// A pattern of one press of `name`, held `held_ms`.
 pub fn one_key(name: &str, held_ms: u64) -> Result<Pattern, String> {
     if code_of(name).is_none() {
@@ -559,6 +615,24 @@ mod tests {
             ]
         );
         assert!(one_key("power", 60).is_err());
+    }
+
+    #[test]
+    fn the_uinput_route_offers_keys_and_refuses_one_without_a_code() {
+        let route = UinputKeys::new(Duration::ZERO);
+        assert_eq!(route.name(), "uinput");
+        assert!(route.any());
+        let bus = crate::fake::FakeBus::new(false);
+        assert_eq!(
+            route.press(&bus, "menu").unwrap_err().code,
+            ErrorCode::Unavailable
+        );
+        for name in KEY_NAMES {
+            assert!(
+                name == "menu" || code_of(name).is_some(),
+                "{name} has no code"
+            );
+        }
     }
 
     #[test]

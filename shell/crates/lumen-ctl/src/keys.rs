@@ -4,7 +4,7 @@
 //! * `keymanager`: LG's `createKeyEvent`, with a payload built from the
 //!   template the PM writes into `/var/lib/lumen/remote/keys.json` once
 //!   `lumen-ctl probe-keys` has shown what the method wants.
-//! * `uinput` (not built): a virtual remote through `/dev/uinput`, the other
+//! * `uinput` (`robot::UinputKeys`): a virtual remote through `/dev/uinput`, the other
 //!   route R0 found. It would be one more `KeyRoute`.
 //!
 //! `keys.json`:
