@@ -27,7 +27,7 @@ step() {
 
 baseline() {
     [ -f tools/out/bench/baseline.json ] && return 0
-    for d in tools/out/bench/*-base-3a89955; do dir=$d; done
+    for d in tools/out/bench/2*-base-3a89955; do [ -d "$d" ] && dir=$d; done
     cp "$dir/summary.json" tools/out/bench/baseline.json &&
         echo "first-runs: baseline from $dir"
 }

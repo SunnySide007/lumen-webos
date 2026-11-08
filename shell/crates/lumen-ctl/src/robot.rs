@@ -688,4 +688,26 @@ mod tests {
         assert!(is_person(&ev(3, 0), |_| true), "pointer motion");
         assert!(is_person(&ev(2, 8), |_| true), "the wheel");
     }
+
+    #[test]
+    fn the_benchs_patterns_parse() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tools/bench");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if !(name.starts_with("pattern-") && name.ends_with(".txt")) {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            let p = Pattern::parse(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(
+                (30_000..=60_000).contains(&p.length_ms),
+                "{name}: {} ms",
+                p.length_ms
+            );
+            seen += 1;
+        }
+        assert!(seen >= 3, "found {seen} patterns in {}", dir.display());
+    }
 }

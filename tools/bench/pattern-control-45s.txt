@@ -1,0 +1,109 @@
+# The Control Center, for b5f35a6 and later: 45 s, the same every run.
+# Opens nothing and changes nothing.
+#
+# From the row, up reaches the gear and OK opens the panel; four taps down
+# move through its rows; Back closes it, back on the gear; down returns to
+# the row. OK only on the gear: OK on a Motion row turns a look off, saves
+# it, and changes the next run's look.
+#
+# One block is 5.00 s; nine of them are 45.0 s.
+repeat off
+
+tap up
+wait 500
+tap ok
+wait 1000
+taps down 4 350
+wait 400
+tap back
+wait 800
+tap down
+wait 890
+
+tap up
+wait 500
+tap ok
+wait 1000
+taps down 4 350
+wait 400
+tap back
+wait 800
+tap down
+wait 890
+
+tap up
+wait 500
+tap ok
+wait 1000
+taps down 4 350
+wait 400
+tap back
+wait 800
+tap down
+wait 890
+
+tap up
+wait 500
+tap ok
+wait 1000
+taps down 4 350
+wait 400
+tap back
+wait 800
+tap down
+wait 890
+
+tap up
+wait 500
+tap ok
+wait 1000
+taps down 4 350
+wait 400
+tap back
+wait 800
+tap down
+wait 890
+
+tap up
+wait 500
+tap ok
+wait 1000
+taps down 4 350
+wait 400
+tap back
+wait 800
+tap down
+wait 890
+
+tap up
+wait 500
+tap ok
+wait 1000
+taps down 4 350
+wait 400
+tap back
+wait 800
+tap down
+wait 890
+
+tap up
+wait 500
+tap ok
+wait 1000
+taps down 4 350
+wait 400
+tap back
+wait 800
+tap down
+wait 890
+
+tap up
+wait 500
+tap ok
+wait 1000
+taps down 4 350
+wait 400
+tap back
+wait 800
+tap down
+wait 890

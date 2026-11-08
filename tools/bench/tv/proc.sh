@@ -6,7 +6,7 @@ if [ -z "$pid" ]; then
     exit 0
 fi
 pid=${pid%% *}
-echo "rss_kb=$(sed -n 's/^VmRSS: *\([0-9]*\).*/\1/p' "/proc/$pid/status")"
+echo "rss_kb=$(sed -n 's/^VmRSS:[^0-9]*\([0-9]*\).*/\1/p' "/proc/$pid/status")"
 t1=$(awk '{print $14 + $15}' "/proc/$pid/stat")
 sleep 30
 t2=$(awk '{print $14 + $15}' "/proc/$pid/stat")
