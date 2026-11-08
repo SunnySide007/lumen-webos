@@ -5,7 +5,7 @@
 //! at that pace. After an idle wait the first frames go into the driver's
 //! queue at once and a later one waits for a free buffer: on the B9, frames 2
 //! and 3 of a burst take about 9 and 30 ms, two vsyncs together, so they are
-//! probably shown 16.7 ms apart (the slow-motion video is not read yet).
+//! probably shown 16.7 ms apart (no video confirms it; that check was dropped).
 //! Stepping the springs by that real time moves them 9 ms, then 30 ms: an
 //! uneven start to every tap. A `Pacer` gives each frame of a burst exactly one
 //! period of motion and lets real time in only in whole periods.

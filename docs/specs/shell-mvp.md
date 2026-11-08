@@ -245,7 +245,8 @@ With vsync the panel shows one frame a refresh, but the loop does not run at
 that pace. After an idle wait the driver takes a burst's first frames at once
 and makes a later one wait: on the B9, frames 2 and 3 take about 9 and 30 ms,
 two vsyncs together ("Measured on the B9", 14), so they are probably shown
-16.7 ms apart (the slow-motion video is not read yet). Stepped by real time,
+16.7 ms apart (never filmed: the slow-motion video was dropped on
+2026-11-08, look-and-feel.md target 3). Stepped by real time,
 the springs moved 9 ms, then 30 ms: an uneven start to every tap. So with
 vsync and the real clock, motion is paced (`lumen_core::pace`):
 
@@ -617,7 +618,7 @@ frame was slow, and where its time went, is not known.
 | H1 | Waking from idle: the GPU clock has dropped, or the buffer queue starts out of phase | A single tap's burst starts from idle and almost always misses; hello-gles drew without stopping and never missed | The slow frame is the burst's first or second; drawing without a stop removes it |
 | H2 | The pixel cost of the highp shader over about 4 Mpx a frame | Down's scroll misses; the cost moved from vertices to pixels | Slow frames mid-burst, their time in the swap; a flat or mediump shader removes them |
 | H3 | Main-thread work: rasterising glyphs, and uploading into an atlas the GPU still reads (on Mali, a copy of the 8 MB texture or a wait) | Each tap shows a new title, at 30 px under the tile and 72 px on the shelf | The slow frame has an upload and a high CPU time; glyphs made ahead remove it |
-| H4 | The measurement: the first swap returns at once and the second waits a whole vsync, with nothing lost on screen | A tap's worst frame is 28–34 ms, about a vsync plus the render | Always the burst's second frame; the slow-motion video shows no stutter |
+| H4 | The measurement: the first swap returns at once and the second waits a whole vsync, with nothing lost on screen | A tap's worst frame is 28–34 ms, about a vsync plus the render | Always the burst's second frame; the slow-motion video shows no stutter (the video was dropped on 2026-11-08: the frame lines and the owner's eye judge it) |
 | H5 | Paging from swap (39.7 MB resident, the B9 already swapping) | Weakly | Page faults jump in the slow frames |
 
 Two held Ups that started from idle stayed at 17.9 and 18.3 ms, against a
@@ -650,14 +651,16 @@ coordinates, separate programs for flat, shape and texture, and the
 background drawn without blending (H2); glyphs made ahead off the frame
 path, and no upload into an atlas the frame reads (H3); a short warm tail
 after a burst (H1); or, for H4, a burst's first frame time left out, said so
-here, and judged by the video.
+here, and judged by the video (dropped on 2026-11-08; judged by eye).
 
 Stage 3's first two parts (2026-10-23; not yet run on the TV), from the
 stage-3 spike:
 
 * **Springs stepped by whole vsyncs,** for H4's uneven start ("Motion",
-  "Paced by vsync"). It changes no frame time: the slow-motion video judges
-  it, 10 taps with and 10 without. The burst line counts the vsyncs skipped.
+  "Paced by vsync"). It changes no frame time: the slow-motion video was to
+  judge it, 10 taps with and 10 without; since that video was dropped
+  (2026-11-08), the owner's eye does. The burst line counts the vsyncs
+  skipped.
 * **Glyphs made ahead,** for H3. Once, when the screen has stayed settled
   50 ms after a burst (so the burst's queued frames have gone out) and the
   shell is visible, every app is painted into a batch that is thrown away.
@@ -691,7 +694,7 @@ about 31 ms. H3 is confirmed: every slow frame with an upload spent 9–25 ms
 in it. H5 is out for the motion. H1 is against: one frame, not a run of
 them, and the next frame is back at 16.7 ms. H2 stays open for the few real
 mid-burst misses, with nothing uploaded. The slow-motion video of the taps
-has not been read yet. Stage 2 waits. Stage 3 went ahead from a spike on the
+was never read, and was dropped on 2026-11-08. Stage 2 waits. Stage 3 went ahead from a spike on the
 PC: hardware float first ("Measured on the B9", 16), then springs stepped by
 whole vsyncs and glyphs made ahead (the stage-3 paragraph above), not yet
 run on the TV.
