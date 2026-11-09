@@ -1,4 +1,5 @@
 use super::*;
+use crate::render::Shader;
 use std::time::Duration;
 
 use lumen_core::apps::{App, AppId, AppKind, Launcher, MockLauncher};
@@ -139,10 +140,10 @@ fn the_art_is_drawn_first_by_its_own_program_over_the_whole_screen() {
     let batch = painted(&home, &mut assets);
     assert_eq!(batch.quad_bounds(0), (0.0, 0.0, SCREEN_W, SCREEN_H));
     let runs = batch.runs();
-    assert!(runs[0].art && runs[0].texture == Texture::Own(9));
+    assert!(runs[0].shader == Shader::Art && runs[0].texture == Texture::Own(9));
     assert_eq!(runs[0].count, 6, "the art alone");
     assert!(
-        runs[1..].iter().all(|r| !r.art),
+        runs[1..].iter().all(|r| r.shader == Shader::Main),
         "the rest is the main program's"
     );
     // Lumen's art has its fade drawn in: nothing goes over it. The owner's
@@ -161,7 +162,7 @@ fn the_art_is_drawn_first_by_its_own_program_over_the_whole_screen() {
 fn without_art_the_gradient_fills_the_screen() {
     let batch = painted(&mock_home(), &mut assets());
     assert_eq!(batch.quad_bounds(0), (0.0, 0.0, SCREEN_W, SCREEN_H));
-    assert!(batch.runs().iter().all(|r| !r.art));
+    assert!(batch.runs().iter().all(|r| r.shader != Shader::Art));
 }
 
 #[test]
@@ -370,16 +371,26 @@ fn the_gear_is_a_button_and_a_cog_of_ten_circles() {
 #[test]
 fn the_control_center_fits_the_budget_and_dims_only_with_the_looks_dim() {
     let mut assets = assets();
-    let dimmed = quads(&control_open(Look::FULL), &mut assets);
-    assert!(dimmed <= QUAD_BUDGET, "{dimmed} quads");
-    let undimmed = quads(
+    let dimmed = painted(&control_open(Look::FULL), &mut assets);
+    let n = dimmed.quad_count();
+    assert!(n <= QUAD_BUDGET, "{n} quads");
+    let undimmed = painted(
         &control_open(Look {
             dim: false,
             ..Look::FULL
         }),
         &mut assets,
     );
-    assert_eq!(undimmed + 1, dimmed);
+    // The dim is no quad: the home under it is darker by the dim's alpha,
+    // and the panel, drawn last, is not.
+    assert_eq!(undimmed.quad_count(), n);
+    let k = 1.0 - PANEL_DIM.3;
+    let (home, panel) = (undimmed.quad_color(0), undimmed.quad_color(n - 1));
+    assert_eq!(
+        dimmed.quad_color(0),
+        Rgba(home.0 * k, home.1 * k, home.2 * k, home.3)
+    );
+    assert_eq!(dimmed.quad_color(n - 1), panel);
     // On its way in, it slides from the right.
     let mut home = mock_home().with_look(Look::FULL);
     let _ = home.handle(press(Dir::Up), Duration::ZERO);
@@ -388,4 +399,49 @@ fn the_control_center_fits_the_budget_and_dims_only_with_the_looks_dim() {
     let control = home.view().control.expect("opening");
     assert!(control.offset > 0.0 && control.shown < 1.0);
     assert!(quads(&home, &mut assets) <= QUAD_BUDGET);
+}
+
+/// The main program's pixels in a frame, in screens: flat, shape and image
+/// quads (`Batch::shaded`).
+fn main_pixels(batch: &Batch) -> f32 {
+    batch.shaded()[2..].iter().sum()
+}
+
+#[test]
+fn other_apps_and_the_control_center_shade_about_what_the_home_does() {
+    // On the B9 a screen of the main program's pixels cost about 11 ms
+    // (2026-11-09, 9d5a988: the full-screen dims took "Other apps" and the
+    // Control Center from 16.9 ms a frame to 28). With the ambient hero
+    // behind them, at the look the owner sees:
+    let mut assets = assets();
+    ambient(&mut assets);
+    let mut home = mock_home().with_look(Look::DEFAULT);
+    home.show_hero(Some(Hero::Ambient));
+    home.settle_now();
+    let batch = painted(&home, &mut assets);
+    let at_home = main_pixels(&batch);
+    let art = batch.shaded()[0];
+    assert!(at_home < 0.5, "{at_home} screens");
+    // "Other apps", turned.
+    for _ in 0..4 {
+        let _ = home.handle(press(Dir::Right), Duration::ZERO);
+    }
+    home.settle_now();
+    assert_eq!(home.handle(act(Action::Select), Duration::ZERO), None);
+    home.settle_now();
+    assert_eq!(home.view().page, 1.0);
+    let batch = painted(&home, &mut assets);
+    let s = batch.shaded();
+    assert_eq!((s[0], s[1]), (art, 0.0));
+    assert!(main_pixels(&batch) <= at_home + 0.05, "{s:?}");
+    // The Control Center: its panel's middle is the fill's, the rest of it
+    // a tenth of a screen.
+    let mut home = control_open(Look::DEFAULT);
+    home.show_hero(Some(Hero::Ambient));
+    home.settle_now();
+    let batch = painted(&home, &mut assets);
+    let s = batch.shaded();
+    assert_eq!(s[0], art);
+    assert!(s[1] > 0.25 && s[1] < 0.3, "{s:?}");
+    assert!(main_pixels(&batch) <= at_home + 0.1, "{s:?} {at_home}");
 }

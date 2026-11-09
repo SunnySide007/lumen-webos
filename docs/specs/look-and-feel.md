@@ -601,8 +601,9 @@ home:
 (the resting tiles' shadows: one quad each), `sheen` (free, but a switch
 like the rest), `fade` (the art's crossfade: off, the art cuts), `slide`
 (the pages', and the Control Center's, slide as they turn: off, they only
-fade) and `dim` (the dim behind "Other apps" and the Control Center: one
-full-screen quad). The look line says them all (below).
+fade) and `dim` (the dim behind "Other apps" and the Control Center: no
+quad, the colours under it darkened as they are drawn). The look line says
+them all (below).
 
 **Cost.** The simulator's frames hold 80 to 95 quads; a test holds every
 frame of the mock home under 600. The art is one to three full-screen quads
@@ -626,8 +627,8 @@ Control Center.
 **The panel.** It comes in from the right over the home, 640 px wide and as
 tall as the safe area (`layout::PANEL`): near-black at 94%, the flat
 fallback for glass. With the look's `slide` it slides in 96 px as it fades
-(`PAGE`'s spring); with `dim` the home behind it dims (one full-screen
-quad). Back closes it and leaves focus on the gear; the Home key closes it
+(`PAGE`'s spring); with `dim` the home behind it dims (no quad: see Cost).
+Back closes it and leaves focus on the gear; the Home key closes it
 and goes to the first tile, as it does from anywhere.
 
 **Privacy, which only reads** (decision 12; privacy.md, G5's first part).
@@ -687,9 +688,25 @@ lumend-side change.
 
 **Cost.** Open, the frame holds about 305 quads in the simulator (the home
 under it, the panel's text a quad a glyph); a test holds it under 600. The
-fill adds the dim and the panel, about 1.3 screens more over the art. The
 panel's glyphs are made with the rest at warm-up (`warm.rs`), so opening it
-uploads nothing in its burst. The bench measures it on the B9.
+uploads nothing in its burst.
+
+The first build drew the dim as a black quad over the whole screen and the
+panel as one shape quad, about 1.3 screens of the main program's pixels
+over the art, and "Other apps" its own dim, one screen more. On the B9
+(OLED55B9PUA, firmware 05.50.00, 2026-11-09, 9d5a988) both ran at about
+28 ms a frame in their bursts where the home ran at 16.9, which puts a
+screen of the main program (a shape, a kind and a texture place for every
+pixel) at about 11 ms. So neither dim is a quad now. Both are black, and
+colours blend premultiplied, so a black quad of alpha `a` over what is
+drawn is the same as every colour under it times `1 - a` (`Batch::set_dim`): the
+art is darkened by both dims, the home by the Control Center's, and the
+panel is drawn after, undimmed. The panel's middle is drawn by a third
+program that carries the colour alone (`Batch::fill`, mediump), and only
+the bands holding its corners and a two-pixel strip down each side are
+shape quads (`Batch::rounded_fill`). A test holds both screens to the
+home's main-program pixels plus a tenth of a screen; the simulator's
+frames match the old ones to within 2 in 255 (all but 7 pixels within 1).
 
 ### Glass: two options (owner picks)
 

@@ -146,11 +146,14 @@ pub fn home(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
 
 fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     batch.clear();
+    // The dims are black, so each is the colours under it darkened as they
+    // are pushed (`Batch::set_dim`), not a quad over the screen: the one
+    // behind "Other apps" over the art, the Control Center's over the art
+    // and the home.
+    let (others, panel) = dims(view);
+    batch.set_dim(1.0 - (1.0 - others) * (1.0 - panel));
     art(batch, view, assets);
-    if view.page > 0.0 && view.look.dim {
-        let dim = OTHERS_DIM.alpha(OTHERS_DIM.3 * view.page);
-        batch.gradient_rect(0.0, 0.0, SCREEN_W, SCREEN_H, dim, dim);
-    }
+    batch.set_dim(panel);
     if view.empty {
         let px = layout::EMPTY_PX;
         let text = "No apps";
@@ -201,10 +204,28 @@ fn paint(batch: &mut Batch, view: &View<'_>, assets: &mut Assets) {
     if let Some(text) = view.status {
         status(batch, text, assets);
     }
+    batch.set_dim(0.0);
     if let Some(control) = &view.control {
-        draw_control(batch, control, view.look.dim, assets);
+        draw_control(batch, control, assets);
     }
 }
+
+/// How dark the art is behind "Other apps", and the home behind the
+/// Control Center: each the alpha of a black quad over it, 0 without the
+/// look's `dim`.
+fn dims(view: &View<'_>) -> (f32, f32) {
+    if !view.look.dim {
+        return (0.0, 0.0);
+    }
+    let others = OTHERS_DIM.3 * view.page.clamp(0.0, 1.0);
+    let panel = view.control.as_ref().map_or(0.0, |c| PANEL_DIM.3 * c.shown);
+    (others, panel)
+}
+
+// `dims` darkens the colours under each dim, which is a black quad over them
+// only if the dim is black.
+const _: () = assert!(OTHERS_DIM.0 == 0.0 && OTHERS_DIM.1 == 0.0 && OTHERS_DIM.2 == 0.0);
+const _: () = assert!(PANEL_DIM.0 == 0.0 && PANEL_DIM.1 == 0.0 && PANEL_DIM.2 == 0.0);
 
 /// The gear that opens the Control Center: a round button like a chip,
 /// with a cog drawn in circles (eight teeth round a disc with a hole), all
@@ -247,18 +268,15 @@ fn draw_gear(batch: &mut Batch, gear: &GearView) {
     disc(batch, cx, cy, icon * 0.26, hole.alpha(hole.3 * a));
 }
 
-/// The Control Center: a dim over the home (the look's `dim`), and the
-/// panel at the right with the Privacy lines, which only read, and a
-/// switch for each moving effect.
-fn draw_control(batch: &mut Batch, c: &ControlView, dim: bool, assets: &mut Assets) {
+/// The Control Center: the panel at the right with the Privacy lines, which
+/// only read, and a switch for each moving effect. The home behind it is
+/// dimmed as it is drawn (`dims`). The panel covers a third of the
+/// screen, so it is a `rounded_fill`: shape quads only along its edges.
+fn draw_control(batch: &mut Batch, c: &ControlView, assets: &mut Assets) {
     let a = c.shown;
-    if dim {
-        let d = PANEL_DIM.alpha(PANEL_DIM.3 * a);
-        batch.gradient_rect(0.0, 0.0, SCREEN_W, SCREEN_H, d, d);
-    }
     let p = layout::panel(c.offset);
     let fill = PANEL.alpha(PANEL.3 * a);
-    batch.rounded_rect(p.x, p.y, p.w, p.h, layout::PANEL_RADIUS, fill, fill);
+    batch.rounded_fill(p.x, p.y, p.w, p.h, layout::PANEL_RADIUS, fill);
     let left = p.x + layout::PANEL_PAD;
     let right = p.right() - layout::PANEL_PAD;
     let text = &mut assets.text;
