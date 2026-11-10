@@ -560,7 +560,14 @@ fn shadow(batch: &mut Batch, tile: &TileView<'_>, resting: bool) {
     let radius = layout::TILE_RADIUS * r.w / layout::TILE_W;
     let s = r.offset(0.0, offset);
     let color = SHADOW.alpha(opacity * tile.alpha);
-    batch.shadow(s.x, s.y, s.w, s.h, radius, blur.max(1.0), color);
+    // An opaque tile standing level hides the shadow under it, all but its
+    // rounded corners: that part is left out (`Batch::shadow_around`).
+    if tile.alpha >= 1.0 && tile.tilt == [0.0; 2] {
+        let hole = r.outset(-radius);
+        batch.shadow_around(s.x, s.y, s.w, s.h, radius, blur.max(1.0), color, hole);
+    } else {
+        batch.shadow(s.x, s.y, s.w, s.h, radius, blur.max(1.0), color);
+    }
 }
 
 fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, sheen: bool, assets: &mut Assets) {
@@ -583,9 +590,10 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, sheen: bool, assets: &mut A
             base.lerp(WHITE, s * 0.35),
             base,
         ];
-        batch.rounded_rect4(r.x, r.y, r.w, r.h, radius, colors.map(|c| c.alpha(a)));
+        batch.rounded_fill4(r.x, r.y, r.w, r.h, radius, colors.map(|c| c.alpha(a)));
     } else {
-        batch.rounded_rect(r.x, r.y, r.w, r.h, radius, top.alpha(a), base.alpha(a));
+        let (top, base) = (top.alpha(a), base.alpha(a));
+        batch.rounded_fill4(r.x, r.y, r.w, r.h, radius, [top, top, base, base]);
     }
 
     let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);

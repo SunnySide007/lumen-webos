@@ -702,11 +702,25 @@ colours blend premultiplied, so a black quad of alpha `a` over what is
 drawn is the same as every colour under it times `1 - a` (`Batch::set_dim`): the
 art is darkened by both dims, the home by the Control Center's, and the
 panel is drawn after, undimmed. The panel's middle is drawn by a third
-program that carries the colour alone (`Batch::fill`, mediump), and only
+program that carries the colour alone (`Batch::fill4`, mediump), and only
 the bands holding its corners and a two-pixel strip down each side are
 shape quads (`Batch::rounded_fill`). A test holds both screens to the
 home's main-program pixels plus a tenth of a screen; the simulator's
 frames match the old ones to within 2 in 255 (all but 7 pixels within 1).
+
+That fixed the Control Center (2026-11-10, bc053bd: 16.84 ms a frame)
+but not "Other apps" while focus moves in it (about 25 ms): its grid of
+some 19 tiles, each with its resting shadow, was 1.03 screens of the
+main program's pixels. So every tile's body is a `Batch::rounded_fill4`
+too (the fill's program for its middle, gradient and sheen included, and
+shape quads only along its edges), and a resting shadow under a level,
+opaque tile leaves out the part the tile hides, all but its rounded
+corners (`Batch::shadow_around`, four quads round the hole). With the
+B9's 30 apps the grid is now about 0.36 screens of the main program and
+0.36 of the fill's, the home 0.16 and 0.12. A test holds every screen,
+still and moving, to 0.4 screens of each (`MAIN_PIXEL_BUDGET`,
+`FILL_PIXEL_BUDGET`). While the dither is on the fills go back to the
+main program, so their gradients are dithered with the rest.
 
 ### Glass: two options (owner picks)
 

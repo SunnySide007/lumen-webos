@@ -114,10 +114,11 @@ fn a_newly_focused_tile_leans_whole_with_its_light_and_fits_the_budget() {
     let tile = *home.view().tiles.last().unwrap();
     assert!(tile.tilt[0] > 0.0 && tile.sweep.is_some());
     let batch = painted(&home, &mut assets);
-    // Prime Video's tile, its name across it and the light's two quads
-    // lean; its shadow and every other tile stay level.
+    // Prime Video's tile (five quads: `Batch::rounded_fill4`), its name
+    // across it and the light's two quads lean; its shadow and every other
+    // tile stay level.
     let name = "PrimeVideo".len();
-    assert_eq!(batch.leaning_quads(), 1 + name + 2);
+    assert_eq!(batch.leaning_quads(), 5 + name + 2);
     let n = batch.quad_count();
     assert!(n <= QUAD_BUDGET, "{n} quads");
     // Settled, nothing leans.
@@ -143,8 +144,8 @@ fn the_art_is_drawn_first_by_its_own_program_over_the_whole_screen() {
     assert!(runs[0].shader == Shader::Art && runs[0].texture == Texture::Own(9));
     assert_eq!(runs[0].count, 6, "the art alone");
     assert!(
-        runs[1..].iter().all(|r| r.shader == Shader::Main),
-        "the rest is the main program's"
+        runs[1..].iter().all(|r| r.shader != Shader::Art),
+        "the rest is the main program's and the fill's"
     );
     // Lumen's art has its fade drawn in: nothing goes over it. The owner's
     // gets a fade of its own, one quad.
@@ -199,7 +200,7 @@ fn the_ambient_heros_layers_drift_each_its_own_way_and_never_show_an_edge() {
 }
 
 #[test]
-fn the_sheen_costs_no_quad_and_the_resting_shadows_one_a_tile() {
+fn the_sheen_costs_no_quad_and_each_resting_shadow_four_round_its_tile() {
     let mut assets = assets();
     let mut plain = mock_home();
     plain.settle_now();
@@ -217,8 +218,9 @@ fn the_sheen_costs_no_quad_and_the_resting_shadows_one_a_tile() {
     };
     let mut shaded = mock_home().with_look(shadow);
     shaded.settle_now();
+    // Each round the part its opaque tile hides (`Batch::shadow_around`).
     let resting = shaded.view().tiles.len() - 1;
-    assert_eq!(quads(&shaded, &mut assets), base + resting);
+    assert_eq!(quads(&shaded, &mut assets), base + 4 * resting);
 }
 
 #[test]
@@ -407,41 +409,66 @@ fn main_pixels(batch: &Batch) -> f32 {
     batch.shaded()[2..].iter().sum()
 }
 
+/// The main program's pixels a frame may shade, in screens: about what
+/// the home shaded when it held its budget on the B9 (0.40 screens at
+/// 16.9 ms a frame, 2026-11-09, 9d5a988), where a screen of them cost
+/// about 11 ms ("Other apps" at 1.03 and the Control Center at 1.73 ran at
+/// about 25 and 28 ms).
+const MAIN_PIXEL_BUDGET: f32 = 0.4;
+
+/// The fill's pixels a frame may shade, in screens: the Control Center
+/// held its budget with 0.28 (2026-11-10, bc053bd: 16.84 ms a frame).
+const FILL_PIXEL_BUDGET: f32 = 0.4;
+
 #[test]
-fn other_apps_and_the_control_center_shade_about_what_the_home_does() {
-    // On the B9 a screen of the main program's pixels cost about 11 ms
-    // (2026-11-09, 9d5a988: the full-screen dims took "Other apps" and the
-    // Control Center from 16.9 ms a frame to 28). With the ambient hero
-    // behind them, at the look the owner sees:
+fn every_screen_keeps_to_the_main_programs_pixel_budget() {
     let mut assets = assets();
     ambient(&mut assets);
-    let mut home = mock_home().with_look(Look::DEFAULT);
+    let check = |name: &str, home: &Home, assets: &mut Assets| {
+        let batch = painted(home, assets);
+        let s = batch.shaded();
+        let main = main_pixels(&batch);
+        assert!(main <= MAIN_PIXEL_BUDGET, "{name}: {s:?}");
+        assert!(s[1] <= FILL_PIXEL_BUDGET, "{name}: {s:?}");
+        assert!((s[0] - 1.92).abs() < 0.01, "{name}: the art's three layers");
+        main
+    };
+    // The B9's 30 apps, with the ambient hero behind them, at the look the
+    // owner sees.
+    let apps = MockLauncher::default()
+        .list()
+        .unwrap()
+        .into_iter()
+        .cycle()
+        .take(30)
+        .collect();
+    let mut home = Home::new(apps, BackAtTop::Exit).with_look(Look::DEFAULT);
     home.show_hero(Some(Hero::Ambient));
     home.settle_now();
-    let batch = painted(&home, &mut assets);
-    let at_home = main_pixels(&batch);
-    let art = batch.shaded()[0];
-    assert!(at_home < 0.5, "{at_home} screens");
-    // "Other apps", turned.
-    for _ in 0..4 {
+    check("home", &home, &mut assets);
+    let _ = home.handle(press(Dir::Right), Duration::ZERO);
+    home.advance_to(style::SWEEP_TIME / 2);
+    check("home, moving", &home, &mut assets);
+    home.settle_now();
+    for _ in 0..3 {
         let _ = home.handle(press(Dir::Right), Duration::ZERO);
     }
     home.settle_now();
     assert_eq!(home.handle(act(Action::Select), Duration::ZERO), None);
+    home.advance_to(Duration::from_millis(150));
+    check("the page turning", &home, &mut assets);
     home.settle_now();
     assert_eq!(home.view().page, 1.0);
-    let batch = painted(&home, &mut assets);
-    let s = batch.shaded();
-    assert_eq!((s[0], s[1]), (art, 0.0));
-    assert!(main_pixels(&batch) <= at_home + 0.05, "{s:?}");
-    // The Control Center: its panel's middle is the fill's, the rest of it
-    // a tenth of a screen.
+    check("other apps", &home, &mut assets);
+    for (i, dir) in [Dir::Right, Dir::Down, Dir::Down].into_iter().enumerate() {
+        let _ = home.handle(press(dir), Duration::ZERO);
+        home.advance_to(style::SWEEP_TIME / 2);
+        check(&format!("other apps, moving {i}"), &home, &mut assets);
+        home.settle_now();
+    }
     let mut home = control_open(Look::DEFAULT);
     home.show_hero(Some(Hero::Ambient));
     home.settle_now();
-    let batch = painted(&home, &mut assets);
-    let s = batch.shaded();
-    assert_eq!(s[0], art);
-    assert!(s[1] > 0.25 && s[1] < 0.3, "{s:?}");
-    assert!(main_pixels(&batch) <= at_home + 0.1, "{s:?} {at_home}");
+    let main = check("the control center", &home, &mut assets);
+    assert!(main > 0.0);
 }

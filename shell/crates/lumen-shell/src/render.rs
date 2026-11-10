@@ -22,10 +22,10 @@
 //! drawn by a program of its own (`Batch::art`): a texture times a colour,
 //! with two varyings and no branch, where the main program would carry its
 //! shape, kind and dither for every pixel. The main program draws the rest,
-//! but for large areas of one colour (`Batch::fill`), which a third program
-//! draws with the colour alone. A black dim over what is drawn is no quad at
-//! all: the colours under it are darkened as they are pushed
-//! (`Batch::set_dim`).
+//! but for the large plain middles of panels and tiles (`Batch::fill4`),
+//! which a third program draws with their blended colour alone. A black dim
+//! over what is drawn is no quad at all: the colours under it are darkened
+//! as they are pushed (`Batch::set_dim`).
 
 use std::ffi::c_void;
 
@@ -181,7 +181,7 @@ pub enum Shader {
     Main,
     /// The art's: a texture times a colour (`Batch::art`).
     Art,
-    /// The fill's: a colour and nothing else (`Batch::fill`).
+    /// The fill's: a colour and nothing else (`Batch::fill4`).
     Fill,
 }
 
@@ -425,11 +425,11 @@ impl Batch {
         });
     }
 
-    /// A rectangle of one colour, drawn by the fill's program: for a large
-    /// area, whose pixels carry nothing but the colour (no shape, kind or
-    /// dither).
-    pub fn fill(&mut self, x: f32, y: f32, w: f32, h: f32, c: Rgba) {
-        if w <= 0.0 || h <= 0.0 || c.3 <= 0.0 {
+    /// A rectangle drawn by the fill's program, each corner its own colour
+    /// (top left, top right, bottom left, bottom right): for a large area,
+    /// whose pixels carry nothing but the colour (no shape, kind or dither).
+    pub fn fill4(&mut self, x: f32, y: f32, w: f32, h: f32, colors: [Rgba; 4]) {
+        if w <= 0.0 || h <= 0.0 || colors.iter().all(|c| c.3 <= 0.0) {
             return;
         }
         self.push(&Quad {
@@ -438,7 +438,7 @@ impl Batch {
             w,
             h,
             uv: NO_UV,
-            colors: [c; 4],
+            colors,
             shape: NO_SHAPE,
             kind: FLAT,
             texture: None,
@@ -446,29 +446,52 @@ impl Batch {
         });
     }
 
-    /// A large rounded rectangle of one colour, as `rounded_rect` draws it:
-    /// the middle a `fill`, and only the bands that hold its corners and
-    /// the two pixels down each side shape quads, so the shape's work is
-    /// done only near an edge. Five quads.
+    /// A large rounded rectangle of one colour, as `rounded_rect` draws it
+    /// (`rounded_fill4`).
     pub fn rounded_fill(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, c: Rgba) {
+        self.rounded_fill4(x, y, w, h, r, [c; 4]);
+    }
+
+    /// A large rounded rectangle, each corner its own colour, as
+    /// `rounded_rect4` draws it: the middle a `fill4`, and only the bands
+    /// that hold its corners and the two pixels down each side shape quads,
+    /// so the shape's work is done only near an edge. Five quads, each
+    /// corner of each its colour at that place.
+    pub fn rounded_fill4(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, colors: [Rgba; 4]) {
         let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
         let band = r.max(1.0);
         if w <= 2.0 || h <= 2.0 * band {
-            self.rounded_rect(x, y, w, h, r, c, c);
+            self.rounded_rect4(x, y, w, h, r, colors);
             return;
         }
+        // The colour at a place, blended across the rectangle and carried
+        // past its edges as `rounded_rect4` blends it.
+        let at = |px: f32, py: f32| {
+            let (u, v) = ((px - x) / w, (py - y) / h);
+            let top = colors[0].lerp(colors[1], u);
+            let bottom = colors[2].lerp(colors[3], u);
+            top.lerp(bottom, v)
+        };
+        let corners = |p: Rect| {
+            [
+                at(p.x, p.y),
+                at(p.right(), p.y),
+                at(p.x, p.bottom()),
+                at(p.right(), p.bottom()),
+            ]
+        };
         let rect = Rect::new(x, y, w, h);
-        let middle = h - 2.0 * band;
-        self.fill(x + 1.0, y + band, w - 2.0, middle, c);
+        let middle = Rect::new(x + 1.0, y + band, w - 2.0, h - 2.0 * band);
+        self.fill4(middle.x, middle.y, middle.w, middle.h, corners(middle));
         // Out to a pixel past the rectangle, for its soft edge.
         let parts = [
             Rect::new(x - 1.0, y - 1.0, w + 2.0, band + 1.0),
-            Rect::new(x - 1.0, y + band, 2.0, middle),
-            Rect::new(x + w - 1.0, y + band, 2.0, middle),
+            Rect::new(x - 1.0, middle.y, 2.0, middle.h),
+            Rect::new(x + w - 1.0, middle.y, 2.0, middle.h),
             Rect::new(x - 1.0, y + h - band, w + 2.0, band + 1.0),
         ];
         for part in parts {
-            self.rounded_part(rect, r, part, [c; 4]);
+            self.rounded_part(rect, r, part, corners(part));
         }
     }
 
@@ -548,6 +571,56 @@ impl Batch {
         self.shape(x, y, w, h, r, blur, (c, c), blur + 0.5);
     }
 
+    /// A `shadow` with `hole` left out: the part something drawn opaque
+    /// over it will hide, so those pixels cost nothing. Up to four shape
+    /// quads round the hole, each cutting the whole shadow's shape.
+    // `shadow`'s arguments, and the hole.
+    #[allow(clippy::too_many_arguments)]
+    pub fn shadow_around(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        r: f32,
+        blur: f32,
+        c: Rgba,
+        hole: Rect,
+    ) {
+        if w <= 0.0 || h <= 0.0 || c.3 <= 0.0 {
+            return;
+        }
+        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+        let blur = blur.max(0.5);
+        let grown = Rect::new(x, y, w, h).outset(blur + 0.5);
+        let (x0, y0) = (hole.x.max(grown.x), hole.y.max(grown.y));
+        let (x1, y1) = (
+            hole.right().min(grown.right()),
+            hole.bottom().min(grown.bottom()),
+        );
+        if x1 <= x0 || y1 <= y0 {
+            self.shadow(x, y, w, h, r, blur, c);
+            return;
+        }
+        let shape = Shape {
+            cx: x + w / 2.0,
+            cy: y + h / 2.0,
+            half_w: w / 2.0,
+            half_h: h / 2.0,
+            radius: r,
+            soft: blur,
+        };
+        let parts = [
+            Rect::new(grown.x, grown.y, grown.w, y0 - grown.y),
+            Rect::new(grown.x, y0, x0 - grown.x, y1 - y0),
+            Rect::new(x1, y0, grown.right() - x1, y1 - y0),
+            Rect::new(grown.x, y1, grown.w, grown.bottom() - y1),
+        ];
+        for part in parts {
+            self.shape_part(shape, part, [c; 4]);
+        }
+    }
+
     /// A shape quad grown by `margin` on every side, its colours carried out
     /// to the grown edges so the gradient stays where it was.
     // Private; the public callers name every argument.
@@ -597,6 +670,22 @@ impl Batch {
             return;
         }
         let r = r.min(rect.w / 2.0).min(rect.h / 2.0).max(0.0);
+        let shape = Shape {
+            cx: rect.x + rect.w / 2.0,
+            cy: rect.y + rect.h / 2.0,
+            half_w: rect.w / 2.0,
+            half_h: rect.h / 2.0,
+            radius: r,
+            soft: 0.5,
+        };
+        self.shape_part(shape, part, colors);
+    }
+
+    /// The `part` of `shape`, each corner of the part its own colour.
+    fn shape_part(&mut self, shape: Shape, part: Rect, colors: [Rgba; 4]) {
+        if part.w <= 0.0 || part.h <= 0.0 {
+            return;
+        }
         self.push(&Quad {
             x: part.x,
             y: part.y,
@@ -604,14 +693,7 @@ impl Batch {
             h: part.h,
             uv: NO_UV,
             colors,
-            shape: Shape {
-                cx: rect.x + rect.w / 2.0,
-                cy: rect.y + rect.h / 2.0,
-                half_w: rect.w / 2.0,
-                half_h: rect.h / 2.0,
-                radius: r,
-                soft: 0.5,
-            },
+            shape,
             kind: SHAPE,
             texture: None,
             shader: Shader::Main,
@@ -874,6 +956,16 @@ struct Attribute {
     at: u32,
     offset: usize,
     floats: i32,
+}
+
+/// The program that draws a run of `shader`'s: the main program draws
+/// the fills too while the dither is on, so their gradients are dithered
+/// with the rest.
+fn draws_with(shader: Shader, dithering: bool) -> Shader {
+    match shader {
+        Shader::Fill if dithering => Shader::Main,
+        other => other,
+    }
 }
 
 /// The dither's 4x4 Bayer thresholds, row by row: each of the 16 levels
@@ -1233,7 +1325,11 @@ impl Renderer {
         }
         let mut current: Option<u32> = None;
         for run in batch.runs() {
-            let program = match (run.shader, &self.art, &self.fill) {
+            let program = match (
+                draws_with(run.shader, self.dither > 0.0),
+                &self.art,
+                &self.fill,
+            ) {
                 (Shader::Art, Some(art), _) => art,
                 (Shader::Fill, _, Some(fill)) => fill,
                 _ => main,
@@ -1505,9 +1601,9 @@ void main() {
         let mut batch = Batch::default();
         let c = Rgba::rgb8(1, 2, 3);
         batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
-        batch.fill(0.0, 0.0, 10.0, 10.0, c);
-        batch.fill(0.0, 0.0, 0.0, 10.0, c);
-        batch.fill(0.0, 0.0, 10.0, 10.0, c.alpha(0.0));
+        batch.fill4(0.0, 0.0, 10.0, 10.0, [c; 4]);
+        batch.fill4(0.0, 0.0, 0.0, 10.0, [c; 4]);
+        batch.fill4(0.0, 0.0, 10.0, 10.0, [c.alpha(0.0); 4]);
         batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
         let shaders: Vec<Shader> = batch.runs().iter().map(|r| r.shader).collect();
         assert_eq!(shaders, [Shader::Main, Shader::Fill, Shader::Main]);
@@ -1547,6 +1643,81 @@ void main() {
         small.rounded_fill(0.0, 0.0, 40.0, 20.0, 12.0, c);
         assert_eq!(small.quad_count(), 1);
         assert_eq!(small.runs()[0].shader, Shader::Main);
+    }
+
+    #[test]
+    fn a_rounded_fill4_blends_its_corners_across_its_pieces_as_one_quad_would() {
+        let colors = [
+            Rgba(1.0, 0.0, 0.0, 1.0),
+            Rgba(0.0, 1.0, 0.0, 1.0),
+            Rgba(0.0, 0.0, 1.0, 1.0),
+            Rgba(1.0, 1.0, 1.0, 1.0),
+        ];
+        let (x, y, w, h) = (100.0, 200.0, 320.0, 180.0);
+        let mut whole = Batch::default();
+        whole.rounded_rect4(x, y, w, h, 14.0, colors);
+        let mut framed = Batch::default();
+        framed.rounded_fill4(x, y, w, h, 14.0, colors);
+        assert_eq!(framed.quad_count(), 5);
+        assert_eq!(framed.bounds(), whole.bounds());
+        // Every corner of every piece has the colour the one quad blends to
+        // at that place.
+        let at = |px: f32, py: f32| {
+            let (u, v) = ((px - x) / w, (py - y) / h);
+            colors[0]
+                .lerp(colors[1], u)
+                .lerp(colors[2].lerp(colors[3], u), v)
+        };
+        for v in vertices(&framed) {
+            let want = at(v[0], v[1]);
+            for (got, want) in v[4..8].iter().zip([want.0, want.1, want.2, want.3]) {
+                assert!((got - want).abs() < 1e-5, "{v:?}");
+            }
+        }
+        // The one quad's own corners, carried a pixel out, agree.
+        let corner = vertices(&whole)[0];
+        let want = at(corner[0], corner[1]);
+        assert!((corner[4] - want.0).abs() < 1e-5 && (corner[5] - want.1).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_shadow_around_a_hole_leaves_it_out_and_cuts_the_same_shape() {
+        let c = Rgba(0.0, 0.0, 0.0, 0.35);
+        let (x, y, w, h, r, blur) = (80.0, 238.0, 320.0, 180.0, 14.0, 16.0);
+        let mut whole = Batch::default();
+        whole.shadow(x, y, w, h, r, blur, c);
+        let hole = Rect::new(94.0, 244.0, 292.0, 152.0);
+        let mut around = Batch::default();
+        around.shadow_around(x, y, w, h, r, blur, c, hole);
+        assert_eq!(around.quad_count(), 4);
+        assert_eq!(around.bounds(), whole.bounds());
+        let area = |b: &Batch, n: usize| {
+            let (x0, y0, x1, y1) = b.quad_bounds(n);
+            (x1 - x0) * (y1 - y0)
+        };
+        let pieces: f32 = (0..4).map(|n| area(&around, n)).sum();
+        let left_out = area(&whole, 0) - pieces;
+        assert!((left_out - hole.w * hole.h).abs() < 0.01, "{left_out}");
+        let shape = vertices(&whole)[0];
+        for v in vertices(&around) {
+            assert_eq!(v[10..15], shape[10..15]);
+            assert_eq!(v[4..8], shape[4..8]);
+        }
+        // A hole the shadow does not reach changes nothing.
+        let mut far = Batch::default();
+        far.shadow_around(x, y, w, h, r, blur, c, Rect::new(900.0, 0.0, 10.0, 10.0));
+        assert_eq!(far.quad_count(), 1);
+        assert_eq!(vertices(&far), vertices(&whole));
+    }
+
+    #[test]
+    fn fills_are_the_main_programs_while_the_dither_is_on() {
+        assert_eq!(draws_with(Shader::Fill, false), Shader::Fill);
+        assert_eq!(draws_with(Shader::Fill, true), Shader::Main);
+        for dithering in [false, true] {
+            assert_eq!(draws_with(Shader::Art, dithering), Shader::Art);
+            assert_eq!(draws_with(Shader::Main, dithering), Shader::Main);
+        }
     }
 
     #[test]
