@@ -255,3 +255,20 @@ all 90 keys of the bench's pattern did, in each of three runs. Its key stamps ar
 own, 2.9 s behind CLOCK_MONOTONIC, so the Wayland path times a key from
 when the shell reads it.
 
+**With `lumend` keeping the shell hidden** (its `shell` part, the Wayland
+path), 2026-11-10 05:05 to 05:20 UTC, HDMI 3 in front, a 180 ms robot
+Home press: 222, 194 and 195 ms from the key going down (42, 14 and 15 ms
+from its release); after a reboot, 229, 195 and 198 ms (49, 15 and 18 ms).
+The first press after a hidden start is the slower one: its frame takes
+31 to 33 ms where the later ones take 2 to 5 ms. After that boot lumend
+started the shell 157 s in: it waits two minutes for an app to come in
+front, and the input was in front before lumend was up.
+
+The six design notes, 90a3880, every run with 30 of 30 icons: home, full
+look 17.04 ms and 1.34 skipped per 10 s, start-up 551 ms; pages-43s
+17.14 ms and 10.20; control-45s 16.98 ms and 1.71. The gate passes on all
+three. 0a537bf, before icon tiles were drawn as fills, read 17.92 ms and
+34.67 on pages. A run straight after an install starts while the first
+icon copy is still going and read 590 to 728 ms to its first frame; the
+same build without a reinstall starts in 550 to 582 ms.
+
