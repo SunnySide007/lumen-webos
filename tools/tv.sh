@@ -124,6 +124,16 @@ done
 EOF
 }
 
+# lumend's keeper starts a closed shell again after 5 s (decision 15). A
+# tool that closes or replaces it on purpose says so first: the unix time
+# until which the keeper leaves it closed, in root's own folder
+# (shell/crates/lumend/src/keeper.rs). Two minutes covers an install and
+# the launch after it; nothing is written on a TV without lumend.
+LUMEN_SHELL=io.github.sunnyside007.lumen.shell
+# The TV's shell expands it, not this one.
+# shellcheck disable=SC2016
+HOLD_SHELL='d=/var/lib/lumen/lumend; if [ -d $d ]; then (umask 077; echo $(($(date +%s) + 120)) >$d/shell-hold.new && mv -f $d/shell-hold.new $d/shell-hold); fi'
+
 cmd_install() {
     need_arg "${1:-}"
     [ -f "$1" ] || die "no such file: $1"
@@ -135,6 +145,7 @@ cmd_install() {
     # progress; watch it for up to 60 s, the way webos-galaxy-launcher's
     # installer does.
     tv_ssh 'sh -s' <<EOF
+$HOLD_SHELL
 log=$STAGE/install.log
 if [ "\$(sha256sum < $remote | cut -d' ' -f1)" != $want ]; then
     rm -f $remote
@@ -184,7 +195,9 @@ cmd_luna_app() {
     else
         body="{\"id\":\"$2\"}"
     fi
-    tv_ssh "luna-send -n 1 -f luna://com.webos.applicationManager/$method '$body' </dev/null"
+    hold=''
+    [ "$method" != closeByAppId ] || [ "$2" != "$LUMEN_SHELL" ] || hold="$HOLD_SHELL; "
+    tv_ssh "${hold}luna-send -n 1 -f luna://com.webos.applicationManager/$method '$body' </dev/null"
 }
 
 cmd_remove() {

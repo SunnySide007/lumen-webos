@@ -24,6 +24,19 @@ const LEAVING_GRACE: Duration = Duration::from_secs(15);
 const WINDOW: Duration = Duration::from_secs(600);
 const MAX_RESTARTS: usize = 3;
 
+/// The longest a tool's hold is believed. The B9 has no clock chip and
+/// boots in 2019, so a time further ahead than this is a stale file or a
+/// clock that has not been set yet, not a hold.
+pub const MAX_HOLD: Duration = Duration::from_secs(900);
+
+/// How long the hold file still holds: its first word is the unix time the
+/// hold ends. Nothing when it is past, absurdly far ahead, or not a number.
+pub fn hold_left(text: &str, now_unix: u64) -> Option<Duration> {
+    let until: u64 = text.split_whitespace().next()?.parse().ok()?;
+    let left = Duration::from_secs(until.checked_sub(now_unix)?);
+    (!left.is_zero() && left <= MAX_HOLD).then_some(left)
+}
+
 /// What an event asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ask {
@@ -82,6 +95,11 @@ impl Keeper {
             }
             _ => Ask::Nothing,
         }
+    }
+
+    /// Whether SAM's events say the shell runs now.
+    pub fn running(&self) -> bool {
+        self.running
     }
 
     /// The shell said it is about to exit on purpose.
@@ -152,7 +170,7 @@ mod tests {
         );
         assert_eq!(
             bus.calls_to(bus::LAUNCH),
-            [json!({"id": APP_ID, "params": {"hidden": true}})]
+            [json!({"id": APP_ID, "params": {"hidden": true, "platform": "wayland"}})]
         );
         assert_eq!(k.on_event(&ev("netflix", "foreground"), now), Ask::Nothing);
     }
@@ -187,6 +205,39 @@ mod tests {
         assert!(k.gave_up);
         k.on_event(&ev(APP_ID, "launch"), t0);
         assert_eq!(k.on_event(&ev(APP_ID, "close"), t0), Ask::Nothing);
+    }
+
+    #[test]
+    fn a_tools_hold_lasts_to_its_time_and_no_further_than_fifteen_minutes() {
+        assert_eq!(
+            hold_left("1794280120\n", 1_794_280_000),
+            Some(Duration::from_secs(120))
+        );
+        // Past, or exactly now.
+        assert_eq!(hold_left("1794280000", 1_794_280_000), None);
+        assert_eq!(hold_left("1794279999", 1_794_280_000), None);
+        // The TV's clock still reads 2019 after a boot: not a hold of years.
+        assert_eq!(hold_left("1794280120", 1_546_300_800), None);
+        assert_eq!(
+            hold_left("1794280900", 1_794_280_000),
+            Some(Duration::from_secs(900))
+        );
+        assert_eq!(hold_left("1794280901", 1_794_280_000), None);
+        // Not a time.
+        assert_eq!(hold_left("", 1), None);
+        assert_eq!(hold_left("soon", 1), None);
+        assert_eq!(hold_left("-5", 1), None);
+    }
+
+    #[test]
+    fn says_whether_the_shell_runs() {
+        let mut k = Keeper::default();
+        let now = Instant::now();
+        assert!(!k.running());
+        k.on_event(&ev(APP_ID, "launch"), now);
+        assert!(k.running());
+        k.on_event(&ev(APP_ID, "close"), now);
+        assert!(!k.running());
     }
 
     #[test]

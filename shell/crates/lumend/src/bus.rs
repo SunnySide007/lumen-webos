@@ -154,10 +154,15 @@ pub fn close_lg_home() -> (&'static str, Value) {
 /// nothing until the first relaunch (a Home press). A shell without lane
 /// L's change ignores the parameter and comes to the front, which `lumend
 /// try shell` reports; fact 10 (depth.md) is whether SAM keeps it resident.
+///
+/// It asks for the Wayland path, the only one that starts hidden: the SDL
+/// path refuses and starts shown. On the B9 on 2026-11-10 a Home press then
+/// showed Lumen 216 to 218 ms after the key went down (a 180 ms hold),
+/// against 843 to 864 ms with the shell closed.
 pub fn launch_shell_hidden() -> (&'static str, Value) {
     (
         LAUNCH,
-        json!({ "id": APP_ID, "params": { "hidden": true } }),
+        json!({ "id": APP_ID, "params": { "hidden": true, "platform": "wayland" } }),
     )
 }
 

@@ -23,6 +23,10 @@ pub const STANDIN: &str = "/var/lib/lumen/lumend/lumen-standin";
 pub const CONF_NAME: &str = "lumend.conf";
 pub const STATUS_NAME: &str = "status";
 pub const LOCK_NAME: &str = "lumend.pid";
+/// A tool's word that it closed the shell on purpose: the unix time until
+/// which the shell is not started again (`tools/tv.sh close` and `install`
+/// write it; keeper.rs).
+pub const HOLD_NAME: &str = "shell-hold";
 /// Boot hooks' and lumend's logs (CONTRIBUTING.md), never `/tmp`.
 pub const VAR_LUMEN: &str = "/var/lib/lumen";
 pub const LOG_DIR_NAME: &str = "log";

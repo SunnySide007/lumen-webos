@@ -195,6 +195,27 @@ pub fn running(root: &Root) -> Result<Option<u32>, String> {
     Ok(Some(pid))
 }
 
+/// How long a tool's hold on the shell still lasts (`HOLD_NAME` in root's
+/// folder, a plain file of root's alone); nothing when there is none, it
+/// is past, or it can't be trusted.
+pub fn shell_hold(root: &Root) -> Option<Duration> {
+    use std::ffi::OsStr;
+    let me = crate::sys::os::euid();
+    let dir = Dir::open_path(&root.path(DIR)).ok()?;
+    let name = OsStr::new(crate::paths::HOLD_NAME);
+    let meta = dir.stat_opt(name).ok()??;
+    if !meta.is_file() || meta.uid != me || meta.shared_write() {
+        return None;
+    }
+    let mut file = dir.open_read(name).ok()?;
+    let (bytes, _) = crate::fsat::read_capped(&mut file, 32).ok()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    crate::keeper::hold_left(&String::from_utf8_lossy(&bytes), now)
+}
+
 /// The kill switch's state, by `lstat` (a link there counts).
 pub fn kill_switch(root: &Root) -> bool {
     std::fs::symlink_metadata(root.path(KILL_DIR).join(KILL_NAME)).is_ok()
@@ -791,6 +812,24 @@ impl Daemon {
             Timer::ShellBoot | Timer::ShellRestart => {
                 let restart = timer == Timer::ShellRestart;
                 if !restart && self.keeper.started {
+                    return;
+                }
+                // A tool launched it again meanwhile: a second launch would
+                // be a relaunch, which shows a hidden shell.
+                if restart && self.keeper.running() {
+                    return;
+                }
+                // A tool closed it on purpose (an install, a bench run):
+                // look again when its hold ends.
+                if let Some(left) = shell_hold(&self.root) {
+                    self.note(
+                        "shell",
+                        format!(
+                            "shell: a tool holds it closed for {} s more; looking again then",
+                            left.as_secs()
+                        ),
+                    );
+                    self.at(now + left + Duration::from_secs(1), timer);
                     return;
                 }
                 if let Some(bus) = self.bus.clone() {
