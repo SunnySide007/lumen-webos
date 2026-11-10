@@ -707,17 +707,7 @@ impl Home {
             }
             Action::Move(_) => return None,
             Action::Select => {
-                let motion = self.control.focused();
-                let on_in_launch = {
-                    let mut only = Reduced::default();
-                    only.set(motion, true);
-                    only.apply(self.launch_look) != self.launch_look
-                };
-                if !on_in_launch {
-                    return None;
-                }
-                let off = !self.reduced.is_off(motion);
-                self.reduced.set(motion, off);
+                self.reduced = self.reduced.toggled(self.launch_look)?;
                 self.apply_reduced();
                 self.dirty = true;
                 return Some(Effect::SaveMotion(self.reduced));

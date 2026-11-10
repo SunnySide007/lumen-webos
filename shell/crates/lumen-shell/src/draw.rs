@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use lumen_core::apps::App;
 use lumen_core::art::Hero;
-use lumen_core::control::{ControlView, MotionRow};
+use lumen_core::control::{ControlView, MotionRow, REDUCE_MOTION_NOTE};
 use lumen_core::focus::Dir;
 use lumen_core::home::{ChipView, GearView, SweepView, TileView, View, page_fades};
 use lumen_core::layout::{self, Rect, SAFE, SCREEN_H, SCREEN_W};
@@ -308,6 +308,20 @@ fn draw_control(batch: &mut Batch, c: &ControlView, assets: &mut Assets) {
     for (i, row) in c.motion.iter().enumerate() {
         motion_row(batch, layout::motion_row(p, i), row, a, assets);
     }
+    // What the switch stops, under it.
+    let last = layout::motion_row(p, c.motion.len().saturating_sub(1));
+    let y = last.bottom() + layout::MOTION_NOTE_GAP + note;
+    let (text, atlas) = (&mut assets.text, &mut assets.atlas);
+    text.draw(
+        batch,
+        atlas,
+        left,
+        y,
+        note,
+        1.0,
+        REDUCE_MOTION_NOTE,
+        dim_ink,
+    );
 }
 
 /// What the Privacy panel says under its lines.

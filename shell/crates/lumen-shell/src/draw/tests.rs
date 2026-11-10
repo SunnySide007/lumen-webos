@@ -501,3 +501,18 @@ fn every_screen_keeps_to_the_main_programs_pixel_budget() {
     let main = check("the control center", &home, &mut assets);
     assert!(main > 0.0);
 }
+
+#[test]
+fn the_control_centers_notes_fit_its_panel() {
+    let text = Text::new().unwrap();
+    let room = layout::PANEL_W - 2.0 * layout::PANEL_PAD;
+    for note in [PRIVACY_NOTE, REDUCE_MOTION_NOTE] {
+        let w = text.width(note, style::NOTE_PX);
+        assert!(w <= room, "{note}: {w} of {room}");
+    }
+    // The note sits under the switch, inside the panel.
+    let p = layout::panel(0.0);
+    let row = layout::motion_row(p, 0);
+    let note = row.bottom() + layout::MOTION_NOTE_GAP + style::NOTE_PX;
+    assert!(note < p.bottom() - layout::PANEL_PAD, "{note}");
+}

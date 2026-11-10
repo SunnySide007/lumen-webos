@@ -486,7 +486,7 @@ These cost little or nothing per frame and do the most for the look:
 | Layered parallax | Only for art Lumen owns (the Top Shelf, Lumen's own tiles): 2–3 layers shift with the tilt. LG's icons are flat images, so they tilt as one piece | One quad per layer | Flat art |
 | Top Shelf hero | Superseded by the home's full-screen art ("The home" below). Was: full-bleed 1920 × 640 art for the focused row-0 app, crossfading on the scroll spring, with the title over a dark scrim at the bottom | 1–3 full-screen quads; 3.6 MB of texture each at 1280 × 720 | The gradient |
 | Glass | Control Center platter and dock (options below) | See below | Flat tinted panels, black at 75% |
-| Control Center | The roadmap's toggles that match LG Settings, on a glass platter; the Privacy panel, read-only (decision 12); Reduce Motion, one switch per effect (focus tilt, focus light, parallax, the hero's crossfade, dither) | Its glass | |
+| Control Center | The roadmap's toggles that match LG Settings, on a glass platter; the Privacy panel, read-only (decision 12); Reduce Motion, one switch for every moving effect (focus tilt, focus light, parallax, slides, crossfades) | Its glass | |
 | App editing | Done from Lumen Remote, not on the TV (decision 10): the first row, the order, "Other apps" | Nothing on the TV | |
 
 * **Top Shelf art:** the owner's own per app, stills from Lumen's ambient
@@ -668,15 +668,20 @@ read `/var/lib/lumen` itself, `lumend` isn't installed on the B9, and its
 lumend-side change). `lumen-ctl privacy.state` reads the same things for
 the phone and the PC.
 
-**Motion** (Reduce Motion, decision 7). A switch for each moving effect, in
-this order: Tilt, Light sweep, Parallax, Slides, Crossfades, green while
-the effect runs. Up and Down move along them; OK turns the focused one off
-or on again. Each drives the look's own switch (`tilt`, `light`,
-`parallax`, `slide`, `fade`), so the home and the bench see one set of
-switches. Reduce Motion can only take an effect away: one the launch
-parameters' `"look"` turns off stays off, and its row is drawn faint and
-ignores OK. An effect turned off stops where it is: tiles stand upright,
-the art stops drifting, a light sweep under way ends.
+**Motion** (Reduce Motion, decision 7). One switch, "Reduce Motion", green
+while it is on, with a note under it: "Stops tilt, light sweep, parallax,
+slides and fades". OK turns every moving effect off at once, and on again
+(`Reduced::toggled`). It drives the look's own switches (`tilt`, `light`,
+`parallax`, `slide`, `fade`), which stay separate in the launch
+parameters' `"look"` for the bench, so the home and the bench see one set
+of switches. The first build had a switch per effect; the build review
+(2026-11-09) asked for the one a viewer expects, as tvOS has. It is on
+when every effect the launch look runs is off; a file with only some off
+(an older one) reads as off, and OK then turns the rest off. Reduce Motion
+can only take effects away: what the launch look turns off stays off, and
+with nothing moving in it the switch is drawn faint and ignores OK. An
+effect turned off stops where it is: tiles stand upright, the art stops
+drifting, a light sweep under way ends.
 
 **Where Reduce Motion is kept.** In `reduce-motion`, a file beside the
 executable in Lumen's folder, as `platform` is: the words of the effects
@@ -816,9 +821,10 @@ Answered on 2026-11-05 (the design session, decisions 10, 12 and 15):
 6. **The grid shows the contract:** the contract's apps, then the inputs,
    then Settings; every other launch point in one "Other apps" tile.
    Edited from Lumen Remote, so on-TV editing is not built.
-7. **Reduce Motion** in the Control Center, one switch per effect, editable
-   on the TV. It drives the same switches as the launch parameters'
-   `"look"`.
+7. **Reduce Motion** in the Control Center, editable on the TV. It drives
+   the same switches as the launch parameters' `"look"`: one switch for
+   them all on the TV (the build review, 2026-11-09), each its own in the
+   launch parameters.
 8. **The hidden shell frees the heroes** (lane J's question 3) and keeps
    the icon atlas.
 9. **Heroes move to ASTC 4x4** on an ES 3.0 context once a B9 measurement

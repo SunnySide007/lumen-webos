@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use lumen_core::apps::App;
 use lumen_core::art::Look;
-use lumen_core::control::{ControlView, Motion, MotionRow};
+use lumen_core::control::{ControlView, MotionRow, REDUCE_MOTION};
 use lumen_core::home::{CONTROL_SUBTITLE, CONTROL_TITLE, ChipView, TileView, View};
 use lumen_core::layout::{self, Rect, SAFE};
 use lumen_core::privacy::Line;
@@ -143,16 +143,13 @@ fn control_view() -> View<'static> {
             warn: false,
         })
         .collect();
-    let motion = Motion::ALL
-        .iter()
-        .map(|m| MotionRow {
-            label: m.label(),
-            on: true,
-            editable: true,
-            focused: false,
-            lift: 0.0,
-        })
-        .collect();
+    let motion = vec![MotionRow {
+        label: REDUCE_MOTION,
+        on: true,
+        editable: true,
+        focused: false,
+        lift: 0.0,
+    }];
     View {
         art: ShelfView::PLACEHOLDER,
         drift: [0.0; 2],

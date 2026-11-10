@@ -624,11 +624,15 @@ mod tests {
         shell.set_motion(Reduced::from_words("slide"), Some(file.clone()));
         shell.press(tap(Action::Move(lumen_core::focus::Dir::Up)), ms(0));
         shell.press(tap(Action::Select), ms(10));
-        // Tilt, the first row, off.
+        // The switch on: every effect off, each named in the file.
         shell.press(tap(Action::Select), ms(20));
         let kept = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(kept, "tilt slide\n");
+        assert_eq!(kept, "tilt light parallax slide fade\n");
         assert_eq!(Reduced::from_words(&kept), shell.home.reduced());
+        // And off: none named.
+        shell.press(tap(Action::Select), ms(30));
+        assert_eq!(std::fs::read_to_string(&file).unwrap().trim(), "");
+        assert_eq!(shell.home.reduced(), Reduced::default());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

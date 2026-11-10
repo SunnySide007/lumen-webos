@@ -155,6 +155,8 @@ pub const MOTION_ROW_Y: f32 = 528.0;
 pub const MOTION_ROW_H: f32 = 72.0;
 pub const MOTION_ROW_PITCH: f32 = 78.0;
 pub const MOTION_ROW_RADIUS: f32 = 16.0;
+/// From the last row's bottom to the top of the note under it.
+pub const MOTION_NOTE_GAP: f32 = 14.0;
 /// How far a row reaches past the panel's padding on each side, so its
 /// label and switch line up with the text above.
 pub const MOTION_ROW_INSET: f32 = 16.0;
