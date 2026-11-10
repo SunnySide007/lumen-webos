@@ -537,13 +537,34 @@ width), dim at rest and brightening as the tile lifts, so the page reads
 without moving focus over it; the first build named only the focused one.
 Back turns back to the Other apps tile.
 
-**One tile style.** Every tile is the app's own colour (its icon's webOS
-colour, else the palette), a soft rest shadow, and the app's icon or, with
-none, its name, dark on a light colour. Focus lifts it (scale 1.12, a deeper
-shadow), leans it toward the move (tilt), sweeps a light across it once,
-and adds a sheen: the top-left corner 26% of the way to white, fading
-across to the bottom right, drawn as the tile's own corner colours, so it
-costs no quad. Chips light up white with
+**One tile style.** Every tile, "Other apps" included, is one rounded tile
+of a colour, a soft rest shadow, and on it an icon, a mark or a name;
+the first build had three looks (colour and name, an icon in a dark box,
+and "Other apps"), which the build review (2026-11-09) asked to make one.
+Its colour, in order:
+
+1. Its icon's own edge colour, when the icon sits on a square of its own
+   (at least half of its two outer rings of pixels opaque:
+   `icons::edge_color`). The icon is then drawn 150 px (most of the tile's
+   height), its square melting into the tile; the tile is flat under it,
+   and its light (below) goes over tile and icon together as white at each
+   corner's lightness, which is the same as the colour taken toward white.
+2. Else webOS's `iconColor`, unless it is near white or a light grey (less
+   than 24 in 255 between its channels, and not dark): LG gives Netflix and
+   YouTube white, which as a whole tile beside dark ones pulls the eye from
+   focus, and shows only when their icons failed to copy.
+3. Else the palette's colour for its place in the list.
+
+An icon on a clear background is drawn 104 px on that colour; with no icon
+the name is drawn across the tile, dark on a light colour. "Other apps"
+has a mark of its own drawn in code, four rounded squares two by two, on
+its slate; its name is the title above the row when it has focus. Every
+colour comes from the TV at run time, so no app's artwork is in the repo.
+Focus lifts a tile (scale 1.12, a deeper shadow), leans it toward the move
+(tilt), sweeps a light across it once, and adds a sheen: the top-left
+corner 26% of the way to white, fading across to the bottom right, drawn
+as the tile's own corner colours (or the light over an icon's tile), so
+it costs no quad on most tiles and one on an icon's. Chips light up white with
 dark text and lift 1.08; they never lean or take the light. The page and
 the art drift with focus (parallax) only on the home page.
 

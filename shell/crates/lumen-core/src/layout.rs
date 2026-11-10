@@ -113,6 +113,11 @@ pub const SHADOW_OPACITY: f32 = style::SHADOW_OPACITY;
 
 /// A tile's icon: its longer side, at rest. It grows with the tile.
 pub const ICON_SIZE: f32 = 104.0;
+/// An icon on a square of its own colour, which the tile takes: most of the
+/// tile's height, and no larger than the icons are kept (`MAX_KEPT`, 160).
+pub const ICON_ON_OWN_SIZE: f32 = 150.0;
+/// The "Other apps" tile's mark, a side.
+pub const OTHERS_GLYPH: f32 = 64.0;
 
 pub const TITLE_PX: f32 = style::TITLE_PX;
 pub const SUBTITLE_PX: f32 = style::SUBTITLE_PX;

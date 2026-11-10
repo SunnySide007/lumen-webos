@@ -289,14 +289,111 @@ fn the_empty_state_draws() {
 }
 
 #[test]
-fn a_tile_takes_its_apps_colour_or_the_palettes_and_text_that_reads_on_it() {
+fn a_tile_takes_its_icons_edge_its_apps_colour_or_the_palettes() {
     let app = App::new("a", "A", AppKind::App);
-    assert_eq!(app_color(&app, 3), tile_color(3));
+    assert_eq!(app_color(&app, 3, None), tile_color(3));
     let app = app.with_color([1, 2, 3]);
-    assert_eq!(app_color(&app, 3), Rgba::rgb8(1, 2, 3));
+    assert_eq!(app_color(&app, 3, None), Rgba::rgb8(1, 2, 3));
+    // The icon's own square wins.
+    assert_eq!(app_color(&app, 3, Some([9, 9, 9])), Rgba::rgb8(9, 9, 9));
+    // White and light grey (LG's Netflix and YouTube) take the palette; a
+    // dark slate, a colour and the "Other apps" tile keep theirs.
+    for pale in [[255, 255, 255], [204, 204, 204], [120, 124, 130]] {
+        let app = App::new("a", "A", AppKind::App).with_color(pale);
+        assert_eq!(app_color(&app, 4, None), tile_color(4), "{pale:?}");
+    }
+    for kept in [[31, 31, 31], [229, 9, 20], style::OTHERS_TILE] {
+        let app = App::new("a", "A", AppKind::App).with_color(kept);
+        assert_eq!(
+            app_color(&app, 4, None),
+            Rgba::rgb8(kept[0], kept[1], kept[2])
+        );
+    }
     assert_eq!(on_color(Rgba::rgb8(255, 255, 255)), ON_LIGHT_TILE);
     assert_eq!(on_color(Rgba::rgb8(0, 0, 0)), ON_TILE);
     assert_eq!(on_color(tile_color(5)), ON_TILE);
+}
+
+#[test]
+fn an_icon_on_a_square_of_its_own_gives_the_tile_its_colour_and_the_light_goes_over() {
+    // A red square with a white mark, as LG's large icons are drawn.
+    let mut px = Vec::new();
+    for y in 0..16 {
+        for x in 0..16 {
+            let mark = (6..10).contains(&x) && (6..10).contains(&y);
+            px.extend_from_slice(if mark { &[255; 4] } else { &[200, 30, 40, 255] });
+        }
+    }
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, 16, 16);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&px).unwrap();
+    }
+    let dir = std::env::temp_dir().join(format!("lumen-edge-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let dir = std::fs::canonicalize(&dir).unwrap();
+    let path = dir.join("red.png");
+    std::fs::write(&path, &bytes).unwrap();
+    // LG's white, which the icon's own square overrules.
+    let app = App::new("red", "Red", AppKind::App)
+        .with_icon(path.to_str().unwrap())
+        .with_color([255, 255, 255]);
+    let mut home = Home::new(vec![app], BackAtTop::Exit).with_look(Look::DEFAULT);
+    home.settle_now();
+    let mut assets = assets();
+    let _ = painted(&home, &mut assets);
+    let batch = painted(&home, &mut assets);
+    let red = Rgba::rgb8(200, 30, 40);
+    let colors: Vec<Rgba> = (0..batch.quad_count())
+        .map(|n| batch.quad_color(n))
+        .collect();
+    let close = |a: Rgba, b: Rgba| (a.0 - b.0).abs() + (a.1 - b.1).abs() + (a.2 - b.2).abs() < 1e-3;
+    assert!(
+        colors.iter().any(|c| close(*c, red)),
+        "the focused tile is the icon's red"
+    );
+    // The light over the tile and its icon: white, its top left lit most.
+    let lit = colors
+        .iter()
+        .filter(|c| c.0 == 1.0 && c.1 == 1.0 && c.2 == 1.0 && c.3 > 0.0)
+        .count();
+    assert!(lit >= 3, "{lit} quads of light");
+    // The icon stands most of the tile's height.
+    let tile = home.view().tiles[0].rect;
+    let zoom = tile.w / layout::TILE_W;
+    let want = layout::ICON_ON_OWN_SIZE * zoom;
+    let icon = (0..batch.quad_count()).any(|n| {
+        let (x0, y0, x1, y1) = batch.quad_bounds(n);
+        ((x1 - x0) - want).abs() < 0.5 && ((y1 - y0) - want).abs() < 0.5
+    });
+    assert!(icon, "an icon {want} px a side");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn the_other_apps_tile_is_a_tile_like_the_rest_with_a_mark_of_four_squares() {
+    let mut home = mock_home().with_look(Look::DEFAULT);
+    home.settle_now();
+    let view = home.view();
+    let others = view
+        .tiles
+        .iter()
+        .find(|t| t.app.id.as_str() == lumen_core::arrange::OTHERS_ID)
+        .expect("on the row");
+    let batch = painted(&home, &mut assets());
+    let r = others.rect;
+    let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+    let half = layout::OTHERS_GLYPH / 2.0 + 1.0;
+    let marks = (0..batch.quad_count())
+        .filter(|&n| {
+            let (x0, y0, x1, y1) = batch.quad_bounds(n);
+            x0 >= cx - half && x1 <= cx + half && y0 >= cy - half && y1 <= cy + half
+        })
+        .count();
+    assert_eq!(marks, 4, "four squares and no name");
 }
 
 #[test]
