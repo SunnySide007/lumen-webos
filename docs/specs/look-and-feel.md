@@ -560,11 +560,16 @@ the name is drawn across the tile, dark on a light colour. "Other apps"
 has a mark of its own drawn in code, four rounded squares two by two, on
 its slate; its name is the title above the row when it has focus. Every
 colour comes from the TV at run time, so no app's artwork is in the repo.
-Focus lifts a tile (scale 1.12, a deeper shadow), leans it toward the move
+Focus lifts a tile (scale 1.15, a deeper shadow, and a 3 px rim of white
+at 90% just outside it, coming with the lift), leans it toward the move
 (tilt), sweeps a light across it once, and adds a sheen: the top-left
 corner 26% of the way to white, fading across to the bottom right, drawn
 as the tile's own corner colours (or the light over an icon's tile), so
-it costs no quad on most tiles and one on an icon's. Chips light up white with
+it costs no quad on most tiles and one on an icon's. Resting tiles are at
+65% brightness, their icons too when the tile takes the icon's colour.
+The build review (2026-11-09) found focus too quiet from a couch at 1.12,
+no rim and 80%; the rim is a `rounded_fill4` under the tile, so it costs
+the fill's pixels and shape quads only along its edge. Chips light up white with
 dark text and lift 1.08; they never lean or take the light. The page and
 the art drift with focus (parallax) only on the home page.
 

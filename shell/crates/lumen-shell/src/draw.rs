@@ -36,6 +36,7 @@ const TEXT_DIM: Rgba = Rgba::of(style::TEXT_DIM);
 const SHADOW: Rgba = Rgba::of(style::SHADOW);
 const PILL: Rgba = Rgba::of(style::PILL);
 const ON_TILE: Rgba = Rgba::of(style::ON_TILE);
+const FOCUS_RIM: Rgba = Rgba::of(style::FOCUS_RIM_COLOR);
 const ON_LIGHT_TILE: Rgba = Rgba::of(style::CHIP_TEXT_FOCUS);
 const WHITE: Rgba = Rgba::of(style::WHITE);
 const CHIP: Rgba = Rgba::of(style::CHIP);
@@ -610,6 +611,13 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, sheen: bool, assets: &mut A
     let own = app_color(tile.app, tile.index, edge);
     let base = own.shade(shade);
     let a = tile.alpha;
+    // The rim, under the tile and a little larger, so only its edge shows.
+    if lift > 0.0 {
+        let rim = style::FOCUS_RIM * zoom;
+        let c = FOCUS_RIM.alpha(FOCUS_RIM.3 * lift * a);
+        let o = r.outset(rim);
+        batch.rounded_fill4(o.x, o.y, o.w, o.h, radius + rim, [c; 4]);
+    }
     // The light on a tile, as how far each corner (top left, top right,
     // bottom left, bottom right) goes toward white: its top lit a little,
     // and with the sheen the top left corner lit more, fading across to the

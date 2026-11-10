@@ -161,11 +161,11 @@ fn a_newly_focused_tile_leans_whole_with_its_light_and_fits_the_budget() {
     let tile = *home.view().tiles.last().unwrap();
     assert!(tile.tilt[0] > 0.0 && tile.sweep.is_some());
     let batch = painted(&home, &mut assets);
-    // Prime Video's tile (five quads: `Batch::rounded_fill4`), its name
-    // across it and the light's two quads lean; its shadow and every other
-    // tile stay level.
+    // Prime Video's rim and tile (five quads each: `Batch::rounded_fill4`),
+    // its name across it and the light's two quads lean; its shadow and
+    // every other tile stay level.
     let name = "PrimeVideo".len();
-    assert_eq!(batch.leaning_quads(), 5 + name + 2);
+    assert_eq!(batch.leaning_quads(), 5 + 5 + name + 2);
     let n = batch.quad_count();
     assert!(n <= QUAD_BUDGET, "{n} quads");
     // Settled, nothing leans.
@@ -394,6 +394,34 @@ fn the_other_apps_tile_is_a_tile_like_the_rest_with_a_mark_of_four_squares() {
         })
         .count();
     assert_eq!(marks, 4, "four squares and no name");
+}
+
+#[test]
+fn the_focused_tile_alone_has_a_bright_rim_round_it() {
+    let mut home = mock_home().with_look(Look::DEFAULT);
+    home.settle_now();
+    let batch = painted(&home, &mut assets());
+    let view = home.view();
+    let rim = Rgba::of(style::FOCUS_RIM_COLOR);
+    // The rim's middle piece, a fill as big as the tile grown by the rim.
+    let rims: Vec<(f32, f32, f32, f32)> = (0..batch.quad_count())
+        .filter(|&n| {
+            let c = batch.quad_color(n);
+            (c.0, c.1, c.2, c.3) == (rim.0, rim.1, rim.2, rim.3)
+        })
+        .map(|n| batch.quad_bounds(n))
+        .collect();
+    let focused = view.tiles.iter().find(|t| t.focused).unwrap().rect;
+    let grown = focused.outset(style::FOCUS_RIM * focused.w / layout::TILE_W);
+    assert_eq!(rims.len(), 5, "one rim, five pieces");
+    let (x0, y0, x1, y1) = rims
+        .iter()
+        .fold((f32::MAX, f32::MAX, f32::MIN, f32::MIN), |b, q| {
+            (b.0.min(q.0), b.1.min(q.1), b.2.max(q.2), b.3.max(q.3))
+        });
+    // A pixel past the grown rect, for the soft edge.
+    assert!((x0 - (grown.x - 1.0)).abs() < 0.01 && (x1 - (grown.right() + 1.0)).abs() < 0.01);
+    assert!((y0 - (grown.y - 1.0)).abs() < 0.01 && (y1 - (grown.bottom() + 1.0)).abs() < 0.01);
 }
 
 #[test]

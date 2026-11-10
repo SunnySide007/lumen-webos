@@ -62,7 +62,9 @@ pub const PILL: Color = BLACK.with_alpha(0.75);
 pub const ON_TILE: Color = WHITE;
 
 /// Resting tiles are this bright; lifting brings a tile to full brightness.
-pub const TILE_REST_SHADE: f32 = 0.8;
+/// 0.8 read too close to the focused tile from a couch (the build review,
+/// 2026-11-09).
+pub const TILE_REST_SHADE: f32 = 0.65;
 /// How much lighter a tile's top edge is than its bottom: this far toward
 /// white.
 pub const TILE_SHEEN: f32 = 0.14;
@@ -143,8 +145,14 @@ pub const TILE_RADIUS: f32 = 14.0;
 
 // Focus: the lifted tile and the shadows.
 
-/// How much a fully lifted tile grows, about its centre.
-pub const FOCUS_SCALE: f32 = 1.12;
+/// How much a fully lifted tile grows, about its centre: 1.15, from 1.12
+/// (the build review, 2026-11-09), which still leaves 16 px to each
+/// neighbour on the row.
+pub const FOCUS_SCALE: f32 = 1.15;
+/// The focused tile's rim: a bright edge this wide just outside it, coming
+/// with the lift, so focus reads from across the room.
+pub const FOCUS_RIM: f32 = 3.0;
+pub const FOCUS_RIM_COLOR: Color = WHITE.with_alpha(0.9);
 /// How much a focused chip grows.
 pub const CHIP_FOCUS_SCALE: f32 = 1.08;
 /// The soft shadow under a lifted tile, offset down and fading out over
