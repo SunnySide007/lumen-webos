@@ -169,9 +169,52 @@ struct Held {
     said: Instant,
 }
 
+/// Keyboard focus across the seats: with two seats bound, the compositor
+/// says enter and leave once for each seat's keyboard (B9, 2026-11-10: three
+/// `window focus gained` in one millisecond), so the window's focus changes
+/// at the first enter and the last leave only.
+#[derive(Debug, Default)]
+struct KeyboardFocus {
+    keyboards: u32,
+}
+
+impl KeyboardFocus {
+    /// A keyboard entered; true if it is the first, when the window gains
+    /// focus.
+    fn enter(&mut self) -> bool {
+        self.keyboards += 1;
+        self.keyboards == 1
+    }
+
+    /// A keyboard left; true if it was the last, when the window loses
+    /// focus (or if none was counted in, so a loss is never missed).
+    fn leave(&mut self) -> bool {
+        let was = self.keyboards;
+        self.keyboards = was.saturating_sub(1);
+        was <= 1
+    }
+}
+
+/// The pointer's visibility as last passed on. LG says each change twice,
+/// as a key (1198, 1199) and as `cursor_visibility`, and echoes the
+/// shell's own hiding, so a state already passed on is dropped.
+#[derive(Debug, Default)]
+struct CursorSeen {
+    shown: Option<bool>,
+}
+
+impl CursorSeen {
+    /// The pointer is `shown` or not; true if that is news.
+    fn pass(&mut self, shown: bool) -> bool {
+        self.shown.replace(shown) != Some(shown)
+    }
+}
+
 #[derive(Default)]
 struct State {
     pointer_at: (i32, i32),
+    keyboard_focus: KeyboardFocus,
+    cursor: CursorSeen,
     held: Vec<Held>,
     key_clock: KeyClock,
     refresh_mhz: Option<i32>,
@@ -420,6 +463,8 @@ impl Wayland {
             self.lib.send(manager, op, &mut args);
             (self.lib.display_flush)(self.display);
         }
+        // The shell knows it hid it: LG's echo is not news.
+        self.inner.state.borrow_mut().cursor.pass(false);
         true
     }
 
@@ -816,9 +861,19 @@ impl Inner {
                     unsafe { libc::close(*fd) };
                 }
             }
-            (Kind::Keyboard, "enter") => self.push(Event::Window(window::FOCUS_GAINED), now),
+            (Kind::Keyboard, "enter") => {
+                if self.state.borrow_mut().keyboard_focus.enter() {
+                    self.push(Event::Window(window::FOCUS_GAINED), now);
+                }
+            }
             (Kind::Keyboard, "leave") => {
-                let held = std::mem::take(&mut self.state.borrow_mut().held);
+                // Keys held go up at any keyboard's leave, so none is left
+                // repeating; the window loses focus at the last.
+                let (held, last) = {
+                    let mut state = self.state.borrow_mut();
+                    let last = state.keyboard_focus.leave();
+                    (std::mem::take(&mut state.held), last)
+                };
                 for key in held {
                     self.push(
                         Event::KeyUp {
@@ -827,7 +882,9 @@ impl Inner {
                         now,
                     );
                 }
-                self.push(Event::Window(window::FOCUS_LOST), now);
+                if last {
+                    self.push(Event::Window(window::FOCUS_LOST), now);
+                }
             }
             (Kind::Keyboard, "key") => {
                 if let (Some(time), Some(code), Some(pressed)) = (uint(1), uint(2), uint(3)) {
@@ -913,7 +970,11 @@ impl Inner {
                 }
             }
             (Kind::InputManager, "cursor_visibility") => {
-                let scancode = if uint(0).unwrap_or(0) != 0 {
+                let shown = uint(0).unwrap_or(0) != 0;
+                if !self.state.borrow_mut().cursor.pass(shown) {
+                    return;
+                }
+                let scancode = if shown {
                     lumen_core::input::scancode::WEBOS_CURSOR_SHOW
                 } else {
                     lumen_core::input::scancode::WEBOS_CURSOR_HIDE
@@ -1072,6 +1133,13 @@ impl Inner {
             state.unknown_keys.push(code);
         }
         let scancode = scancode.unwrap_or(0);
+        // The pointer's keys pass on only a change (`CursorSeen`).
+        let news = match scancode {
+            _ if !down => true,
+            lumen_core::input::scancode::WEBOS_CURSOR_SHOW => state.cursor.pass(true),
+            lumen_core::input::scancode::WEBOS_CURSOR_HIDE => state.cursor.pass(false),
+            _ => true,
+        };
         if down {
             state.held.retain(|h| h.code != code);
             state.held.push(Held {
@@ -1104,7 +1172,9 @@ impl Inner {
         } else {
             Event::KeyUp { scancode }
         };
-        self.push(event, at);
+        if news {
+            self.push(event, at);
+        }
     }
 
     /// When a held key is next to be said to be still held.
@@ -1208,6 +1278,31 @@ impl crate::screen::Window for EglWindow<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn focus_changes_at_the_first_keyboard_in_and_the_last_out() {
+        let mut focus = KeyboardFocus::default();
+        assert_eq!(
+            [focus.enter(), focus.enter(), focus.enter()],
+            [true, false, false]
+        );
+        assert_eq!(
+            [focus.leave(), focus.leave(), focus.leave()],
+            [false, false, true]
+        );
+        assert!(focus.leave(), "a leave with none in still loses focus");
+        assert!(focus.enter(), "and the next enter gains it");
+    }
+
+    #[test]
+    fn the_pointers_state_passes_on_only_when_it_changes() {
+        let mut seen = CursorSeen::default();
+        assert!(seen.pass(true), "the first word is news");
+        assert!(!seen.pass(true), "the same, said again");
+        assert!(seen.pass(false));
+        assert!(!seen.pass(false));
+        assert!(seen.pass(true));
+    }
 
     #[test]
     fn states_are_named() {

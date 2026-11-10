@@ -242,6 +242,12 @@ no input for <N> s; focused <yes|no>; pointer <shown|hidden>; power <state|unkno
 * `pointer at`: each time the pointer moves focus, by moving or by a click
   (just before its `mouse button` line), with what has it now: an app's
   name, `the gear` or `Reduce Motion`.
+* On the Wayland path, `pointer shown` and `pointer hidden` come once per
+  change: LG says each both as a key (1198, 1199) and as
+  `cursor_visibility`, and echoes the shell's own hiding. `window focus
+  gained` and `lost` come once too: with two seats bound, the compositor
+  enters and leaves each seat's keyboard, and the window's focus changes at
+  the first enter and the last leave.
 * `pointer:` once at start-up. If LG's SDL exports
   `SDL_webOSCursorVisibility`, an arrow hides a shown pointer, so the next OK
   arrives as key 40. If not, the pointer stays as LG leaves it.
