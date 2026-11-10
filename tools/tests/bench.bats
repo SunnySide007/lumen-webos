@@ -264,3 +264,20 @@ EOF
     [ "$status" -eq 0 ]
     [ "$(cat "$LUMEN_BENCH_LOCK/pid")" != 999999 ]
 }
+
+@test "front refuses odd options before it reaches the TV" {
+    run sh "$BENCH" front --runs 0
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"--runs must be 1 to 9"* ]]
+    run sh "$BENCH" front --from "$APP"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"--from: a plain app id other than Lumen's"* ]]
+    run sh "$BENCH" front --from 'a;b'
+    [ "$status" -eq 1 ]
+    run sh "$BENCH" front --ipk "$TMP/none.ipk"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"no such IPK"* ]]
+    run sh "$BENCH" front --pattern x
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"unknown option for front"* ]]
+}

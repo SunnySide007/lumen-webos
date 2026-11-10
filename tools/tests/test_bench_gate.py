@@ -61,6 +61,13 @@ class RunNumbers(unittest.TestCase):
         self.assertEqual((n['rss_kb'], n['idle_cpu_pct']), (61000, 0.4))
         self.assertNotIn('yielded', n)
 
+    def test_the_icon_count_of_the_start(self):
+        log = ('[1794288397.500] 30 tiles, 4 with icons; left out 0 launch points\n'
+               '[1794288460.500] 30 tiles, 30 with icons; left out 0 launch points\n')
+        n = gate.run_numbers(STATS, log)
+        self.assertEqual((n['tiles'], n['icons']), (30, 4))
+        self.assertNotIn('icons', gate.run_numbers(STATS, LOG))
+
     def test_a_yield_is_kept(self):
         n = gate.run_numbers('', '', ['{"yield":{"node":"event3"},"played":4}'])
         self.assertEqual(n['yielded'], {'node': 'event3'})

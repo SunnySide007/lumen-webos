@@ -102,6 +102,13 @@ def startup_from_log(text):
     return {}
 
 
+def icons_from_log(text):
+    """The first `N tiles, M with icons` line: icon tiles cost more to draw
+    than letter tiles, so runs with different counts do not compare."""
+    m = re.search(r'\] ([0-9]+) tiles, ([0-9]+) with icons', text)
+    return {'tiles': int(m.group(1)), 'icons': int(m.group(2))} if m else {}
+
+
 def home_press(text, press):
     """Target 5 from the robot's Home press at `press` (epoch seconds, the
     TV's clock): the first `foreground:` or `relaunch:` line after it. Its
@@ -129,6 +136,7 @@ def run_numbers(stats_text, log_text, play_lines=(), rss_kb=None, cpu_pct=None):
     out = {}
     out.update(frames_from_stats(stats_text))
     out.update(startup_from_log(log_text))
+    out.update(icons_from_log(log_text))
     out.update(keys_in_log(log_text))
     for line in play_lines:
         line = line.strip()

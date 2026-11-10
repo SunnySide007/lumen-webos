@@ -26,7 +26,12 @@ are layout only.
    it ends, also after a yield or an automatic undo. `--force` is for
    when the owner says the TV is free.
 2. **The build.** `--ipk` installs a build; otherwise the installed one is
-   measured. The robot's `lumen-ctl` and the pattern go into
+   measured. After an install the bench makes the icon copy if the new
+   build has none (the shell's own script, as root) and launches the build
+   once without timing it, until that start's icon copy has ended; only
+   then do the timed runs begin. `run.txt` lists the apps running behind
+   Lumen, and each run's numbers carry its icon count (`icons`): runs with
+   different counts do not compare. The robot's `lumen-ctl` and the pattern go into
    `/var/lib/lumen/stage/`, root's own folder. The installed `lumen-ctl`
    behind the Remote's forced key is never touched.
 3. **Each run** (3 by default): close the shell, launch it with the
@@ -81,6 +86,35 @@ YouTube and plx-native, through: a cold launch (closed first if it runs),
   back by a launch; if that fails too, the run stops (exit 4).
 * An HDMI input is left out for now: switching to one may wake other
   devices over HDMI-CEC, which the family would notice.
+
+## Coming back in front
+
+`tools/bench.sh front` measures the frames the shell draws when a Home
+press brings it back over another app: the hero is decoded again (the
+shell frees it while hidden) and fades in over the gradient.
+
+1. The shell is closed and launched with `--params` (default
+   `{"platform":"wayland"}`, the path a Home press gets from `lumend`'s
+   hidden shell) plus `"saver":"hold"` and `"exitAfter"`. The run waits for
+   the first frame and for the start's icon copy to end.
+2. **Each trip** (3 by default): the other app (`--from`, default
+   `netflix`) is launched and stays in front for 8 s; the robot presses
+   Home for 180 ms; 8 s later the shell's log is read from the press on.
+3. **The window** is the log's own: from the shell's `lifecycle: relaunch`
+   line to 2 s after its first `crossfade … to <hero>` line.
+   `tools/bench/front.py` takes from it the shell's `drew N frames` lines
+   (the fade's is the last one before the crossfade line), each `slow
+   frame` line with its loop, batch, upload, submit and swap split, the
+   hero's decode and upload times, and the press to the first frame
+   (target 5). It computes no frame time itself.
+4. **Afterwards:** the other app is closed if it was not running before,
+   and the run ends like any other (the last good build back, a plain
+   relaunch, the HDMI input back in front).
+
+The report holds `front<N>.log`, `front<N>.json`, `summary.json` (the
+medians) and, in `run.txt`, the apps running behind Lumen. There is no
+gate for this pattern yet: its first numbers are the baseline a limit will
+come from.
 
 ## The lean track
 
@@ -272,3 +306,29 @@ three. 0a537bf, before icon tiles were drawn as fills, read 17.92 ms and
 icon copy is still going and read 590 to 728 ms to its first frame; the
 same build without a reinstall starts in 550 to 582 ms.
 
+
+**The pointer build, 57c4831** (hover moves the focus, a click opens what
+is under it), 05:22 to 05:55 UTC, forced, Netflix and YouTube running
+behind Lumen, every run with 30 of 30 icons: home, full look 17.02 ms and
+0.00 skipped per 10 s, start-up 579 ms; pages-43s 17.12 ms and 9.67,
+start-up 600 ms; control-45s 16.50 ms and 0.00, start-up 552 ms. The gate
+passes on all three.
+
+**A build installed over the last good one starts with 4 of 30 icons.**
+The first Pages and Control Center runs of 57c4831 drew 4 icons (17.13 ms
+and 16.51 ms; they do not count). The last good IPK is made from the TV's
+folder, icon copy included, so the installer removes the copy with it; the
+shell refreshes only a copy that exists, and `lumend` makes one only when
+it starts. The bench now makes the copy after an install and launches once
+untimed. The untimed launch did not bring the start-up down: the three
+Pages starts after it read 613, 539 and 600 ms.
+
+**Coming back in front** (`tools/bench.sh front`), 57c4831 on the Wayland
+path, Netflix in front, a 180 ms robot Home press, three trips: the fade
+drew 36, 35 and 35 frames in 680, 699 and 695 ms with 7, 8 and 8 vsyncs
+skipped (median 8), and 3, 4 and 3 slow frames of 25 to 74 ms, all of it
+submit time (the worst 70.10, 56.34 and 72.36 ms; upload at most 0.02 ms,
+swap under 1 ms). The hero was decoded in 344, 324 and 324 ms, and
+Lumen's first frame came 192, 201 and 194 ms after the key went down.
+With 4 icons the fade read the same (8 skipped, worst submit 73.56 ms),
+so the icon tiles are not the cause. This is the baseline for the fix.

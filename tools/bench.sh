@@ -26,6 +26,16 @@
 #                       the shell's RSS and idle CPU
 #       --force         run outside a lab window: only when the owner says
 #                       the TV is free
+#   tools/bench.sh front [options]     coming back in front: another app in
+#                                      front, a robot Home press, and the
+#                                      shell's frames from its relaunch until
+#                                      2 s after the fade to the hero
+#       --ipk FILE      install this build first (default: what is installed)
+#       --params JSON   launch parameters (default {"platform":"wayland"})
+#       --runs N        how many Home presses (default 3)
+#       --from ID       the app in front before each press (default netflix)
+#       --name NAME     the report folder's suffix
+#       --force         as for run
 #   tools/bench.sh apps [--apps "ID ..."] [--force]
 #                                      app launch times and target 5: each app
 #                                      (default netflix, youtube.leanback.v4,
@@ -79,11 +89,18 @@ LEAN=${LUMEN_LEAN_PROFILE:-$ROOT/profiles/lean}
 LAST_GOOD=$OUTROOT/last-good
 APP=io.github.sunnyside007.lumen.shell
 SAVER=com.webos.app.screensaver
+APPDIR=/media/developer/apps/usr/palm/applications/$APP
 STAGE=/var/lib/lumen/stage
 CTL=$STAGE/bench-lumen-ctl
 PATTERN=$STAGE/bench-pattern.txt
 IDLE_S=1200
 FIRST_FRAME_S=10
+# How long a start's icon copy may take (7 to 14 s on the B9, 2026-11-10).
+ICON_COPY_S=30
+# "front": how long the other app stays in front before the Home press, and
+# how long after it the log is read (the hero's decode, the fade and 2 s).
+FRONT_AWAY_S=8
+FRONT_AFTER_S=8
 # How long the robot holds Home: about a person's quick press.
 HOME_HOLD_MS=180
 PY=${PYTHON:-python}
@@ -281,7 +298,7 @@ cmd_wait_window() {
 
 # The installed app's binary's SHA-256 on the TV.
 tv_binary_sha() {
-    tv run "sha256sum /media/developer/apps/usr/palm/applications/$APP/lumen-shell 2>/dev/null | cut -d' ' -f1" </dev/null | tr -d '\r'
+    tv run "sha256sum $APPDIR/lumen-shell 2>/dev/null | cut -d' ' -f1" </dev/null | tr -d '\r'
 }
 
 last_good_ipk() {
@@ -337,7 +354,50 @@ restore() {
 relaunch_plain() {
     tv close "$APP" </dev/null >/dev/null || true
     sleep 2
+    p0=$(tv run 'date +%s' </dev/null | tr -d '\r')
     tv launch "$APP" </dev/null >/dev/null || say "plain relaunch failed"
+    # Each start copies LG's icons again. An install that lands in the middle
+    # of that copy leaves the next build without one (4 of 30 icons in two
+    # runs on 2026-11-10), so the bench leaves only once it is over.
+    [ -z "$p0" ] || icons_settled "$p0" || true
+}
+
+# Waits for the icon copy of the start after $1 to end: the log's `luna
+# exec` line, which a plain start writes once. 1 if none came in time.
+icons_settled() {
+    waited=0
+    while [ $waited -lt "$ICON_COPY_S" ]; do
+        sleep 2
+        if tv_step logsince "SINCE=$1" 2>/dev/null | grep -q '\] luna exec: '; then
+            return 0
+        fi
+        waited=$((waited + 2))
+    done
+    return 1
+}
+
+# The ids of the apps running now, on one line.
+running_apps() {
+    tv_step running 2>/dev/null | tr '\n' ' ' | sed 's/ $//'
+}
+
+# After an install: one launch that is not timed, so the first icon copy is
+# over before the timed starts (start-up read 590 to 728 ms straight after
+# an install on the B9, 550 to 582 ms without one).
+#
+# The new build may also have no icon copy at all: the last good IPK is made
+# from the TV's folder, icons included, so the installer takes them away
+# with it; the shell only refreshes a copy that exists, and lumend makes one
+# only when it starts (4 of 30 icons in two runs of 2026-11-10). The bench
+# then makes it with the script's own fixed command, as root, which is what
+# Homebrew Channel's exec does for the shell. It writes only in Lumen's folder.
+settle_install() {
+    tv run "[ -d $APPDIR/lg-icons ] || /bin/sh $APPDIR/lumen-icons.sh" </dev/null >>"$OUT/install.txt" 2>&1 ||
+        say "the icon copy failed: $(tail -n 1 "$OUT/install.txt")"
+    s0=$(tv run 'date +%s' </dev/null | tr -d '\r')
+    tv launch "$APP" </dev/null >/dev/null || return 0
+    first_frame_after "$s0" || return 0
+    icons_settled "$s0" || say "no icon copy seen ${ICON_COPY_S} s after the install's first launch"
 }
 
 cmd_restore() {
@@ -436,6 +496,7 @@ cmd_run() {
         echo "last good $(cat "$LAST_GOOD/binary.sha256")"
         [ -z "$BACK_TO" ] || echo "back to $BACK_TO"
         tv check </dev/null | grep -E '"(modelName|firmwareVersion)"' | tr -d ' ,'
+        echo "running $(running_apps)"
     } >"$OUT/run.txt"
     say "report in ${OUT#"$ROOT"/}"
 
@@ -447,6 +508,7 @@ cmd_run() {
         say "installing $(basename "$IPK")"
         tv close "$APP" </dev/null >/dev/null || true
         tv install "$IPK" </dev/null >"$OUT/install.txt" || die "install failed: $(cat "$OUT/install.txt")"
+        settle_install
     fi
     sha=$(tv_binary_sha)
     echo "binary $sha" >>"$OUT/run.txt"
@@ -506,7 +568,7 @@ cmd_run() {
             tar -xf "$OUT/run$i-shots.tar" -C "$OUT/run$i-shots" 2>/dev/null || true
         fi
         rm -f "$OUT/run$i-shots.tar"
-        say "run $i: $(grep -E '"(avg_frame_ms|skipped_per_10s|startup_ms|key_downs)"' "$OUT/run$i.json" | tr -d ' \n')"
+        say "run $i: $(grep -E '"(avg_frame_ms|skipped_per_10s|startup_ms|key_downs|icons)"' "$OUT/run$i.json" | tr -d ' \n')"
         i=$((i + 1))
     done
     set -- "$OUT"/run[0-9].json
@@ -560,6 +622,139 @@ home_from() {
             exit 4
         }
     fi
+}
+
+# One trip for `front`: $FROM in front, a robot Home press, and the shell's
+# log from the press on, cut by tools/bench/front.py.
+front_trip() {
+    n=$1
+    r=$(tv_step applaunch "APP=$FROM" "COLD=0")
+    echo "$r" >"$OUT/front$n-launch.txt"
+    err=$(value error "$r")
+    [ -z "$err" ] || {
+        say "run $n: $FROM: $err"
+        exit 1
+    }
+    sleep "$FRONT_AWAY_S"
+    set +e
+    tv run "$CTL key home --hold-ms $HOME_HOLD_MS" </dev/null >"$OUT/front$n-home.jsonl"
+    rc=$?
+    set -e
+    if [ "$rc" = 3 ]; then
+        say "YIELD: a person used the remote"
+        note_person "$OUT/front$n-home.jsonl"
+        exit 3
+    fi
+    press=$(sed -n 's/.*"first":\([0-9.]*\).*/\1/p' "$OUT/front$n-home.jsonl" | head -n 1)
+    [ -n "$press" ] || {
+        say "run $n: the Home press failed: $(tail -n 1 "$OUT/front$n-home.jsonl")"
+        exit 1
+    }
+    sleep "$FRONT_AFTER_S"
+    tv_step logsince "SINCE=${press%.*}" >"$OUT/front$n.log"
+    "$PY" -I "$BENCH/front.py" cut "$press" "$OUT/front$n.log" >"$OUT/front$n.json"
+    say "run $n: $(grep -E '^  "(complete|target5_ms|fade_frames|fade_ms|fade_skipped|skipped|slow_frames|worst_submit_ms|hero_decode_ms)"' "$OUT/front$n.json" | tr -d ' \n')"
+    # Lumen must be back in front, as after `apps`.
+    fg=$(value fg "$(tv_step window)")
+    if [ "$fg" != "$APP" ]; then
+        say "the Home press did not bring Lumen back (front: ${fg:-?}); bringing it back by launch"
+        tv launch "$APP" </dev/null >/dev/null || true
+        sleep 2
+        [ "$(value fg "$(tv_step window)")" = "$APP" ] || {
+            say "AUTOMATIC UNDO: Lumen does not come back in front"
+            exit 4
+        }
+    fi
+}
+
+cmd_front() {
+    IPK='' PARAMS='{"platform":"wayland"}' RUNS=3 NAME=front FORCE=0 KEEP=0 FROM=netflix
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --ipk) IPK=$2; shift 2 ;;
+            --params) PARAMS=$2; shift 2 ;;
+            --runs) RUNS=$2; shift 2 ;;
+            --name) NAME=$2; shift 2 ;;
+            --from) FROM=$2; shift 2 ;;
+            --force) FORCE=1; shift ;;
+            *) die "unknown option for front: $1" ;;
+        esac
+    done
+    case $RUNS in [1-9]) ;; *) die "--runs must be 1 to 9" ;; esac
+    case $NAME in *[!A-Za-z0-9._-]* | '') die "--name: letters, digits, . _ - only" ;; esac
+    case $FROM in *[!A-Za-z0-9._-]* | '' | "$APP") die "--from: a plain app id other than Lumen's" ;; esac
+    [ -z "$IPK" ] || [ -f "$IPK" ] || die "no such IPK: $IPK"
+    [ -n "$(last_good_ipk)" ] || die "no last good build: run tools/bench.sh last-good first"
+    [ -f "$ROOT/dist/ctl/lumen-ctl" ] || die "no dist/ctl/lumen-ctl: tools/dev.sh make ctl"
+    if [ "$FORCE" = 0 ]; then
+        why=$(window_closed)
+        [ -z "$why" ] || {
+            echo "bench: no lab window: $why"
+            exit 5
+        }
+    fi
+    launch=$("$PY" -I "$BENCH/gate.py" params "$PARAMS" '{"saver":"hold","exitAfter":600}') ||
+        die "--params must be one JSON object"
+
+    BACK_TO=$(hdmi_in_front)
+    OUT=$OUTROOT/$(date -u +%Y%m%dT%H%M%SZ)-$NAME
+    mkdir -p "$OUT"
+    BENCH_T0=$(tv run 'date +%s' </dev/null | tr -d '\r')
+    trap cleanup EXIT
+    trap 'exit 130' INT TERM
+    before=$(running_apps)
+    {
+        echo "name $NAME"
+        echo "what coming back in front from $FROM, $RUNS Home presses of $HOME_HOLD_MS ms"
+        echo "commit $(git -C "$ROOT" rev-parse --short HEAD)"
+        echo "ipk ${IPK:-the installed build}"
+        [ -z "$IPK" ] || echo "ipk sha256 $(sha256sum <"$IPK" | cut -d' ' -f1)"
+        echo "launch $launch"
+        echo "last good $(cat "$LAST_GOOD/binary.sha256")"
+        [ -z "$BACK_TO" ] || echo "back to $BACK_TO"
+        tv check </dev/null | grep -E '"(modelName|firmwareVersion)"' | tr -d ' ,'
+        echo "running $before"
+    } >"$OUT/run.txt"
+    say "report in ${OUT#"$ROOT"/}"
+
+    tv push "$ROOT/dist/ctl/lumen-ctl" "$CTL" >/dev/null
+    tv run "chmod 0700 $CTL" </dev/null
+    if [ -n "$IPK" ]; then
+        say "installing $(basename "$IPK")"
+        tv close "$APP" </dev/null >/dev/null || true
+        tv install "$IPK" </dev/null >"$OUT/install.txt" || die "install failed: $(cat "$OUT/install.txt")"
+        settle_install
+    fi
+    echo "binary $(tv_binary_sha)" >>"$OUT/run.txt"
+
+    tv close "$APP" </dev/null >/dev/null || true
+    sleep 2
+    l0=$(tv run 'date +%s' </dev/null | tr -d '\r')
+    tv launch "$APP" "$launch" </dev/null >"$OUT/launch.txt"
+    if ! first_frame_after "$l0"; then
+        say "AUTOMATIC UNDO: no first frame within ${FIRST_FRAME_S} s of the launch"
+        tv_step logsince "SINCE=$l0" >"$OUT/start.log" 2>/dev/null || true
+        exit 4
+    fi
+    icons_settled "$l0" || say "no icon copy seen ${ICON_COPY_S} s after the start"
+    tv_step logsince "SINCE=$l0" >"$OUT/start.log"
+    grep -E '\] (start: |platform: |[0-9]+ tiles, )' "$OUT/start.log" | sed 's/^[^]]*\] /start /' >>"$OUT/run.txt"
+
+    i=1
+    while [ $i -le "$RUNS" ]; do
+        say "run $i of $RUNS"
+        front_trip "$i"
+        i=$((i + 1))
+    done
+    set -- "$OUT"/front[0-9].json
+    "$PY" -I "$BENCH/front.py" combine "$@" >"$OUT/summary.json"
+    echo "running at the end $(running_apps)" >>"$OUT/run.txt"
+    # Put back: the other app closed if it was not running before.
+    case " $before " in
+        *" $FROM "*) ;;
+        *) tv close "$FROM" </dev/null >/dev/null || true ;;
+    esac
+    grep -E '^  "(complete|runs|target5_ms|fade_frames|fade_ms|fade_avg_ms|fade_worst_ms|fade_skipped|skipped|slow_frames|worst_submit_ms|hero_decode_ms|hero_upload_ms)"' "$OUT/summary.json"
 }
 
 cmd_apps() {
@@ -783,6 +978,7 @@ case $cmd in
     wait-window) cmd_wait_window "$@" ;;
     last-good) cmd_last_good "$@" ;;
     run) take_lock; cmd_run "$@" ;;
+    front) take_lock; cmd_front "$@" ;;
     apps) take_lock; cmd_apps "$@" ;;
     lean-survey) take_lock; cmd_lean_survey "$@" ;;
     lean-plan) cmd_lean_plan "$@" ;;
