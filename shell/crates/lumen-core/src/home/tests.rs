@@ -169,6 +169,52 @@ fn down_and_up_go_to_the_nearest_item_across() {
 }
 
 #[test]
+fn chips_are_sized_to_their_names_and_up_and_down_follow_their_middles() {
+    // The B9's inputs as the owner named them.
+    let mut apps = mock_apps();
+    let named = [("PC", 0), ("Home Theater", 1), ("Google Streamer", 2)];
+    for (name, k) in named {
+        let input = apps
+            .iter_mut()
+            .filter(|a| a.kind == AppKind::Input)
+            .nth(k)
+            .unwrap();
+        input.title = name.to_owned();
+    }
+    let mut home = Home::new(apps, BackAtTop::Stay);
+    // 15 px a character stands in for the font.
+    home.size_chips(|title| title.chars().count() as f32 * 15.0);
+    let mut sim = Sim::with(home);
+    sim.settle();
+    let view = sim.home.view();
+    let widths: Vec<f32> = view.chips.iter().map(|c| c.rect.w).collect();
+    let want = |name: &str| layout::chip_width(name.len() as f32 * 15.0);
+    assert_eq!(
+        widths[..3],
+        [want("PC"), want("Home Theater"), want("Google Streamer")]
+    );
+    assert_eq!(widths[0], layout::CHIP_MIN_W);
+    assert!(widths[2] > widths[1] && widths[1] > layout::CHIP_W);
+    for pair in view.chips.windows(2) {
+        assert!((pair[1].rect.x - pair[0].rect.right() - layout::CHIP_GAP).abs() < 1e-3);
+    }
+    // Down from Prime Video (its middle at 600 px) lands on the chip whose
+    // middle is nearest, as the chips now lie.
+    let nearest = view
+        .chips
+        .iter()
+        .min_by(|a, b| {
+            let d = |c: &&ChipView<'_>| (c.rect.centre_x() - 600.0).abs();
+            d(a).total_cmp(&d(b))
+        })
+        .map(|c| c.app.title.clone())
+        .unwrap();
+    sim.presses(&[RIGHT, DOWN]);
+    assert_eq!(sim.focused_title(), nearest);
+    assert_eq!(nearest, "Google Streamer");
+}
+
+#[test]
 fn edges_bump_and_spring_back_and_chips_never_lean() {
     let mut sim = Sim::full();
     let rest = sim.tile("Netflix").rect;

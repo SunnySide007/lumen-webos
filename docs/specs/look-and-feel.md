@@ -519,8 +519,14 @@ everything. Over it, from the top:
   Video, YouTube, then Plex or the Homebrew Channel), then **Other apps**.
   With none of the contract's apps installed, the first four apps take the
   row.
-* A slim row of chips (220 × 60, fully round, y 900, up to seven): the
+* A slim row of chips (60 high, fully round, y 900, up to seven): the
   inputs, then Settings. What was playing has the green dot here too.
+  Each chip is as wide as its name, its 24 px padding each side and room
+  for the dot (`layout::chip_width`), from 160 px ("PC" is still a chip)
+  to 360 (a longer name is cut), 24 px apart; seven at the widest still
+  fit the safe area, and would be narrowed alike if they did not. Before
+  the font has measured them they are 220 wide. Up and Down go to the
+  nearest middle, as the chips lie.
 * The status pill, when there is one, top left.
 
 **Other apps** is a page of its own: Select on its tile turns to it (the

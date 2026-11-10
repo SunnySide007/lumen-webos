@@ -712,7 +712,8 @@ fn draw_chip(batch: &mut Batch, chip: &ChipView<'_>, assets: &mut Assets) {
     let fill = CHIP.lerp(CHIP_FOCUS, lift);
     let fill = fill.alpha(fill.3 * a);
     batch.rounded_rect(r.x, r.y, r.w, r.h, r.h / 2.0, fill, fill);
-    let zoom = r.w / layout::CHIP_W;
+    // Chips are each as wide as their names: the lift is in the height.
+    let zoom = r.h / layout::CHIP_H;
     let px = (style::CHIP_PX * layout::CHIP_FOCUS_SCALE).round();
     let scale = style::CHIP_PX * zoom / px;
     let dot = if chip.playing {
@@ -721,7 +722,7 @@ fn draw_chip(batch: &mut Batch, chip: &ChipView<'_>, assets: &mut Assets) {
         0.0
     };
     let text = &mut assets.text;
-    let room = (layout::CHIP_W - 2.0 * style::CHIP_PAD_X - dot) * layout::CHIP_FOCUS_SCALE;
+    let room = (r.w / zoom - 2.0 * style::CHIP_PAD_X - dot) * layout::CHIP_FOCUS_SCALE;
     let name = text.fit(&chip.app.title, px, room);
     let w = text.width(&name, px) * scale;
     let whole = w + dot * zoom;

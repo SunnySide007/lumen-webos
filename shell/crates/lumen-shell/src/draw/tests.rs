@@ -351,6 +351,35 @@ fn control_open(look: Look) -> Home {
 }
 
 #[test]
+fn a_chip_sized_to_its_name_draws_it_whole() {
+    let mut assets = assets();
+    let mut apps = MockLauncher::default().list().unwrap();
+    let input = apps.iter_mut().find(|a| a.kind == AppKind::Input).unwrap();
+    input.title = "Google Streamer".to_owned();
+    let mut home = Home::new(apps, BackAtTop::Exit).with_look(Look::DEFAULT);
+    let text = Text::new().unwrap();
+    home.size_chips(|title| text.width(title, style::CHIP_PX));
+    for focused in [false, true] {
+        if focused {
+            let _ = home.handle(press(Dir::Down), Duration::ZERO);
+        }
+        home.settle_now();
+        let view = home.view();
+        let chip = view.chips[0];
+        assert_eq!(chip.app.title, "Google Streamer");
+        assert_eq!(chip.lift, if focused { 1.0 } else { 0.0 });
+        let px = (style::CHIP_PX * layout::CHIP_FOCUS_SCALE).round();
+        let zoom = chip.rect.h / layout::CHIP_H;
+        let room = (chip.rect.w / zoom - 2.0 * style::CHIP_PAD_X) * layout::CHIP_FOCUS_SCALE;
+        assert_eq!(
+            assets.text.fit(&chip.app.title, px, room),
+            "Google Streamer"
+        );
+        assert!(painted(&home, &mut assets).quad_count() > 0);
+    }
+}
+
+#[test]
 fn the_gear_is_a_button_and_a_cog_of_ten_circles() {
     let mut assets = assets();
     let mut home = mock_home();

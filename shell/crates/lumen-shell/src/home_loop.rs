@@ -20,6 +20,7 @@ use lumen_core::art::Hero;
 use lumen_core::home::Home;
 use lumen_core::input::Input;
 use lumen_core::script::Script;
+use lumen_core::style;
 
 use crate::app::Options;
 use crate::frame_stats::{BurstEnd, FrameStats};
@@ -76,6 +77,8 @@ pub trait Screen {
     fn take_icons(&mut self) -> bool;
     /// Whether any icon is still on its way.
     fn icons_loading(&self) -> bool;
+    /// How wide `text` is at `px`, as it is drawn.
+    fn text_width(&self, text: &str, px: f32) -> f32;
     /// Makes every glyph `apps`' titles need and uploads them, and logs the
     /// `warm` line.
     fn warm(&mut self, apps: &[App]);
@@ -221,6 +224,9 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         clock.at(start.listing),
     );
     shell.can_hide_pointer = events.can_hide_pointer();
+    shell
+        .home
+        .size_chips(|title| screen.text_width(title, style::CHIP_PX));
     shell.set_motion(opts.reduced, opts.motion_file.clone());
     if let Some(id) = &opts.playing {
         shell.home.set_playing(Some(id.clone()));

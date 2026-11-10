@@ -85,10 +85,14 @@ pub const FOCUS_SCALE: f32 = style::FOCUS_SCALE;
 /// The most chips the line holds: four HDMI inputs, any others, and
 /// Settings; more go to "Other apps".
 pub const CHIPS_MAX: usize = 7;
+/// A chip's width before its name is measured (`chip_width`).
 pub const CHIP_W: f32 = 220.0;
+/// The narrowest and widest a chip is: "PC" is not a dot, and a long name
+/// is cut before it crowds out its neighbours.
+pub const CHIP_MIN_W: f32 = 160.0;
+pub const CHIP_MAX_W: f32 = 360.0;
 pub const CHIP_H: f32 = 60.0;
 pub const CHIP_GAP: f32 = style::CHIP_GAP;
-pub const CHIP_PITCH: f32 = CHIP_W + CHIP_GAP;
 pub const CHIP_Y: f32 = 900.0;
 pub const CHIP_FOCUS_SCALE: f32 = style::CHIP_FOCUS_SCALE;
 
@@ -179,9 +183,35 @@ pub fn row_tile(i: usize) -> Rect {
     Rect::new(SAFE.x + i as f32 * COLUMN_PITCH, ROW_Y, TILE_W, TILE_H)
 }
 
-/// The resting rect of chip `i`.
-pub fn chip_rect(i: usize) -> Rect {
-    Rect::new(SAFE.x + i as f32 * CHIP_PITCH, CHIP_Y, CHIP_W, CHIP_H)
+/// A chip's width for a name `text_w` wide at `style::CHIP_PX`: the name,
+/// its padding each side and room for the dot of what is playing, so that
+/// never cuts it, from `CHIP_MIN_W` to `CHIP_MAX_W`.
+pub fn chip_width(text_w: f32) -> f32 {
+    let w = text_w + 2.0 * style::CHIP_PAD_X + style::LIVE_DOT + style::LIVE_GAP;
+    w.ceil().clamp(CHIP_MIN_W, CHIP_MAX_W)
+}
+
+/// The chips' resting rects, `widths` wide, left to right from the safe
+/// area's left a gap apart; all narrowed alike if they would run past its
+/// right.
+pub fn chip_rects(widths: &[f32]) -> Vec<Rect> {
+    let gaps = CHIP_GAP * widths.len().saturating_sub(1) as f32;
+    let total: f32 = widths.iter().sum();
+    let k = if total + gaps > SAFE.w {
+        (SAFE.w - gaps) / total
+    } else {
+        1.0
+    };
+    let mut x = SAFE.x;
+    widths
+        .iter()
+        .map(|w| {
+            let w = (w * k).floor();
+            let rect = Rect::new(x, CHIP_Y, w, CHIP_H);
+            x += w + CHIP_GAP;
+            rect
+        })
+        .collect()
 }
 
 /// A tile's `rect` with `lift` (0 resting, 1 focused) applied.
@@ -276,10 +306,30 @@ mod tests {
     }
 
     #[test]
-    fn the_most_chips_fit_the_safe_width() {
-        assert_eq!(chip_rect(0).x, SAFE.x);
-        assert!(chip_rect(CHIPS_MAX - 1).right() <= SAFE.right());
-        assert!(chip_rect(CHIPS_MAX).right() > SAFE.right());
+    fn the_most_chips_fit_the_safe_width_at_any_widths() {
+        let unmeasured = chip_rects(&[CHIP_W; CHIPS_MAX]);
+        assert_eq!(unmeasured[0].x, SAFE.x);
+        assert!(unmeasured[CHIPS_MAX - 1].right() <= SAFE.right());
+        let widest = chip_rects(&[CHIP_MAX_W; CHIPS_MAX]);
+        assert!(widest[CHIPS_MAX - 1].right() <= SAFE.right());
+        for pair in widest.windows(2) {
+            assert!((pair[1].x - pair[0].right() - CHIP_GAP).abs() < 1e-3);
+            assert_eq!(pair[0].w, pair[1].w);
+        }
+        // Lifted, a widest chip keeps clear of its neighbour.
+        let lifted = chip_lifted(widest[1], 1.0);
+        assert!(lifted.x > widest[0].right() && lifted.right() < widest[2].x);
+    }
+
+    #[test]
+    fn a_chip_is_its_name_and_padding_within_its_bounds() {
+        assert_eq!(chip_width(0.0), CHIP_MIN_W);
+        assert_eq!(chip_width(1000.0), CHIP_MAX_W);
+        let room = 2.0 * style::CHIP_PAD_X + style::LIVE_DOT + style::LIVE_GAP;
+        assert_eq!(chip_width(170.4), (170.4 + room).ceil());
+        let rects = chip_rects(&[160.0, 240.0, 300.0]);
+        assert_eq!(rects[1].x, SAFE.x + 160.0 + CHIP_GAP);
+        assert_eq!(rects[2].w, 300.0);
     }
 
     #[test]
@@ -295,7 +345,7 @@ mod tests {
     #[test]
     fn the_focused_tiles_shadow_ends_above_the_lifted_chips() {
         let reach = ROW_Y + TILE_H + shadow_reach();
-        let chip = chip_lifted(chip_rect(0), 1.0);
+        let chip = chip_lifted(chip_rects(&[CHIP_W])[0], 1.0);
         assert!(reach < chip.y, "{reach} against {}", chip.y);
         assert!(chip.bottom() < SAFE.bottom());
     }
@@ -310,6 +360,8 @@ mod tests {
     fn nearest_picks_by_middles_and_the_earlier_on_a_tie() {
         // Tile 1's middle (600) is nearer chip 2's (678) than chip 1's
         // (434).
+        let chips = chip_rects(&[CHIP_W; 5]);
+        let chip_rect = |i: usize| chips[i];
         assert_eq!(nearest(5, row_tile(1).centre_x(), chip_rect), Some(2));
         assert_eq!(nearest(5, chip_rect(4).centre_x(), row_tile), Some(3));
         assert_eq!(nearest(0, 100.0, row_tile), None);

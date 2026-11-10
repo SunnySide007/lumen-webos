@@ -14,7 +14,7 @@ use lumen_core::apps::App;
 use lumen_core::art::Look;
 use lumen_core::control::{ControlView, Motion, MotionRow};
 use lumen_core::home::{CONTROL_SUBTITLE, CONTROL_TITLE, ChipView, TileView, View};
-use lumen_core::layout;
+use lumen_core::layout::{self, Rect, SAFE};
 use lumen_core::privacy::Line;
 use lumen_core::shelf::ShelfView;
 
@@ -111,7 +111,10 @@ fn paint_all(apps: &[App], assets: &mut Assets) {
                 }],
                 chips: vec![ChipView {
                     app: &plain,
-                    rect: layout::chip_lifted(layout::chip_rect(0), 1.0),
+                    rect: layout::chip_lifted(
+                        Rect::new(SAFE.x, layout::CHIP_Y, layout::CHIP_MAX_W, layout::CHIP_H),
+                        1.0,
+                    ),
                     lift: 1.0,
                     focused: true,
                     playing: true,
