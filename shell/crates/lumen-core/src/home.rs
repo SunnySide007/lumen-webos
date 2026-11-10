@@ -408,8 +408,13 @@ impl Home {
     }
 
     /// `hero`'s textures are in (`None`: the art is to show the gradient):
-    /// it fades to it.
-    pub fn show_hero(&mut self, hero: Option<Hero>) {
+    /// it fades to it from `now`. Stepped up to `now` first, as a press is,
+    /// so the fade starts whole however long the loop waited before: from a
+    /// home last stepped before a wait, the first frame took the whole wait
+    /// off the fade (B9, 2026-11-10: 425 to 543 ms of a 710 ms fade after
+    /// a 164 to 263 ms wait for the window's focus).
+    pub fn show_hero(&mut self, hero: Option<Hero>, now: Duration) {
+        self.advance_to(now);
         if self.shelf.show(hero) {
             // Without the look's fade the art cuts: the crossfade ends on
             // its first frame, and the old hero can go at once.

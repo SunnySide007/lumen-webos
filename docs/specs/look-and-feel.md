@@ -289,6 +289,7 @@ hero <name>: <L> layer(s), <KB> KB; decoded in <ms> ms, uploaded in <ms> ms
 hero <name>: decoded in <ms> ms; dropped, focus moved on
 hero <name>: <file>: <why>; the shelf shows its gradient
 hero <name>: upload failed: <error>; the shelf shows its gradient
+hero <name>: its fade waited <ms> ms for the window's focus[, which did not come]
 hero <name>: <KB> KB more would take the textures to <T> KB, over <B> KB; not uploaded
 crossfade <name> to <name>: <N> frames; textures <KB> KB at most
 textures: <T> KB in all (atlas <A> KB, heroes <H> KB); <P> KB at most so far
@@ -305,6 +306,13 @@ the hero thread stopped: heroes load at once
   wait). `dropped` is a hero decoded after focus had moved on; it never
   reaches a texture. A hero that fails says so once and is never asked for
   again; the shelf keeps its gradient.
+* `its fade waited` (since 2026-11-10): back in front, the crossfade waits
+  for the window's focus, 800 ms at most, with the hero decoded meanwhile.
+  LG's compositor gives the focus 530 to 590 ms after a Home press, once it
+  has finished the switch, and every 50 to 90 ms frame of the fade came
+  before it (B9, 57c4831 and f6d2025, `bench.sh front`). The line says how
+  long a hero ready to fade in waited, and `which did not come` if the
+  limit ended it.
 * `crossfade`: each crossfade, once settled: the frames it took, up to and
   including the one that showed it settled, and the most the textures held
   meanwhile (the atlas, the hero it left and the one it came to).
@@ -692,6 +700,13 @@ frame of the mock home under 600. The art is one to three full-screen quads
 (three for the ambient hero's layers), which is the frame's fill; the
 bench measures the rest on the B9. The Control Center, below, completes
 Stage 3.
+
+The gradient behind everything until a hero is in (and the owner's art's
+scrim) is the fill program's, not the main program's (2026-11-10): back in
+front the hero fades in over it, and through the main program it was a
+screen of that program's pixels, about 11 ms on the B9, under every frame
+of the fade. With the dither on it is still dithered, through the main
+program, as every fill is then.
 
 ### The Control Center
 

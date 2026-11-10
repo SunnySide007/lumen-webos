@@ -398,23 +398,28 @@ fn art(batch: &mut Batch, view: &View<'_>, assets: &Assets) {
     if alpha > 0.0 {
         let top = SCREEN_H * style::OWNER_SCRIM_FROM;
         let dark = OWNER_SCRIM.alpha(OWNER_SCRIM.3 * alpha);
-        batch.gradient_rect(0.0, top, SCREEN_W, SCREEN_H - top, dark.alpha(0.0), dark);
+        let clear = dark.alpha(0.0);
+        batch.fill4(
+            0.0,
+            top,
+            SCREEN_W,
+            SCREEN_H - top,
+            [clear, clear, dark, dark],
+        );
     }
 }
 
 /// One picture at `alpha`: `hero`'s layers, back to front, or the gradient
 /// for `None` (and for a hero with no textures, which the home loop never
-/// shows). A layered hero's layers drift by `drift` (`View::drift`).
+/// shows). A layered hero's layers drift by `drift` (`View::drift`). The
+/// gradient is the fill program's, whose pixels carry only their colour: the
+/// main program's took a screen of its pixels, about 11 ms on the B9, under
+/// every frame of a fade back in front. With the dither on, the fills go
+/// through the main program, dithered (`render::draws_with`).
 fn picture(batch: &mut Batch, hero: Option<&Hero>, alpha: f32, drift: [f32; 2], assets: &Assets) {
     let Some(layers) = hero.and_then(|hero| assets.heroes.get(hero)) else {
-        batch.gradient_rect(
-            0.0,
-            0.0,
-            SCREEN_W,
-            SCREEN_H,
-            BG_TOP.alpha(alpha),
-            BG_BOTTOM.alpha(alpha),
-        );
+        let (top, bottom) = (BG_TOP.alpha(alpha), BG_BOTTOM.alpha(alpha));
+        batch.fill4(0.0, 0.0, SCREEN_W, SCREEN_H, [top, top, bottom, bottom]);
         return;
     };
     if layers.len() > 1 {

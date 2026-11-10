@@ -16,7 +16,8 @@
 //! * While the shell is hidden it stays resident (decision 15): every
 //!   hero's textures and pixels go, and one decoded meanwhile is dropped as
 //!   it comes; the atlas stays. Back in front, the wanted hero loads again
-//!   at once and fades in over the gradient.
+//!   at once and fades in over the gradient, once the window has focus
+//!   (`FOCUS_WAIT`).
 
 use std::time::Duration;
 
@@ -38,6 +39,13 @@ pub(super) const ATLAS_BYTES: usize = ATLAS_W as usize * ATLAS_H as usize * 4;
 pub(super) const HERO_POLL: Duration = Duration::from_millis(16);
 /// How often a hidden shell looks for a hero still decoding, to drop it.
 pub(super) const HIDDEN_POLL: Duration = Duration::from_millis(100);
+/// Back in front, how long the crossfade waits at most for the window's
+/// focus. LG's compositor gives it 530 to 590 ms after a Home press, once
+/// it has finished the switch, and until then a frame took 50 to 90 ms to
+/// submit: every slow frame of the fade came before `window focus gained`
+/// and only single 33 ms ones after (B9, 2026-11-10, 57c4831 and f6d2025,
+/// `bench.sh front`, six runs). The hero still loads meanwhile.
+pub(super) const FOCUS_WAIT: Duration = Duration::from_millis(800);
 
 /// A hero decoded and not uploaded.
 #[derive(Debug)]
@@ -81,6 +89,11 @@ pub(super) struct HeroPlan {
     total_said: bool,
     /// The shell is hidden: nothing is kept.
     hidden: bool,
+    /// Back in front, until when the crossfade waits for the window's
+    /// focus; `None` once it has focus.
+    focus_due: Option<Duration>,
+    /// When a hero ready to fade in first waited for the focus.
+    held_from: Option<Duration>,
 }
 
 /// A hero's name, or the placeholder's.
@@ -110,7 +123,14 @@ impl HeroPlan {
             peak: ATLAS_BYTES,
             total_said: false,
             hidden: false,
+            focus_due: None,
+            held_from: None,
         }
+    }
+
+    /// Whether a crossfade waits, at `now`, for the window's focus.
+    fn holding(&self, now: Duration) -> bool {
+        self.focus_due.is_some_and(|due| now < due)
     }
 
     /// The atlas and every hero in textures.
@@ -180,7 +200,12 @@ impl HeroPlan {
     /// The shell went out of sight: every hero's textures and decoded
     /// pixels go, and the shelf will show its gradient when it is back. The
     /// atlas stays. Returns the line to log, if anything was freed.
-    pub(super) fn hidden(&mut self, home: &mut Home, screen: &mut impl Screen) -> Option<String> {
+    pub(super) fn hidden(
+        &mut self,
+        home: &mut Home,
+        screen: &mut impl Screen,
+        now: Duration,
+    ) -> Option<String> {
         if !self.on || std::mem::replace(&mut self.hidden, true) {
             return None;
         }
@@ -194,7 +219,7 @@ impl HeroPlan {
             screen.free_hero(&d.hero);
         }
         self.fading = None;
-        home.show_hero(None);
+        home.show_hero(None, now);
         home.settle_now();
         while home.take_faded().is_some() {}
         (uploaded + decoded > 0).then(|| {
@@ -214,10 +239,17 @@ impl HeroPlan {
     }
 
     /// The shell is in front again at `now`: the wanted hero loads at once.
+    /// Its crossfade waits for the window's focus (`FOCUS_WAIT`).
     pub(super) fn shown(&mut self, now: Duration) {
         if std::mem::take(&mut self.hidden) {
             self.due = self.due.min(now);
+            self.focus_due = Some(now + FOCUS_WAIT);
         }
+    }
+
+    /// The window has focus: a crossfade need not wait for it.
+    pub(super) fn focused(&mut self) {
+        self.focus_due = None;
     }
 
     /// A burst is over. If input came in it, the wanted hero waits for focus
@@ -277,9 +309,12 @@ impl HeroPlan {
             return lines;
         };
         if self.failed.contains(&wanted) {
-            home.show_hero(None);
+            home.show_hero(None, now);
+        } else if self.holding(now) && (self.is_uploaded(&wanted) || self.is_decoded(&wanted)) {
+            self.held_from.get_or_insert(now);
         } else if self.is_uploaded(&wanted) {
-            self.fade_to(home, wanted);
+            self.said_hold(&wanted, now, &mut lines);
+            self.fade_to(home, wanted, now);
         } else if let Some(at) = self.decoded.iter().position(|d| d.hero == wanted) {
             let d = self.decoded.remove(at);
             let total = self.total() + d.bytes;
@@ -293,7 +328,7 @@ impl HeroPlan {
                     TEXTURE_BUDGET / 1024
                 ));
                 self.failed.push(d.hero);
-                home.show_hero(None);
+                home.show_hero(None, now);
             } else {
                 match screen.upload_hero(&d.hero) {
                     Ok(up) => {
@@ -307,7 +342,8 @@ impl HeroPlan {
                             ms(up.took)
                         ));
                         self.uploaded.push((d.hero.clone(), up.bytes));
-                        self.fade_to(home, d.hero);
+                        self.said_hold(&d.hero, now, &mut lines);
+                        self.fade_to(home, d.hero, now);
                     }
                     Err(e) => {
                         lines.push(format!(
@@ -315,7 +351,7 @@ impl HeroPlan {
                             d.hero.name()
                         ));
                         self.failed.push(d.hero);
-                        home.show_hero(None);
+                        home.show_hero(None, now);
                     }
                 }
             }
@@ -327,8 +363,25 @@ impl HeroPlan {
         lines
     }
 
+    /// Says how long `hero`'s crossfade waited for the window's focus, if
+    /// it did, as it starts at `now`.
+    fn said_hold(&mut self, hero: &Hero, now: Duration, lines: &mut Vec<String>) {
+        if let Some(from) = self.held_from.take() {
+            let why = if self.focus_due.is_none() {
+                "for the window's focus"
+            } else {
+                "for the window's focus, which did not come"
+            };
+            lines.push(format!(
+                "hero {}: its fade waited {:.1} ms {why}",
+                hero.name(),
+                ms(now.saturating_sub(from))
+            ));
+        }
+    }
+
     /// Starts the crossfade to `hero`, whose textures are in.
-    fn fade_to(&mut self, home: &mut Home, hero: Hero) {
+    fn fade_to(&mut self, home: &mut Home, hero: Hero, now: Duration) {
         let total = self.total();
         self.peak = self.peak.max(total);
         self.fading = Some(Fading {
@@ -336,7 +389,7 @@ impl HeroPlan {
             peak: total,
             done: false,
         });
-        home.show_hero(Some(hero));
+        home.show_hero(Some(hero), now);
     }
 
     /// The texture total, once, at the first idle wait with a hero on the
@@ -390,6 +443,12 @@ impl HeroPlan {
         }
         if self.failed.contains(wanted) {
             return (can_act && target.is_some()).then_some(now);
+        }
+        // The focus comes as an event, which wakes the loop by itself.
+        if let Some(due) = self.focus_due.filter(|_| self.holding(now))
+            && (self.is_decoded(wanted) || self.is_uploaded(wanted))
+        {
+            return Some(due);
         }
         if self.is_decoded(wanted) || self.is_uploaded(wanted) || self.due <= now {
             return can_act.then_some(now);
