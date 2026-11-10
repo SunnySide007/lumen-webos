@@ -699,21 +699,19 @@ fn light(batch: &mut Batch, tile: &TileView<'_>, sweep: SweepView) {
     }
 }
 
-/// On the "Other apps" page, the focused tile's name below it, fading in as
-/// it lifts.
+/// On the "Other apps" page, every tile's name below it: dim at rest, and
+/// brightening as the tile lifts. A name is cut to its tile's width, so
+/// neighbours' names never meet.
 fn grid_title(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
-    let lift = tile.lift.min(1.0);
-    if lift <= 0.01 {
-        return;
-    }
+    let lift = tile.lift.clamp(0.0, 1.0);
     let px = layout::GRID_TITLE_PX;
     let r = tile.rect;
     let text = &mut assets.text;
-    let name = text.fit(&tile.app.title, px, layout::TILE_W * layout::FOCUS_SCALE);
+    let name = text.fit(&tile.app.title, px, r.w);
     let w = text.width(&name, px);
     let baseline = r.bottom() + layout::TITLE_GAP + text.cap_height(px);
     let x = r.x + (r.w - w) / 2.0;
-    let color = TEXT.alpha(lift * tile.alpha);
+    let color = TEXT_DIM.lerp(TEXT, lift).alpha(tile.alpha);
     text.draw(batch, &mut assets.atlas, x, baseline, px, 1.0, &name, color);
 }
 

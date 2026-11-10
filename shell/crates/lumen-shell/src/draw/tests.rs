@@ -89,6 +89,53 @@ fn the_other_apps_page_scrolled_deep_fits_the_quad_budget() {
 }
 
 #[test]
+fn every_tile_on_other_apps_has_its_name_under_it_within_the_budget() {
+    let apps = MockLauncher::default()
+        .list()
+        .unwrap()
+        .into_iter()
+        .cycle()
+        .take(60)
+        .collect();
+    let mut home = Home::new(apps, BackAtTop::Exit).with_look(Look::DEFAULT);
+    let mut assets = assets();
+    for _ in 0..4 {
+        let _ = home.handle(press(Dir::Right), Duration::ZERO);
+    }
+    assert_eq!(home.handle(act(Action::Select), Duration::ZERO), None);
+    home.settle_now();
+    for row in 0..=3 {
+        if row > 0 {
+            let _ = home.handle(press(Dir::Down), Duration::ZERO);
+            home.settle_now();
+        }
+        let batch = painted(&home, &mut assets);
+        let n = batch.quad_count();
+        assert!(n <= QUAD_BUDGET, "row {row}: {n} quads");
+        let view = home.view();
+        let on_screen: Vec<_> = view
+            .tiles
+            .iter()
+            .filter(|t| t.named && t.rect.bottom() + 60.0 < SCREEN_H && t.rect.y > 0.0)
+            .collect();
+        assert!(on_screen.len() >= 10, "row {row}");
+        for tile in on_screen {
+            // Glyph quads in the band under the tile, inside its width.
+            let r = tile.rect;
+            let top = r.bottom() + layout::TITLE_GAP - 2.0;
+            let bottom = top + layout::GRID_TITLE_PX + 14.0;
+            let glyphs = (0..n)
+                .filter(|&i| {
+                    let (x0, y0, x1, y1) = batch.quad_bounds(i);
+                    x0 >= r.x - 1.0 && x1 <= r.right() + 1.0 && y0 >= top && y1 <= bottom
+                })
+                .count();
+            assert!(glyphs >= 3, "row {row}: {}", tile.app.title);
+        }
+    }
+}
+
+#[test]
 fn a_page_turning_draws_both_pages_and_fits_the_budget() {
     let mut home = mock_home();
     let mut assets = assets();

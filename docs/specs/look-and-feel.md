@@ -532,7 +532,10 @@ everything. Over it, from the top:
 **Other apps** is a page of its own: Select on its tile turns to it (the
 home fades over the first 60% of a spring turn, the page over the last 60%,
 each sliding 48 px), a heading and a grid of five columns that scrolls a row
-at a time. Back turns back to the Other apps tile.
+at a time. Every tile has its name under it (30 px, cut to the tile's
+width), dim at rest and brightening as the tile lifts, so the page reads
+without moving focus over it; the first build named only the focused one.
+Back turns back to the Other apps tile.
 
 **One tile style.** Every tile is the app's own colour (its icon's webOS
 colour, else the palette), a soft rest shadow, and the app's icon or, with
