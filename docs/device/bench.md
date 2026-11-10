@@ -19,8 +19,12 @@ are layout only.
    a change of the app in front or the power state, but not LG's
    screensaver coming). A run starts only if the hour is 06:00 or later
    (the screen stays dark at night), Lumen or LG's screensaver over Lumen
-   is in front, and that last sign is at least 20 minutes old. `--force`
-   is for when the owner says the TV is free.
+   is in front, and that last sign is at least 20 minutes old. In the
+   owner's weekday slot (Monday to Friday, 10:00 to 15:00 TV time) an HDMI
+   input in front, or under LG's screensaver, is allowed too; the run
+   notes it as `back to` in `run.txt` and launches that input again when
+   it ends, also after a yield or an automatic undo. `--force` is for
+   when the owner says the TV is free.
 2. **The build.** `--ipk` installs a build; otherwise the installed one is
    measured. The robot's `lumen-ctl` and the pattern go into
    `/var/lib/lumen/stage/`, root's own folder. The installed `lumen-ctl`

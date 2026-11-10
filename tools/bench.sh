@@ -6,7 +6,9 @@
 # the last good build. Nothing else on the TV changes.
 #
 #   tools/bench.sh window [--night]    is a lab window open now? (exit 0 yes,
-#                                      1 no, with the reason); --night: the
+#                                      1 no, with the reason); on weekdays
+#                                      from 10:00 to 15:00 an HDMI input in
+#                                      front is allowed too; --night: the
 #                                      window for work that lights nothing
 #                                      (00:00 to 06:00, nothing else in front)
 #   tools/bench.sh wait-window [MIN] [--night]
@@ -129,6 +131,29 @@ value() {
     printf '%s\n' "$2" | sed -n "s/^$1=//p" | head -n 1
 }
 
+# The owner's weekday slot (docs/safety.md, 2026-11-10): Monday to Friday,
+# 10:00 to 15:00 TV time. In it an HDMI input in front is no bar to a run,
+# and the run goes back to that input. Needs $dow and $hour.
+in_slot() {
+    case $dow in 1 | 2 | 3 | 4 | 5) ;; *) return 1 ;; esac
+    case $hour in 10 | 11 | 12 | 13 | 14) return 0 ;; esac
+    return 1
+}
+
+is_hdmi() {
+    case $1 in com.webos.app.hdmi[1-4]) return 0 ;; esac
+    return 1
+}
+
+# Prints the HDMI input a run would take the screen from: the one in front,
+# or the one under LG's screensaver. Nothing for anything else.
+hdmi_in_front() {
+    info=$(tv_step window 2>/dev/null) || return 0
+    fg=$(value fg "$info")
+    [ "$fg" != "$SAVER" ] || fg=$(value under "$info")
+    ! is_hdmi "$fg" || echo "$fg"
+}
+
 # Prints why no lab window is open, or nothing when one is. With "night",
 # the window for work that lights nothing on the panel (Guard, hooks,
 # surveys): 00:00 to 06:00 only, any power state, with Lumen, LG's
@@ -141,6 +166,7 @@ window_closed() {
     }
     now=$(value now "$info")
     hour=$(value hour "$info")
+    dow=$(value dow "$info")
     fg=$(value fg "$info")
     power=$(value power "$info")
     last=$(value last "$info")
@@ -192,14 +218,16 @@ window_closed() {
     case $fg in
         "$APP") ;;
         "$SAVER")
-            [ "$under" = "$APP" ] || {
+            [ "$under" = "$APP" ] || { in_slot && is_hdmi "$under"; } || {
                 echo "LG's screensaver is over ${under:-an unknown app}, not Lumen"
                 return
             }
             ;;
         *)
-            echo "${fg:-nothing} is in front"
-            return
+            if ! in_slot || ! is_hdmi "$fg"; then
+                echo "${fg:-nothing} is in front"
+                return
+            fi
             ;;
     esac
     [ -n "$last" ] || {
@@ -338,6 +366,14 @@ cleanup() {
             restore || true
         fi
         relaunch_plain
+        if [ -n "${BACK_TO:-}" ]; then
+            sleep 2
+            if tv launch "$BACK_TO" </dev/null >/dev/null; then
+                say "back on $BACK_TO"
+            else
+                say "COULD NOT GO BACK to $BACK_TO: Lumen is in front"
+            fi
+        fi
         # The window check leaves this run's own keys and launches out.
         [ -z "${BENCH_T0:-}" ] ||
             tv run "echo $BENCH_T0 \$((\$(date +%s) + 15)) >>$STAGE/bench-ranges; tail -n 200 $STAGE/bench-ranges >$STAGE/bench-ranges.new && mv $STAGE/bench-ranges.new $STAGE/bench-ranges" </dev/null || true
@@ -379,6 +415,9 @@ cmd_run() {
     launch=$("$PY" -I "$BENCH/gate.py" params "$PARAMS" "{\"saver\":\"hold\",\"shots\":[4,58],\"exitAfter\":$exit_after}") ||
         die "--params must be one JSON object"
 
+    # An HDMI input the run takes the screen from gets it back at the end.
+    BACK_TO=$(hdmi_in_front)
+
     OUT=$OUTROOT/$(date -u +%Y%m%dT%H%M%SZ)-$NAME
     mkdir -p "$OUT"
     BENCH_T0=$(tv run 'date +%s' </dev/null | tr -d '\r')
@@ -393,6 +432,7 @@ cmd_run() {
         echo "runs $RUNS"
         echo "pattern ${MOVES#"$ROOT"/} $(sha256sum <"$MOVES" | cut -c1-12)"
         echo "last good $(cat "$LAST_GOOD/binary.sha256")"
+        [ -z "$BACK_TO" ] || echo "back to $BACK_TO"
         tv check </dev/null | grep -E '"(modelName|firmwareVersion)"' | tr -d ' ,'
     } >"$OUT/run.txt"
     say "report in ${OUT#"$ROOT"/}"

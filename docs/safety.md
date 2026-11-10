@@ -82,6 +82,15 @@ from 00:00 to 06:00 a run does only what lights nothing new on the panel
 Frame timings, screenshots and anything that puts Lumen in front run in
 the idle windows outside those hours.
 
+**The weekday slot** (the owner, 2026-11-10): Monday to Friday, 10:00 to
+15:00 TV time, a run may also start with an HDMI input in front, after the
+same 20 minutes, and it goes back to that input when it ends. An app in
+front (Netflix, YouTube, Plex) still shuts the window at any hour. The 20
+minutes count from the TV's own remote and the last change of input: a
+box on HDMI with a remote of its own gives no sign of a person, so
+someone watching it in the slot can be interrupted. Any key on the TV's
+remote stops the run, as below.
+
 **Yield.** A real remote press stops the run: an event on the remote's own
 evdev node, read without grabbing it, never one from the injector. The run
 then puts back the last good build and settings and waits for the next

@@ -26,8 +26,8 @@ teardown() {
 }
 
 answer() {
-    # now hour fg power last under
-    printf 'now=%s\nhour=%s\nfg=%s\npower=%s\npid=1\nlast=%s\nunder=%s\n' "$@" >"$FAKE_WINDOW"
+    # now hour fg power last under [dow, 1 = Monday]
+    printf 'now=%s\nhour=%s\nfg=%s\npower=%s\npid=1\nlast=%s\nunder=%s\ndow=%s\n' "$@" >"$FAKE_WINDOW"
 }
 
 APP=io.github.sunnyside007.lumen.shell
@@ -74,6 +74,56 @@ SAVER=com.webos.app.screensaver
     run sh "$BENCH" window
     [ "$status" -eq 1 ]
     [[ "$output" == *"over com.webos.app.hdmi3, not Lumen" ]]
+}
+
+@test "in the owner's weekday slot an HDMI input in front is a window" {
+    HDMI=com.webos.app.hdmi3
+    # Monday to Friday, 10:00 to 15:00, 20 minutes idle.
+    for d in 1 5; do
+        for h in 10 14; do
+            answer 10000 "$h" "$HDMI" Active 8800 "$HDMI" "$d"
+            run sh "$BENCH" window
+            [ "$status" -eq 0 ]
+        done
+    done
+    # LG's screensaver over the input counts too.
+    answer 10000 12 "$SAVER" "Screen Saver" 8800 "$HDMI" 3
+    run sh "$BENCH" window
+    [ "$status" -eq 0 ]
+    # Still 20 minutes idle.
+    answer 10000 12 "$HDMI" Active 9500 "$HDMI" 3
+    run sh "$BENCH" window
+    [ "$output" = "closed: idle 500 s of 1200" ]
+}
+
+@test "outside the slot, or with an app in front, the slot opens nothing" {
+    HDMI=com.webos.app.hdmi3
+    # Before 10:00, from 15:00, and at the weekend.
+    for h in 09 15; do
+        answer 10000 "$h" "$HDMI" Active 8800 "$HDMI" 3
+        run sh "$BENCH" window
+        [ "$output" = "closed: $HDMI is in front" ]
+    done
+    for d in 6 7; do
+        answer 10000 12 "$HDMI" Active 8800 "$HDMI" "$d"
+        run sh "$BENCH" window
+        [ "$output" = "closed: $HDMI is in front" ]
+    done
+    # An app is somebody watching: never, slot or not.
+    answer 10000 12 netflix Active 8800 netflix 3
+    run sh "$BENCH" window
+    [ "$output" = "closed: netflix is in front" ]
+    answer 10000 12 "$SAVER" "Screen Saver" 8800 netflix 3
+    run sh "$BENCH" window
+    [[ "$output" == *"over netflix, not Lumen" ]]
+    # The night window knows no slot.
+    answer 10000 03 "$HDMI" Active 8800 "$HDMI" 3
+    run sh "$BENCH" window --night
+    [ "$output" = "closed: $HDMI is in front" ]
+    # A TV whose answer has no weekday keeps the old rule.
+    answer 10000 12 "$HDMI" Active 8800 "$HDMI"
+    run sh "$BENCH" window
+    [ "$output" = "closed: $HDMI is in front" ]
 }
 
 @test "a screen that is off, or no record of input, is not a window" {

@@ -2,6 +2,8 @@
 # What decides a lab window (docs/safety.md), as key=value lines. Read-only.
 echo "now=$(date +%s)"
 echo "hour=$(date +%H)"
+# 1 (Monday) to 7, for the owner's weekday slot.
+echo "dow=$(date +%u)"
 echo "fg=$(luna luna://com.webos.applicationManager/getForegroundAppInfo '{}' | field appId)"
 echo "power=$(luna luna://com.webos.service.tvpower/power/getPowerState '{}' | field state)"
 echo "pid=$(pidof lumen-shell)"
