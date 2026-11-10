@@ -12,11 +12,12 @@ luna luna://com.webos.service.config/getConfigs '{"configNames":["com.webos.appl
     tr -d '\n' | sed 's/.*keepAliveApps": *\[\([^]]*\)\].*/\1/' | tr -d ' "' | tr ',' '\n'
 echo
 echo "===== running apps"
+# The reply is one line: one id a line first.
 luna luna://com.webos.applicationManager/running '{}' |
-    sed -n 's/.*"id": *"\([^"]*\)".*/\1/p'
-# kB resident for a pid, or 0.
+    tr ',{' '\n\n' | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p'
+# kB resident for a pid, or nothing. /proc writes a tab after the colon.
 rss() {
-    sed -n 's/^VmRSS: *\([0-9]*\).*/\1/p' "/proc/$1/status" 2>/dev/null | head -n 1
+    sed -n 's/^VmRSS:[[:space:]]*\([0-9]*\).*/\1/p' "/proc/$1/status" 2>/dev/null | head -n 1
 }
 echo "===== jobs (name state pid rss_kB)"
 initctl list 2>/dev/null | while read -r job state rest; do
