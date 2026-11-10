@@ -179,6 +179,10 @@ impl<W: Window> Screen for TvScreen<W> {
         self.assets.text.width(text, px)
     }
 
+    fn layout_point(&self, x: i32, y: i32) -> (f32, f32) {
+        crate::render::layout_point(self.drawable, x, y)
+    }
+
     fn paint(&mut self, home: &Home) {
         self.drawable = self.surface.drawable_size();
         let batch_from = Instant::now();

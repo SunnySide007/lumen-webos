@@ -778,6 +778,21 @@ pub fn fit_viewport(w: i32, h: i32) -> (i32, i32, i32, i32) {
     ((w - vw) / 2, (h - vh) / 2, vw, vh)
 }
 
+/// Where the point `x`,`y` of a `w` x `h` window falls in the layout, through
+/// the viewport `fit_viewport` draws it in (window rows count down, GL's up,
+/// but the margins are even). The same point on the TV, whose window is the
+/// layout's size.
+pub fn layout_point((w, h): (i32, i32), x: i32, y: i32) -> (f32, f32) {
+    let (vx, vy, vw, vh) = fit_viewport(w, h);
+    if vw <= 0 || vh <= 0 {
+        return (x as f32, y as f32);
+    }
+    (
+        (x - vx) as f32 * SCREEN_W / vw as f32,
+        (y - vy) as f32 * SCREEN_H / vh as f32,
+    )
+}
+
 // No #version line: GLSL ES 1.00 and desktop GLSL 1.10 both accept these, and
 // the precision statements only exist where GL_ES is defined.
 const VERTEX_SHADER: &str = "
@@ -1897,6 +1912,16 @@ void main() {
         assert_eq!(fit_viewport(1024, 768), (0, 96, 1024, 576));
         // A tall-and-wide window keeps full height and centres horizontally.
         assert_eq!(fit_viewport(2000, 1080), (40, 0, 1920, 1080));
+    }
+
+    #[test]
+    fn the_pointer_lands_in_the_layout_where_the_window_draws_it() {
+        assert_eq!(layout_point((1920, 1080), 601, 718), (601.0, 718.0));
+        assert_eq!(layout_point((1280, 720), 640, 360), (960.0, 540.0));
+        // In a 4:3 window, the bar above the picture is above the layout.
+        assert_eq!(layout_point((1024, 768), 0, 96), (0.0, 0.0));
+        assert!(layout_point((1024, 768), 512, 50).1 < 0.0);
+        assert_eq!(layout_point((0, 0), 3, 4), (3.0, 4.0));
     }
 
     #[test]

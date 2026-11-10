@@ -150,8 +150,11 @@ pub enum Event {
         x: i32,
         y: i32,
     },
-    /// The pointer moved. Where to is not used, only that it did.
-    MouseMotion,
+    /// The pointer moved to `x`,`y`, in the window's coordinates.
+    MouseMotion {
+        x: i32,
+        y: i32,
+    },
     /// The Magic Remote's wheel turned (the B9 sends 0x403 while the pointer
     /// is up). Input, nothing more.
     MouseWheel,
@@ -178,7 +181,8 @@ fn read_u32(bytes: &[u8], at: usize) -> u32 {
 /// Mouse events are at upstream's offsets in both layouts: the B9's own
 /// 0x400, 0x401 and 0x402 events (2026-10-22) have `which` at 12, the button
 /// at 16, its state at 17 and `x`,`y` at 20 and 24, as `SDL_MouseButtonEvent`
-/// declares them.
+/// declares them, and the B9's 0x400 has its `x`,`y` at 20 and 24 too, as
+/// `SDL_MouseMotionEvent` declares them.
 pub fn parse_event(raw: &RawEvent, layout: KeyLayout) -> Event {
     let bytes = &raw.0;
     let state = layout.state_offset();
@@ -189,7 +193,10 @@ pub fn parse_event(raw: &RawEvent, layout: KeyLayout) -> Event {
             x: read_u32(bytes, 20) as i32,
             y: read_u32(bytes, 24) as i32,
         },
-        EVENT_MOUSEMOTION => Event::MouseMotion,
+        EVENT_MOUSEMOTION => Event::MouseMotion {
+            x: read_u32(bytes, 20) as i32,
+            y: read_u32(bytes, 24) as i32,
+        },
         EVENT_MOUSEWHEEL => Event::MouseWheel,
         EVENT_QUIT => Event::Quit,
         EVENT_KEYDOWN => Event::KeyDown {
@@ -1116,7 +1123,7 @@ mod tests {
         ),
         (
             "00 04 00 00|0d 1d 00 00|01 00 00 00|02 00 00 00|00 00 00 00|04 04 00 00|3b 02 00 00|04 04 00 00|3b 02 00 00|38 04 00 00|0a 00 00 00|04 04 00 00",
-            Event::MouseMotion,
+            Event::MouseMotion { x: 1028, y: 571 },
         ),
         (
             "01 04 00 00|d3 30 00 00|01 00 00 00|02 00 00 00|01 01 01 00|46 02 00 00|9d 01 00 00|f1 ff ff ff|fe ff ff ff|c9 e2 db f6|e0 09 24 01|d8 09 24 01",

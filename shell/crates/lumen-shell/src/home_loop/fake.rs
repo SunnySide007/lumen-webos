@@ -402,6 +402,10 @@ impl Screen for FakeScreen {
         self.assets.text.width(text, px)
     }
 
+    fn layout_point(&self, x: i32, y: i32) -> (f32, f32) {
+        (x as f32, y as f32)
+    }
+
     fn swap(&mut self) -> Frame {
         self.clock.advance(self.frame_time);
         act(&self.acts, &self.clock, Act::Swap);
