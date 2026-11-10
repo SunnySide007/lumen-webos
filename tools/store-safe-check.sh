@@ -212,7 +212,9 @@ END {
 # nslookup alone is worth a second look).
 if [ -z "$HOSTS_FILE" ]; then
     {
-        for n in us.lgtvsdp.com lgtvsdp.com us.lgeapi.com www.netflix.com \
+        # Not the apex lgtvsdp.com: it has no address record anywhere
+        # (checked 2026-11-10), so "no answer" there says nothing.
+        for n in us.lgtvsdp.com us.lgeapi.com www.netflix.com \
             www.amazon.com atv-ps.amazon.com plex.tv www.googleapis.com \
             www.youtube.com spclient.wg.spotify.com; do
             echo "allow $n"

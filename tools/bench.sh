@@ -84,6 +84,8 @@ CTL=$STAGE/bench-lumen-ctl
 PATTERN=$STAGE/bench-pattern.txt
 IDLE_S=1200
 FIRST_FRAME_S=10
+# How long the robot holds Home: about a person's quick press.
+HOME_HOLD_MS=180
 PY=${PYTHON:-python}
 LOCK=${LUMEN_BENCH_LOCK:-$OUTROOT/tv.lock}
 LOCK_WAIT_S=3600
@@ -523,7 +525,10 @@ cmd_run() {
 home_from() {
     app=$1 mode=$2
     set +e
-    tv run "$CTL key home --hold-ms 180" </dev/null >"$OUT/home-$app-$mode.jsonl"
+    # LG acts on the Home key's release (measured on the B9, 2026-11-10: the
+    # time to Lumen was the hold plus 41 to 51 ms for holds of 40, 180 and
+    # 400 ms), so the hold is part of the number and is said with it.
+    tv run "$CTL key home --hold-ms $HOME_HOLD_MS" </dev/null >"$OUT/home-$app-$mode.jsonl"
     rc=$?
     set -e
     if [ "$rc" = 3 ]; then
@@ -541,7 +546,9 @@ home_from() {
     fg=$(value fg "$(tv_step window)")
     "$PY" -I "$BENCH/gate.py" home "$press" "$OUT/home-$app-$mode.log" >"$OUT/home-$app-$mode.json"
     t5=$(sed -n 's/.*"target5_ms": \([0-9]*\).*/\1/p' "$OUT/home-$app-$mode.json")
-    say "$app $mode: Home press to Lumen ${t5:-not measured} ms; in front after: ${fg:-?}"
+    after=''
+    [ -z "$t5" ] || after=", $((t5 - HOME_HOLD_MS)) ms after the release"
+    say "$app $mode: Home press to Lumen ${t5:-not measured} ms$after; in front after: ${fg:-?}"
     printf '%s\t%s\thome\t%s\t%s\n' "$app" "$mode" "${t5:-}" "$fg" >>"$OUT/apps.tsv"
     # Lumen must be back in front: the automatic undo's second trigger.
     if [ "$fg" != "$APP" ]; then

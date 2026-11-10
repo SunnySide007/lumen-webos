@@ -14,7 +14,7 @@ echo
 echo "===== running apps"
 # The reply is one line: one id a line first.
 luna luna://com.webos.applicationManager/running '{}' |
-    tr ',{' '\n\n' | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p'
+    tr ',' '\n' | tr '{' '\n' | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p'
 # kB resident for a pid, or nothing. /proc writes a tab after the colon.
 rss() {
     sed -n 's/^VmRSS:[[:space:]]*\([0-9]*\).*/\1/p' "/proc/$1/status" 2>/dev/null | head -n 1
