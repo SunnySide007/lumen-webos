@@ -749,10 +749,19 @@ fn light(batch: &mut Batch, tile: &TileView<'_>, sweep: SweepView) {
     }
 }
 
-/// On the "Other apps" page, every tile's name below it: dim at rest, and
+/// On the "Other apps" page, a tile's name below it: dim at rest, and
 /// brightening as the tile lifts. A name is cut to its tile's width, so
-/// neighbours' names never meet.
+/// neighbours' names never meet. A tile that shows its name across itself
+/// (no icon, or one that failed) has none below, which would repeat it.
 fn grid_title(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
+    if tile
+        .app
+        .icon
+        .as_deref()
+        .is_none_or(|path| assets.icons.has_failed(path))
+    {
+        return;
+    }
     let lift = tile.lift.clamp(0.0, 1.0);
     let px = layout::GRID_TITLE_PX;
     let r = tile.rect;

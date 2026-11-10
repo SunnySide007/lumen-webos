@@ -89,8 +89,15 @@ fn the_other_apps_page_scrolled_deep_fits_the_quad_budget() {
 }
 
 #[test]
-fn every_tile_on_other_apps_has_its_name_under_it_within_the_budget() {
+fn every_tile_on_other_apps_with_an_icon_has_its_name_under_it_within_the_budget() {
+    // Canonical, as the TV's launcher gives them. Plex and Disney+ have
+    // none, so their names are across them.
+    let icons = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/mock-icons")
+        .canonicalize()
+        .unwrap();
     let apps = MockLauncher::default()
+        .with_icons_in(&icons)
         .list()
         .unwrap()
         .into_iter()
@@ -109,6 +116,7 @@ fn every_tile_on_other_apps_has_its_name_under_it_within_the_budget() {
             let _ = home.handle(press(Dir::Down), Duration::ZERO);
             home.settle_now();
         }
+        let _ = painted(&home, &mut assets);
         let batch = painted(&home, &mut assets);
         let n = batch.quad_count();
         assert!(n <= QUAD_BUDGET, "row {row}: {n} quads");
@@ -130,7 +138,11 @@ fn every_tile_on_other_apps_has_its_name_under_it_within_the_budget() {
                     x0 >= r.x - 1.0 && x1 <= r.right() + 1.0 && y0 >= top && y1 <= bottom
                 })
                 .count();
-            assert!(glyphs >= 3, "row {row}: {}", tile.app.title);
+            if tile.app.icon.is_some() {
+                assert!(glyphs >= 3, "row {row}: {}", tile.app.title);
+            } else {
+                assert_eq!(glyphs, 0, "row {row}: {} twice", tile.app.title);
+            }
         }
     }
 }

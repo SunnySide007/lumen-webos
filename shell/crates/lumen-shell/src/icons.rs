@@ -286,6 +286,11 @@ impl Icons {
         }
     }
 
+    /// Whether `path`'s icon could not be loaded.
+    pub fn has_failed(&self, path: &Path) -> bool {
+        matches!(self.entries.get(path), Some(Entry::Failed))
+    }
+
     /// Whether `path`'s icon is still on its way.
     pub fn is_loading(&self, path: &Path) -> bool {
         matches!(self.entries.get(path), Some(Entry::Loading))
