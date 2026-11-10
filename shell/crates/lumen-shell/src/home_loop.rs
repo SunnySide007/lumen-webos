@@ -439,6 +439,9 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         // A hero loads and goes into textures only on a pass that began with
         // an idle wait and that no event has given a frame to draw, with no
         // key held: a held key's tiles are passing, not resting.
+        if shell.has_focus() {
+            heroes.focused();
+        }
         if waited && shell.visible && !shell.wants_frame() && !shell.input.is_holding() {
             for line in heroes.idle(&mut shell.home, screen, now) {
                 info!("{line}");
@@ -1499,6 +1502,66 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    /// Back in front at 4 s: when the hero went into textures, and the
+    /// lines about its fade's wait.
+    fn back_in_front(focus_at: Option<u64>) -> (Duration, Vec<String>) {
+        let ran = with_heroes(|s| s)
+            .events(|e| {
+                let e = e
+                    .at(2_000, Event::Window(window::MINIMIZED))
+                    .at(4_000, Event::Window(window::RESTORED));
+                match focus_at {
+                    Some(at) => e.at(at, Event::Window(window::FOCUS_GAINED)),
+                    None => e,
+                }
+                .at(7_000, Event::Quit)
+            })
+            .run();
+        let uploaded = ran
+            .hero_acts()
+            .iter()
+            .filter(|&&(kind, at, _)| kind == 'U' && at >= ms(4_000))
+            .map(|&(_, at, _)| at)
+            .next()
+            .expect("uploaded again");
+        let waits = ran
+            .lines_starting("hero hero-ambient: its fade waited")
+            .into_iter()
+            .cloned()
+            .collect();
+        (uploaded, waits)
+    }
+
+    #[test]
+    fn back_in_front_the_fade_waits_for_the_windows_focus() {
+        let (uploaded, waits) = back_in_front(Some(4_500));
+        assert_eq!(uploaded, ms(4_500), "at the focus, not before");
+        assert_eq!(waits.len(), 1, "{waits:?}");
+        assert!(
+            waits[0].ends_with(" ms for the window's focus"),
+            "{waits:?}"
+        );
+    }
+
+    #[test]
+    fn back_in_front_without_focus_the_fade_waits_no_longer_than_its_limit() {
+        let (uploaded, waits) = back_in_front(None);
+        assert!(uploaded >= ms(4_000) + hero::FOCUS_WAIT, "{uploaded:?}");
+        assert!(
+            uploaded < ms(4_000) + hero::FOCUS_WAIT + ms(50),
+            "{uploaded:?}"
+        );
+        assert_eq!(waits.len(), 1, "{waits:?}");
+        assert!(waits[0].ends_with("which did not come"), "{waits:?}");
+    }
+
+    #[test]
+    fn back_in_front_with_focus_already_the_fade_does_not_wait() {
+        let (uploaded, waits) = back_in_front(Some(3_000));
+        assert!(uploaded < ms(4_000) + ms(200), "{uploaded:?}");
+        assert!(waits.is_empty(), "{waits:?}");
     }
 
     #[test]

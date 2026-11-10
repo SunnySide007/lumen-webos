@@ -223,6 +223,11 @@ impl<L: Launcher> Shell<L> {
 
     /// Whether the loop should hide the pointer now (an arrow came while it
     /// showed); asked once per arrow.
+    /// Whether the window has keyboard focus, as the platform said last.
+    pub(super) fn has_focus(&self) -> bool {
+        self.focused
+    }
+
     pub(super) fn take_pointer_hide(&mut self) -> bool {
         std::mem::take(&mut self.hide_pointer_due)
     }
