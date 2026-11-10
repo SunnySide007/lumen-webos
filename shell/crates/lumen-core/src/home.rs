@@ -180,6 +180,8 @@ pub struct Home {
     grid: GridFocus,
     /// Each app's lift.
     lifts: Vec<Spring>,
+    /// Each chip's resting rect, by its place in the line (`size_chips`).
+    chip_rects: Vec<Rect>,
     /// Each app's lean, as `TileView::tilt`.
     tilts: Vec<[Spring; 2]>,
     /// The layered hero's drift, as `View::drift`.
@@ -249,6 +251,7 @@ impl Home {
         let mut home = Self {
             grid: GridFocus::new(lines.others.len(), layout::GRID_COLUMNS),
             lifts: vec![Spring::new(0.0, LIFT); apps.len()],
+            chip_rects: layout::chip_rects(&vec![layout::CHIP_W; lines.chips.len()]),
             tilts: vec![[upright; 2]; apps.len()],
             drift: [Spring::new(0.0, style::PARALLAX); 2],
             sweep: None,
@@ -286,6 +289,20 @@ impl Home {
 
     /// The same home screen with the effects `look` turns on; `new` has
     /// none of them.
+    /// Sizes each input chip to its name (`layout::chip_width`): `width`
+    /// gives a title's width at `style::CHIP_PX`, as it is drawn. Until
+    /// then every chip is `layout::CHIP_W` wide.
+    pub fn size_chips(&mut self, width: impl Fn(&str) -> f32) {
+        let widths: Vec<f32> = self
+            .lines
+            .chips
+            .iter()
+            .map(|&app| layout::chip_width(width(&self.apps[app].title)))
+            .collect();
+        self.chip_rects = layout::chip_rects(&widths);
+        self.dirty = true;
+    }
+
     pub fn with_look(mut self, look: Look) -> Self {
         self.launch_look = look;
         self.look = self.reduced.apply(look);
@@ -454,14 +471,14 @@ impl Home {
             (Spot::Row(i), Dir::Right) => (i + 1 < row).then_some(Spot::Row(i + 1)),
             (Spot::Row(i), Dir::Down) => {
                 let x = layout::row_tile(i).centre_x();
-                layout::nearest(chips, x, layout::chip_rect).map(Spot::Chip)
+                layout::nearest(chips, x, |k| self.chip_rects[k]).map(Spot::Chip)
             }
             (Spot::Row(_), Dir::Up) => Some(Spot::Gear),
             (Spot::Chip(_), Dir::Down) => None,
             (Spot::Chip(i), Dir::Left) => Some(Spot::Chip(i - 1)),
             (Spot::Chip(i), Dir::Right) => (i + 1 < chips).then_some(Spot::Chip(i + 1)),
             (Spot::Chip(i), Dir::Up) => {
-                let x = layout::chip_rect(i).centre_x();
+                let x = self.chip_rects[i].centre_x();
                 // With no row, the gear is next up.
                 Some(layout::nearest(row, x, layout::row_tile).map_or(Spot::Gear, Spot::Row))
             }
@@ -481,7 +498,7 @@ impl Home {
         layout::nearest(self.lines.row.len(), x, layout::row_tile)
             .map(Spot::Row)
             .or_else(|| {
-                layout::nearest(self.lines.chips.len(), x, layout::chip_rect).map(Spot::Chip)
+                layout::nearest(self.lines.chips.len(), x, |k| self.chip_rects[k]).map(Spot::Chip)
             })
     }
 
@@ -690,17 +707,7 @@ impl Home {
             }
             Action::Move(_) => return None,
             Action::Select => {
-                let motion = self.control.focused();
-                let on_in_launch = {
-                    let mut only = Reduced::default();
-                    only.set(motion, true);
-                    only.apply(self.launch_look) != self.launch_look
-                };
-                if !on_in_launch {
-                    return None;
-                }
-                let off = !self.reduced.is_off(motion);
-                self.reduced.set(motion, off);
+                self.reduced = self.reduced.toggled(self.launch_look)?;
                 self.apply_reduced();
                 self.dirty = true;
                 return Some(Effect::SaveMotion(self.reduced));
@@ -750,7 +757,7 @@ impl Home {
                 None
             }
             Spot::Chip(i) if !self.lines.row.is_empty() => {
-                let x = layout::chip_rect(i).centre_x();
+                let x = self.chip_rects[i].centre_x();
                 self.spot =
                     layout::nearest(self.lines.row.len(), x, layout::row_tile).map(Spot::Row);
                 self.focus_changed(Some(from), Dir::Up);
@@ -954,7 +961,7 @@ impl Home {
             }
             for (k, &app) in self.lines.chips.iter().enumerate() {
                 let lift = self.lifts[app].value();
-                let mut rect = layout::chip_lifted(layout::chip_rect(k).offset(0.0, dy), lift);
+                let mut rect = layout::chip_lifted(self.chip_rects[k].offset(0.0, dy), lift);
                 if app == self.bump_owner {
                     rect = rect.offset(self.bump_x.value(), self.bump_y.value());
                 }

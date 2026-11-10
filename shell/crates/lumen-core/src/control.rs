@@ -1,11 +1,13 @@
 //! The Control Center (docs/specs/look-and-feel.md, "The Control Center"):
 //! a panel the gear on the home opens, over the right of the screen. It
 //! shows the Privacy panel, which only reads (decision 12), and Reduce
-//! Motion: one switch per moving effect, editable on the TV (decision 7),
-//! driving the same switches as the launch parameters' `"look"`.
+//! Motion: one switch, editable on the TV (decision 7), that turns off
+//! every moving effect at once, driving the same switches as the launch
+//! parameters' `"look"`. The effects stay switches of their own there, for
+//! the bench; the saved file names each one.
 //!
-//! Reduce Motion can only take an effect away: what the launch look turns
-//! off stays off, and its row says so.
+//! Reduce Motion can only take effects away: what the launch look turns
+//! off stays off, and with nothing moving in it the switch does nothing.
 
 use std::fmt;
 
@@ -75,6 +77,11 @@ impl Motion {
     }
 }
 
+/// The one switch's row.
+pub const REDUCE_MOTION: &str = "Reduce Motion";
+/// What it says it stops, under it.
+pub const REDUCE_MOTION_NOTE: &str = "Stops tilt, light sweep, parallax, slides and fades";
+
 /// Reduce Motion: the effects the owner turned off on the TV.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Reduced([bool; 5]);
@@ -86,6 +93,30 @@ impl Reduced {
 
     pub fn set(&mut self, motion: Motion, off: bool) {
         self.0[motion.index()] = off;
+    }
+
+    /// Every effect off.
+    pub const ALL: Self = Self([true; 5]);
+
+    /// Whether the switch is on over `launch`: every effect `launch` runs
+    /// is off, and it runs one.
+    pub fn is_on(&self, launch: Look) -> bool {
+        let moving: Vec<Motion> = Motion::ALL.into_iter().filter(|m| m.of(launch)).collect();
+        !moving.is_empty() && moving.iter().all(|m| self.is_off(*m))
+    }
+
+    /// The switch pressed over `launch`: on, every effect off; off, every
+    /// effect back. `None` if `launch` runs none, so there is nothing to
+    /// take away.
+    pub fn toggled(&self, launch: Look) -> Option<Self> {
+        if !Motion::ALL.iter().any(|m| m.of(launch)) {
+            return None;
+        }
+        Some(if self.is_on(launch) {
+            Self::default()
+        } else {
+            Self::ALL
+        })
     }
 
     /// `look` with these effects taken away.
@@ -139,13 +170,13 @@ impl fmt::Display for Reduced {
     }
 }
 
-/// One Reduce Motion row as drawn.
+/// A switch's row as drawn: Reduce Motion's.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MotionRow {
     pub label: &'static str,
-    /// Whether the effect runs: on in the launch look and not turned off.
+    /// Whether the switch is on (`Reduced::is_on`).
     pub on: bool,
-    /// Whether OK changes it: not if the launch look turned it off.
+    /// Whether OK changes it: not if the launch look runs no effect.
     pub editable: bool,
     pub focused: bool,
     /// The row's focus highlight, 0 to 1, on its spring.
@@ -160,8 +191,12 @@ pub struct ControlView {
     /// How far right of its place the panel still is, in pixels.
     pub offset: f32,
     pub privacy: Vec<privacy::Line>,
+    /// The switches' rows: Reduce Motion's alone.
     pub motion: Vec<MotionRow>,
 }
+
+/// How many switch rows the panel has.
+const ROWS: usize = 1;
 
 /// The Control Center's state: whether it is open, the focused row, the
 /// Privacy panel's reading.
@@ -169,7 +204,7 @@ pub struct ControlView {
 pub struct Control {
     shown: Spring,
     focus: usize,
-    lifts: [Spring; 5],
+    lifts: [Spring; ROWS],
     reading: Reading,
 }
 
@@ -178,7 +213,7 @@ impl Default for Control {
         Self {
             shown: Spring::new(0.0, style::PAGE),
             focus: 0,
-            lifts: [Spring::new(0.0, style::LIFT); 5],
+            lifts: [Spring::new(0.0, style::LIFT); ROWS],
             reading: Reading::Unread,
         }
     }
@@ -193,7 +228,7 @@ impl Control {
     /// Opens on the first row, with the Privacy panel reading.
     pub fn open(&mut self) {
         self.shown.set_target(1.0);
-        self.lifts = [Spring::new(0.0, style::LIFT); 5];
+        self.lifts = [Spring::new(0.0, style::LIFT); ROWS];
         self.lifts[0] = Spring::new(1.0, style::LIFT);
         self.focus = 0;
         if !matches!(self.reading, Reading::Read(_)) {
@@ -207,21 +242,13 @@ impl Control {
 
     /// Moves focus one row up (`-1`) or down (`1`); false at an end.
     pub fn step(&mut self, by: isize) -> bool {
-        let Some(to) = self
-            .focus
-            .checked_add_signed(by)
-            .filter(|&i| i < Motion::ALL.len())
-        else {
+        let Some(to) = self.focus.checked_add_signed(by).filter(|&i| i < ROWS) else {
             return false;
         };
         self.lifts[self.focus].set_target(0.0);
         self.lifts[to].set_target(1.0);
         self.focus = to;
         true
-    }
-
-    pub fn focused(&self) -> Motion {
-        Motion::ALL[self.focus]
     }
 
     pub fn set_reading(&mut self, reading: Reading) {
@@ -253,17 +280,13 @@ impl Control {
             shown,
             offset: slide * (1.0 - shown),
             privacy: privacy::lines(&self.reading),
-            motion: Motion::ALL
-                .iter()
-                .enumerate()
-                .map(|(i, &m)| MotionRow {
-                    label: m.label(),
-                    on: m.of(launch) && !reduced.is_off(m),
-                    editable: m.of(launch),
-                    focused: self.is_open() && i == self.focus,
-                    lift: self.lifts[i].value().clamp(0.0, 1.0),
-                })
-                .collect(),
+            motion: vec![MotionRow {
+                label: REDUCE_MOTION,
+                on: reduced.is_on(launch),
+                editable: reduced.toggled(launch).is_some(),
+                focused: self.is_open() && self.focus == 0,
+                lift: self.lifts[0].value().clamp(0.0, 1.0),
+            }],
         })
     }
 }
@@ -298,7 +321,38 @@ mod tests {
     }
 
     #[test]
-    fn rows_say_what_runs_and_what_the_launch_look_keeps_off() {
+    fn the_switch_turns_every_effect_off_and_all_back() {
+        let none = Reduced::default();
+        assert!(!none.is_on(Look::FULL));
+        let on = none.toggled(Look::FULL).expect("something moves");
+        assert_eq!(on, Reduced::ALL);
+        assert!(on.is_on(Look::FULL));
+        let look = on.apply(Look::FULL);
+        assert!(!look.tilt && !look.light && !look.parallax && !look.slide && !look.fade);
+        assert!(
+            look.hero && look.shadow && look.sheen && look.dim,
+            "only motion"
+        );
+        assert_eq!(on.toggled(Look::FULL), Some(none));
+        // Some effects off (an older file's), it reads off, and turns the
+        // rest off.
+        let some = Reduced::from_words("tilt slide");
+        assert!(!some.is_on(Look::FULL));
+        assert_eq!(some.toggled(Look::FULL), Some(Reduced::ALL));
+        // What the launch look keeps off counts as off already.
+        let launch = Look {
+            light: false,
+            parallax: false,
+            ..Look::FULL
+        };
+        assert!(Reduced::from_words("tilt slide fade").is_on(launch));
+        // Nothing moving: nothing to take away.
+        assert_eq!(none.toggled(Look::PLAIN), None);
+        assert!(!Reduced::ALL.is_on(Look::PLAIN));
+    }
+
+    #[test]
+    fn the_panel_has_the_one_switch_saying_whether_it_is_on() {
         let mut control = Control::default();
         assert!(
             control
@@ -307,43 +361,26 @@ mod tests {
         );
         control.open();
         control.shown.snap();
-        let launch = Look {
-            light: false,
-            ..Look::FULL
+        let row = |control: &Control, launch: Look, reduced: Reduced| {
+            let view = control
+                .view(launch, reduced, reduced.apply(launch))
+                .expect("open");
+            assert_eq!(view.motion.len(), 1);
+            let r = &view.motion[0];
+            (r.label, r.on, r.editable, r.focused)
         };
-        let mut reduced = Reduced::default();
-        reduced.set(Motion::Tilt, true);
+        let off = row(&control, Look::FULL, Reduced::default());
+        assert_eq!(off, (REDUCE_MOTION, false, true, true));
+        let on = row(&control, Look::FULL, Reduced::ALL);
+        assert_eq!(on, (REDUCE_MOTION, true, true, true));
+        let still = row(&control, Look::PLAIN, Reduced::default());
+        assert_eq!(still, (REDUCE_MOTION, false, false, true));
         let view = control
-            .view(launch, reduced, reduced.apply(launch))
-            .expect("open");
-        let rows: Vec<(&str, bool, bool, bool)> = view
-            .motion
-            .iter()
-            .map(|r| (r.label, r.on, r.editable, r.focused))
-            .collect();
-        assert_eq!(
-            rows,
-            [
-                ("Tilt", false, true, true),
-                ("Light sweep", false, false, false),
-                ("Parallax", true, true, false),
-                ("Slides", true, true, false),
-                ("Crossfades", true, true, false),
-            ]
-        );
+            .view(Look::FULL, Reduced::default(), Look::FULL)
+            .unwrap();
         assert_eq!(view.offset, 0.0, "in place once open");
         assert_eq!(view.privacy[0].value, "Reading…");
-    }
-
-    #[test]
-    fn focus_stops_at_the_ends() {
-        let mut control = Control::default();
-        control.open();
-        assert!(!control.step(-1));
-        for _ in 0..4 {
-            assert!(control.step(1));
-        }
-        assert_eq!(control.focused(), Motion::Fade);
-        assert!(!control.step(1));
+        // One row: Up and Down go nowhere.
+        assert!(!control.step(-1) && !control.step(1));
     }
 }

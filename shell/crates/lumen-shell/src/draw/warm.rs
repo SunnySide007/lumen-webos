@@ -12,9 +12,9 @@ use std::time::Duration;
 
 use lumen_core::apps::App;
 use lumen_core::art::Look;
-use lumen_core::control::{ControlView, Motion, MotionRow};
+use lumen_core::control::{ControlView, MotionRow, REDUCE_MOTION};
 use lumen_core::home::{CONTROL_SUBTITLE, CONTROL_TITLE, ChipView, TileView, View};
-use lumen_core::layout;
+use lumen_core::layout::{self, Rect, SAFE};
 use lumen_core::privacy::Line;
 use lumen_core::shelf::ShelfView;
 
@@ -111,7 +111,10 @@ fn paint_all(apps: &[App], assets: &mut Assets) {
                 }],
                 chips: vec![ChipView {
                     app: &plain,
-                    rect: layout::chip_lifted(layout::chip_rect(0), 1.0),
+                    rect: layout::chip_lifted(
+                        Rect::new(SAFE.x, layout::CHIP_Y, layout::CHIP_MAX_W, layout::CHIP_H),
+                        1.0,
+                    ),
                     lift: 1.0,
                     focused: true,
                     playing: true,
@@ -140,16 +143,13 @@ fn control_view() -> View<'static> {
             warn: false,
         })
         .collect();
-    let motion = Motion::ALL
-        .iter()
-        .map(|m| MotionRow {
-            label: m.label(),
-            on: true,
-            editable: true,
-            focused: false,
-            lift: 0.0,
-        })
-        .collect();
+    let motion = vec![MotionRow {
+        label: REDUCE_MOTION,
+        on: true,
+        editable: true,
+        focused: false,
+        lift: 0.0,
+    }];
     View {
         art: ShelfView::PLACEHOLDER,
         drift: [0.0; 2],

@@ -398,6 +398,10 @@ impl Screen for FakeScreen {
         act(&self.acts, &self.clock, Act::Screenshot);
     }
 
+    fn text_width(&self, text: &str, px: f32) -> f32 {
+        self.assets.text.width(text, px)
+    }
+
     fn swap(&mut self) -> Frame {
         self.clock.advance(self.frame_time);
         act(&self.acts, &self.clock, Act::Swap);

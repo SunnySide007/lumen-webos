@@ -104,6 +104,36 @@ pub fn shrink(mut image: Image, max: u32) -> Image {
     image
 }
 
+/// The colour round `image`'s edge, if it has one of its own: the average
+/// of its two outermost rings of pixels, when at least half of them are
+/// opaque (an icon drawn on a square of its own colour, its corners perhaps
+/// rounded off). A tile takes it, so the icon's square melts into the tile.
+/// `None` for an icon on a clear background, which goes on the app's
+/// colour instead.
+pub fn edge_color(image: &Image) -> Option<[u8; 3]> {
+    let (w, h) = (image.w, image.h);
+    let ring = 2.min(w / 2).min(h / 2).max(1);
+    let (mut seen, mut opaque) = (0u32, 0u32);
+    let mut sum = [0u32; 3];
+    for y in 0..h {
+        for x in 0..w {
+            if x >= ring && y >= ring && x < w - ring && y < h - ring {
+                continue;
+            }
+            seen += 1;
+            let at = ((y * w + x) * 4) as usize;
+            let px = &image.rgba[at..at + 4];
+            if px[3] >= 250 {
+                opaque += 1;
+                for (s, &v) in sum.iter_mut().zip(&px[..3]) {
+                    *s += u32::from(v);
+                }
+            }
+        }
+    }
+    (opaque > 0 && 2 * opaque >= seen).then(|| sum.map(|s| ((s + opaque / 2) / opaque) as u8))
+}
+
 /// Reads, decodes and shrinks the PNG at `path`.
 pub fn load(path: &Path) -> Result<Image, String> {
     // The launcher hands over paths with their links and `..` resolved
@@ -158,6 +188,8 @@ enum Entry {
     Ready {
         image: Image,
         placed: Option<(Uv, u32)>,
+        /// Its own edge colour (`edge_color`), worked out once.
+        edge: Option<[u8; 3]>,
     },
     Failed,
 }
@@ -166,6 +198,7 @@ impl Entry {
     fn from(path: &Path, loaded: Result<Image, String>) -> Self {
         match loaded {
             Ok(image) => Self::Ready {
+                edge: edge_color(&image),
                 image,
                 placed: None,
             },
@@ -235,7 +268,7 @@ impl Icons {
             };
             self.entries.insert(path.to_owned(), entry);
         }
-        let Some(Entry::Ready { image, placed }) = self.entries.get_mut(path) else {
+        let Some(Entry::Ready { image, placed, .. }) = self.entries.get_mut(path) else {
             return None;
         };
         let generation = atlas.generation();
@@ -243,6 +276,19 @@ impl Icons {
             *placed = place(image, atlas).map(|uv| (uv, atlas.generation()));
         }
         placed.map(|(uv, _)| (uv, image.w, image.h))
+    }
+
+    /// The edge colour of `path`'s icon (`edge_color`), once it has loaded.
+    pub fn edge_color(&self, path: &Path) -> Option<[u8; 3]> {
+        match self.entries.get(path) {
+            Some(Entry::Ready { edge, .. }) => *edge,
+            _ => None,
+        }
+    }
+
+    /// Whether `path`'s icon could not be loaded.
+    pub fn has_failed(&self, path: &Path) -> bool {
+        matches!(self.entries.get(path), Some(Entry::Failed))
     }
 
     /// Whether `path`'s icon is still on its way.
@@ -334,6 +380,41 @@ mod tests {
         let path = temp_dir().join(name);
         std::fs::write(&path, bytes).unwrap();
         path
+    }
+
+    #[test]
+    fn an_icon_on_a_square_of_its_own_gives_its_edge_colour() {
+        // 8 x 8: a red square with a white mark in the middle, its corners
+        // cut clear as a rounded square's are.
+        let mut rgba = Vec::new();
+        for y in 0..8u32 {
+            for x in 0..8u32 {
+                let corner = (x == 0 || x == 7) && (y == 0 || y == 7);
+                let middle = (3..5).contains(&x) && (3..5).contains(&y);
+                rgba.extend_from_slice(match (corner, middle) {
+                    (true, _) => &[0, 0, 0, 0],
+                    (_, true) => &[255, 255, 255, 255],
+                    _ => &[200, 30, 40, 255],
+                });
+            }
+        }
+        let icon = Image { w: 8, h: 8, rgba };
+        assert_eq!(edge_color(&icon), Some([200, 30, 40]));
+        // A white glyph on a clear background has no edge colour.
+        let mut glyph = icon;
+        for (i, px) in glyph.rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let (x, y) = (i % 8, i / 8);
+            let inside = (2..6).contains(&x) && (2..6).contains(&y);
+            *px = if inside { [255; 4] } else { [0; 4] };
+        }
+        assert_eq!(edge_color(&glyph), None);
+        // A 1 x 1 icon is all edge.
+        let dot = Image {
+            w: 1,
+            h: 1,
+            rgba: vec![9, 8, 7, 255],
+        };
+        assert_eq!(edge_color(&dot), Some([9, 8, 7]));
     }
 
     #[test]

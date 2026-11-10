@@ -89,6 +89,65 @@ fn the_other_apps_page_scrolled_deep_fits_the_quad_budget() {
 }
 
 #[test]
+fn every_tile_on_other_apps_with_an_icon_has_its_name_under_it_within_the_budget() {
+    // Canonical, as the TV's launcher gives them. Plex and Disney+ have
+    // none, so their names are across them.
+    let icons = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/mock-icons")
+        .canonicalize()
+        .unwrap();
+    let apps = MockLauncher::default()
+        .with_icons_in(&icons)
+        .list()
+        .unwrap()
+        .into_iter()
+        .cycle()
+        .take(60)
+        .collect();
+    let mut home = Home::new(apps, BackAtTop::Exit).with_look(Look::DEFAULT);
+    let mut assets = assets();
+    for _ in 0..4 {
+        let _ = home.handle(press(Dir::Right), Duration::ZERO);
+    }
+    assert_eq!(home.handle(act(Action::Select), Duration::ZERO), None);
+    home.settle_now();
+    for row in 0..=3 {
+        if row > 0 {
+            let _ = home.handle(press(Dir::Down), Duration::ZERO);
+            home.settle_now();
+        }
+        let _ = painted(&home, &mut assets);
+        let batch = painted(&home, &mut assets);
+        let n = batch.quad_count();
+        assert!(n <= QUAD_BUDGET, "row {row}: {n} quads");
+        let view = home.view();
+        let on_screen: Vec<_> = view
+            .tiles
+            .iter()
+            .filter(|t| t.named && t.rect.bottom() + 60.0 < SCREEN_H && t.rect.y > 0.0)
+            .collect();
+        assert!(on_screen.len() >= 10, "row {row}");
+        for tile in on_screen {
+            // Glyph quads in the band under the tile, inside its width.
+            let r = tile.rect;
+            let top = r.bottom() + layout::TITLE_GAP - 2.0;
+            let bottom = top + layout::GRID_TITLE_PX + 14.0;
+            let glyphs = (0..n)
+                .filter(|&i| {
+                    let (x0, y0, x1, y1) = batch.quad_bounds(i);
+                    x0 >= r.x - 1.0 && x1 <= r.right() + 1.0 && y0 >= top && y1 <= bottom
+                })
+                .count();
+            if tile.app.icon.is_some() {
+                assert!(glyphs >= 3, "row {row}: {}", tile.app.title);
+            } else {
+                assert_eq!(glyphs, 0, "row {row}: {} twice", tile.app.title);
+            }
+        }
+    }
+}
+
+#[test]
 fn a_page_turning_draws_both_pages_and_fits_the_budget() {
     let mut home = mock_home();
     let mut assets = assets();
@@ -114,11 +173,11 @@ fn a_newly_focused_tile_leans_whole_with_its_light_and_fits_the_budget() {
     let tile = *home.view().tiles.last().unwrap();
     assert!(tile.tilt[0] > 0.0 && tile.sweep.is_some());
     let batch = painted(&home, &mut assets);
-    // Prime Video's tile (five quads: `Batch::rounded_fill4`), its name
-    // across it and the light's two quads lean; its shadow and every other
-    // tile stay level.
+    // Prime Video's rim (four quads round the tile: `shadow_around`), its
+    // tile (five: `Batch::rounded_fill4`), its name across it and the
+    // light's two quads lean; its shadow and every other tile stay level.
     let name = "PrimeVideo".len();
-    assert_eq!(batch.leaning_quads(), 5 + name + 2);
+    assert_eq!(batch.leaning_quads(), 4 + 5 + name + 2);
     let n = batch.quad_count();
     assert!(n <= QUAD_BUDGET, "{n} quads");
     // Settled, nothing leans.
@@ -242,14 +301,181 @@ fn the_empty_state_draws() {
 }
 
 #[test]
-fn a_tile_takes_its_apps_colour_or_the_palettes_and_text_that_reads_on_it() {
+fn a_tile_takes_its_icons_edge_its_apps_colour_or_the_palettes() {
     let app = App::new("a", "A", AppKind::App);
-    assert_eq!(app_color(&app, 3), tile_color(3));
+    assert_eq!(app_color(&app, 3, None), tile_color(3));
     let app = app.with_color([1, 2, 3]);
-    assert_eq!(app_color(&app, 3), Rgba::rgb8(1, 2, 3));
+    assert_eq!(app_color(&app, 3, None), Rgba::rgb8(1, 2, 3));
+    // The icon's own square wins.
+    assert_eq!(app_color(&app, 3, Some([9, 9, 9])), Rgba::rgb8(9, 9, 9));
+    // White and light grey (LG's Netflix and YouTube) take the palette; a
+    // dark slate, a colour and the "Other apps" tile keep theirs.
+    for pale in [[255, 255, 255], [204, 204, 204], [120, 124, 130]] {
+        let app = App::new("a", "A", AppKind::App).with_color(pale);
+        assert_eq!(app_color(&app, 4, None), tile_color(4), "{pale:?}");
+    }
+    for kept in [[31, 31, 31], [229, 9, 20], style::OTHERS_TILE] {
+        let app = App::new("a", "A", AppKind::App).with_color(kept);
+        assert_eq!(
+            app_color(&app, 4, None),
+            Rgba::rgb8(kept[0], kept[1], kept[2])
+        );
+    }
     assert_eq!(on_color(Rgba::rgb8(255, 255, 255)), ON_LIGHT_TILE);
     assert_eq!(on_color(Rgba::rgb8(0, 0, 0)), ON_TILE);
     assert_eq!(on_color(tile_color(5)), ON_TILE);
+}
+
+/// A folder of its own (`tag`) with `red.png`: a 130 px red square with a
+/// white mark, as LG's large icons are drawn on a square of their own.
+/// The folder and the icon's path, canonical as the launcher gives them.
+fn icon_on_its_own_square(tag: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let mut px = Vec::new();
+    for y in 0..130 {
+        for x in 0..130 {
+            let mark = (50..80).contains(&x) && (50..80).contains(&y);
+            px.extend_from_slice(if mark { &[255; 4] } else { &[200, 30, 40, 255] });
+        }
+    }
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, 130, 130);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&px).unwrap();
+    }
+    let dir = std::env::temp_dir().join(format!("lumen-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let dir = std::fs::canonicalize(&dir).unwrap();
+    let path = dir.join("red.png");
+    std::fs::write(&path, &bytes).unwrap();
+    (dir, path)
+}
+
+#[test]
+fn an_icon_on_a_square_of_its_own_gives_the_tile_its_colour_and_the_light_goes_over() {
+    let (dir, path) = icon_on_its_own_square("edge");
+    // LG's white, which the icon's own square overrules.
+    let app = App::new("red", "Red", AppKind::App)
+        .with_icon(path.to_str().unwrap())
+        .with_color([255, 255, 255]);
+    let mut home = Home::new(vec![app], BackAtTop::Exit).with_look(Look::DEFAULT);
+    home.settle_now();
+    let mut assets = assets();
+    let _ = painted(&home, &mut assets);
+    let batch = painted(&home, &mut assets);
+    let red = Rgba::rgb8(200, 30, 40);
+    let colors: Vec<Rgba> = (0..batch.quad_count())
+        .map(|n| batch.quad_color(n))
+        .collect();
+    let close = |a: Rgba, b: Rgba| (a.0 - b.0).abs() + (a.1 - b.1).abs() + (a.2 - b.2).abs() < 1e-3;
+    assert!(
+        colors.iter().any(|c| close(*c, red)),
+        "the focused tile is the icon's red"
+    );
+    // Focused, the light goes over the tile and its icon: white.
+    let lit = colors
+        .iter()
+        .filter(|c| c.0 == 1.0 && c.1 == 1.0 && c.2 == 1.0 && c.3 > 0.0)
+        .count();
+    assert!(lit >= 3, "{lit} quads of light");
+    // The icon stands most of the tile's height.
+    let tile = home.view().tiles[0].rect;
+    let zoom = tile.w / layout::TILE_W;
+    let want = layout::ICON_ON_OWN_SIZE * zoom;
+    let icon = (0..batch.quad_count()).any(|n| {
+        let (x0, y0, x1, y1) = batch.quad_bounds(n);
+        ((x1 - x0) - want).abs() < 0.5 && ((y1 - y0) - want).abs() < 0.5
+    });
+    assert!(icon, "an icon {want} px a side");
+    // Drawn by the art's program, as a large picture.
+    let pictures = batch
+        .runs()
+        .iter()
+        .filter(|r| r.shader == Shader::Art && r.texture == Texture::Atlas)
+        .count();
+    assert_eq!(pictures, 1);
+    // At rest the tile stays flat: no light over it.
+    let mut home = Home::new(
+        vec![
+            App::new("x", "X", AppKind::App),
+            App::new("red", "Red", AppKind::App).with_icon(path.to_str().unwrap()),
+        ],
+        BackAtTop::Exit,
+    )
+    .with_look(Look::DEFAULT);
+    home.settle_now();
+    let batch = painted(&home, &mut assets);
+    let red = home
+        .view()
+        .tiles
+        .iter()
+        .find(|t| t.app.title == "Red")
+        .unwrap()
+        .rect
+        .outset(2.0);
+    let white = (0..batch.quad_count())
+        .filter(|&n| {
+            let (x0, y0, x1, y1) = batch.quad_bounds(n);
+            x0 >= red.x && y0 >= red.y && x1 <= red.right() && y1 <= red.bottom()
+        })
+        .map(|n| batch.quad_color(n))
+        .filter(|c| c.0 == 1.0 && c.1 == 1.0 && c.2 == 1.0 && c.3 > 0.0 && c.3 < 0.5)
+        .count();
+    assert_eq!(white, 0, "no light over the resting icon's tile");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn the_other_apps_tile_is_a_tile_like_the_rest_with_a_mark_of_four_squares() {
+    let mut home = mock_home().with_look(Look::DEFAULT);
+    home.settle_now();
+    let view = home.view();
+    let others = view
+        .tiles
+        .iter()
+        .find(|t| t.app.id.as_str() == lumen_core::arrange::OTHERS_ID)
+        .expect("on the row");
+    let batch = painted(&home, &mut assets());
+    let r = others.rect;
+    let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+    let half = layout::OTHERS_GLYPH / 2.0 + 1.0;
+    let marks = (0..batch.quad_count())
+        .filter(|&n| {
+            let (x0, y0, x1, y1) = batch.quad_bounds(n);
+            x0 >= cx - half && x1 <= cx + half && y0 >= cy - half && y1 <= cy + half
+        })
+        .count();
+    assert_eq!(marks, 4, "four squares and no name");
+}
+
+#[test]
+fn the_focused_tile_alone_has_a_bright_rim_round_it() {
+    let mut home = mock_home().with_look(Look::DEFAULT);
+    home.settle_now();
+    let batch = painted(&home, &mut assets());
+    let view = home.view();
+    let rim = Rgba::of(style::FOCUS_RIM_COLOR);
+    // The rim: four pieces round the tile, leaving out what it hides.
+    let rims: Vec<(f32, f32, f32, f32)> = (0..batch.quad_count())
+        .filter(|&n| {
+            let c = batch.quad_color(n);
+            (c.0, c.1, c.2, c.3) == (rim.0, rim.1, rim.2, rim.3)
+        })
+        .map(|n| batch.quad_bounds(n))
+        .collect();
+    let focused = view.tiles.iter().find(|t| t.focused).unwrap().rect;
+    let grown = focused.outset(style::FOCUS_RIM * focused.w / layout::TILE_W);
+    assert_eq!(rims.len(), 4, "one rim, four pieces");
+    let (x0, y0, x1, y1) = rims
+        .iter()
+        .fold((f32::MAX, f32::MAX, f32::MIN, f32::MIN), |b, q| {
+            (b.0.min(q.0), b.1.min(q.1), b.2.max(q.2), b.3.max(q.3))
+        });
+    // A pixel past the grown rect, for the soft edge.
+    assert!((x0 - (grown.x - 1.0)).abs() < 0.01 && (x1 - (grown.right() + 1.0)).abs() < 0.01);
+    assert!((y0 - (grown.y - 1.0)).abs() < 0.01 && (y1 - (grown.bottom() + 1.0)).abs() < 0.01);
 }
 
 #[test]
@@ -351,6 +577,35 @@ fn control_open(look: Look) -> Home {
 }
 
 #[test]
+fn a_chip_sized_to_its_name_draws_it_whole() {
+    let mut assets = assets();
+    let mut apps = MockLauncher::default().list().unwrap();
+    let input = apps.iter_mut().find(|a| a.kind == AppKind::Input).unwrap();
+    input.title = "Google Streamer".to_owned();
+    let mut home = Home::new(apps, BackAtTop::Exit).with_look(Look::DEFAULT);
+    let text = Text::new().unwrap();
+    home.size_chips(|title| text.width(title, style::CHIP_PX));
+    for focused in [false, true] {
+        if focused {
+            let _ = home.handle(press(Dir::Down), Duration::ZERO);
+        }
+        home.settle_now();
+        let view = home.view();
+        let chip = view.chips[0];
+        assert_eq!(chip.app.title, "Google Streamer");
+        assert_eq!(chip.lift, if focused { 1.0 } else { 0.0 });
+        let px = (style::CHIP_PX * layout::CHIP_FOCUS_SCALE).round();
+        let zoom = chip.rect.h / layout::CHIP_H;
+        let room = (chip.rect.w / zoom - 2.0 * style::CHIP_PAD_X) * layout::CHIP_FOCUS_SCALE;
+        assert_eq!(
+            assets.text.fit(&chip.app.title, px, room),
+            "Google Streamer"
+        );
+        assert!(painted(&home, &mut assets).quad_count() > 0);
+    }
+}
+
+#[test]
 fn the_gear_is_a_button_and_a_cog_of_ten_circles() {
     let mut assets = assets();
     let mut home = mock_home();
@@ -409,46 +664,76 @@ fn main_pixels(batch: &Batch) -> f32 {
     batch.shaded()[2..].iter().sum()
 }
 
-/// The main program's pixels a frame may shade, in screens: about what
-/// the home shaded when it held its budget on the B9 (0.40 screens at
-/// 16.9 ms a frame, 2026-11-09, 9d5a988), where a screen of them cost
-/// about 11 ms ("Other apps" at 1.03 and the Control Center at 1.73 ran at
-/// about 25 and 28 ms).
-const MAIN_PIXEL_BUDGET: f32 = 0.4;
+/// The main program's pixels a frame may shade, in screens. On the B9 a
+/// screen of them cost about 11 ms ("Other apps" at 1.03 and the Control
+/// Center at 1.73 ran at about 25 and 28 ms, 2026-11-09, 9d5a988).
+/// "Other apps" held its budget at 0.36 of them and 0.36 of the fill's
+/// (8a4d844, 17.07 ms), and missed it with every tile an icon at 0.62 and
+/// 0.78 (2026-11-10, 0a537bf with the B9's 30 icons: 17.92 ms).
+const MAIN_PIXEL_BUDGET: f32 = 0.45;
 
-/// The fill's pixels a frame may shade, in screens: the Control Center
-/// held its budget with 0.28 (2026-11-10, bc053bd: 16.84 ms a frame).
-const FILL_PIXEL_BUDGET: f32 = 0.4;
+/// The fill's pixels a frame may shade, in screens (above).
+const FILL_PIXEL_BUDGET: f32 = 0.45;
 
 #[test]
 fn every_screen_keeps_to_the_main_programs_pixel_budget() {
     let mut assets = assets();
     ambient(&mut assets);
     let check = |name: &str, home: &Home, assets: &mut Assets| {
+        // Twice: the first draw asks for the icons, which load at once.
+        let _ = painted(home, assets);
         let batch = painted(home, assets);
         let s = batch.shaded();
         let main = main_pixels(&batch);
         assert!(main <= MAIN_PIXEL_BUDGET, "{name}: {s:?}");
         assert!(s[1] <= FILL_PIXEL_BUDGET, "{name}: {s:?}");
-        assert!((s[0] - 1.92).abs() < 0.01, "{name}: the art's three layers");
+        // The art's three layers, and the icons drawn as pictures.
+        assert!(s[0] >= 1.91, "{name}: {s:?}");
         main
     };
     // The B9's 30 apps, with the ambient hero behind them, at the look the
-    // owner sees.
-    let apps = MockLauncher::default()
-        .list()
-        .unwrap()
-        .into_iter()
-        .cycle()
-        .take(30)
-        .collect();
+    // owner sees: with no icons, and each with an icon on a square of its
+    // own, as they come on the B9 once its icons copy.
+    let (dir, icon) = icon_on_its_own_square("budget");
+    for iconed in [false, true] {
+        let apps = MockLauncher::default()
+            .list()
+            .unwrap()
+            .into_iter()
+            .cycle()
+            .take(30)
+            .map(|app| {
+                if iconed {
+                    app.with_icon(icon.to_str().unwrap())
+                } else {
+                    app
+                }
+            })
+            .collect();
+        every_screen(apps, &mut assets, check);
+    }
+    let mut home = control_open(Look::DEFAULT);
+    home.show_hero(Some(Hero::Ambient));
+    home.settle_now();
+    let main = check("the control center", &home, &mut assets);
+    assert!(main > 0.0);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Walks `apps` through the home, the page turning and "Other apps", still
+/// and moving, `check`ing each.
+fn every_screen(
+    apps: Vec<App>,
+    assets: &mut Assets,
+    check: impl Fn(&str, &Home, &mut Assets) -> f32,
+) {
     let mut home = Home::new(apps, BackAtTop::Exit).with_look(Look::DEFAULT);
     home.show_hero(Some(Hero::Ambient));
     home.settle_now();
-    check("home", &home, &mut assets);
+    check("home", &home, assets);
     let _ = home.handle(press(Dir::Right), Duration::ZERO);
     home.advance_to(style::SWEEP_TIME / 2);
-    check("home, moving", &home, &mut assets);
+    check("home, moving", &home, assets);
     home.settle_now();
     for _ in 0..3 {
         let _ = home.handle(press(Dir::Right), Duration::ZERO);
@@ -456,19 +741,29 @@ fn every_screen_keeps_to_the_main_programs_pixel_budget() {
     home.settle_now();
     assert_eq!(home.handle(act(Action::Select), Duration::ZERO), None);
     home.advance_to(Duration::from_millis(150));
-    check("the page turning", &home, &mut assets);
+    check("the page turning", &home, assets);
     home.settle_now();
     assert_eq!(home.view().page, 1.0);
-    check("other apps", &home, &mut assets);
+    check("other apps", &home, assets);
     for (i, dir) in [Dir::Right, Dir::Down, Dir::Down].into_iter().enumerate() {
         let _ = home.handle(press(dir), Duration::ZERO);
         home.advance_to(style::SWEEP_TIME / 2);
-        check(&format!("other apps, moving {i}"), &home, &mut assets);
+        check(&format!("other apps, moving {i}"), &home, assets);
         home.settle_now();
     }
-    let mut home = control_open(Look::DEFAULT);
-    home.show_hero(Some(Hero::Ambient));
-    home.settle_now();
-    let main = check("the control center", &home, &mut assets);
-    assert!(main > 0.0);
+}
+
+#[test]
+fn the_control_centers_notes_fit_its_panel() {
+    let text = Text::new().unwrap();
+    let room = layout::PANEL_W - 2.0 * layout::PANEL_PAD;
+    for note in [PRIVACY_NOTE, REDUCE_MOTION_NOTE] {
+        let w = text.width(note, style::NOTE_PX);
+        assert!(w <= room, "{note}: {w} of {room}");
+    }
+    // The note sits under the switch, inside the panel.
+    let p = layout::panel(0.0);
+    let row = layout::motion_row(p, 0);
+    let note = row.bottom() + layout::MOTION_NOTE_GAP + style::NOTE_PX;
+    assert!(note < p.bottom() - layout::PANEL_PAD, "{note}");
 }

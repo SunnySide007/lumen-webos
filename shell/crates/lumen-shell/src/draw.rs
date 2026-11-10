@@ -13,8 +13,9 @@
 use std::collections::HashMap;
 
 use lumen_core::apps::App;
+use lumen_core::arrange::OTHERS_ID;
 use lumen_core::art::Hero;
-use lumen_core::control::{ControlView, MotionRow};
+use lumen_core::control::{ControlView, MotionRow, REDUCE_MOTION_NOTE};
 use lumen_core::focus::Dir;
 use lumen_core::home::{ChipView, GearView, SweepView, TileView, View, page_fades};
 use lumen_core::layout::{self, Rect, SAFE, SCREEN_H, SCREEN_W};
@@ -35,6 +36,7 @@ const TEXT_DIM: Rgba = Rgba::of(style::TEXT_DIM);
 const SHADOW: Rgba = Rgba::of(style::SHADOW);
 const PILL: Rgba = Rgba::of(style::PILL);
 const ON_TILE: Rgba = Rgba::of(style::ON_TILE);
+const FOCUS_RIM: Rgba = Rgba::of(style::FOCUS_RIM_COLOR);
 const ON_LIGHT_TILE: Rgba = Rgba::of(style::CHIP_TEXT_FOCUS);
 const WHITE: Rgba = Rgba::of(style::WHITE);
 const CHIP: Rgba = Rgba::of(style::CHIP);
@@ -72,12 +74,23 @@ pub fn tile_color(index: usize) -> Rgba {
     Rgba::of(PALETTE[index % PALETTE.len()])
 }
 
-/// The app's own colour, or the palette's for its place in the list.
-fn app_color(app: &App, index: usize) -> Rgba {
-    match app.color {
-        Some([red, green, blue]) => Rgba::rgb8(red, green, blue),
-        None => tile_color(index),
+/// A tile's colour: its icon's own edge colour if the icon sits on a
+/// square of its own (`icons::edge_color`), else the app's colour (webOS's
+/// `iconColor`) unless that is near white or grey, else the palette's for
+/// its place in the list. LG gives Netflix and YouTube white, which as a
+/// whole tile beside dark ones pulls the eye from focus.
+fn app_color(app: &App, index: usize, edge: Option<[u8; 3]>) -> Rgba {
+    match edge.or(app.color) {
+        Some(c) if edge.is_some() || !pale_grey(c) => Rgba::rgb8(c[0], c[1], c[2]),
+        _ => tile_color(index),
     }
+}
+
+/// Whether `c` is near white or a light grey: nearly no colour, and not
+/// dark (a dark slate, as "Other apps" is, keeps its colour).
+fn pale_grey([r, g, b]: [u8; 3]) -> bool {
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    max - min < 24 && max >= 77
 }
 
 /// What reads on a tile of colour `c`: white, or dark on a light tile (LG
@@ -308,6 +321,20 @@ fn draw_control(batch: &mut Batch, c: &ControlView, assets: &mut Assets) {
     for (i, row) in c.motion.iter().enumerate() {
         motion_row(batch, layout::motion_row(p, i), row, a, assets);
     }
+    // What the switch stops, under it.
+    let last = layout::motion_row(p, c.motion.len().saturating_sub(1));
+    let y = last.bottom() + layout::MOTION_NOTE_GAP + note;
+    let (text, atlas) = (&mut assets.text, &mut assets.atlas);
+    text.draw(
+        batch,
+        atlas,
+        left,
+        y,
+        note,
+        1.0,
+        REDUCE_MOTION_NOTE,
+        dim_ink,
+    );
 }
 
 /// What the Privacy panel says under its lines.
@@ -576,36 +603,67 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, sheen: bool, assets: &mut A
     let radius = layout::TILE_RADIUS * zoom;
     let lift = tile.lift.clamp(0.0, 1.0);
     let shade = REST_SHADE + (1.0 - REST_SHADE) * lift;
-    let own = app_color(tile.app, tile.index);
+    let path = tile.app.icon.as_deref();
+    let icon = path.and_then(|path| assets.icons.get(path, &mut assets.atlas));
+    let edge = path
+        .filter(|_| icon.is_some())
+        .and_then(|path| assets.icons.edge_color(path));
+    let own = app_color(tile.app, tile.index, edge);
     let base = own.shade(shade);
-    let top = base.lerp(WHITE, TILE_SHEEN);
     let a = tile.alpha;
-    if sheen && lift > 0.0 {
-        // The sheen: the top left corner lit, fading across to the bottom
-        // right, as the lift comes.
-        let s = style::FOCUS_SHEEN * lift;
-        let colors = [
-            top.lerp(WHITE, s),
-            top.lerp(WHITE, s * 0.35),
-            base.lerp(WHITE, s * 0.35),
-            base,
-        ];
-        batch.rounded_fill4(r.x, r.y, r.w, r.h, radius, colors.map(|c| c.alpha(a)));
-    } else {
-        let (top, base) = (top.alpha(a), base.alpha(a));
-        batch.rounded_fill4(r.x, r.y, r.w, r.h, radius, [top, top, base, base]);
+    // The rim, under the tile and a little larger, so only its edge shows:
+    // drawn round the part the tile hides, which costs nothing.
+    if lift > 0.0 {
+        let rim = style::FOCUS_RIM * zoom;
+        let c = FOCUS_RIM.alpha(FOCUS_RIM.3 * lift * a);
+        let o = r.outset(rim);
+        let hole = r.outset(-radius);
+        batch.shadow_around(o.x, o.y, o.w, o.h, radius + rim, 0.5, c, hole);
     }
-
+    // The light on a tile, as how far each corner (top left, top right,
+    // bottom left, bottom right) goes toward white: its top lit a little,
+    // and with the sheen the top left corner lit more, fading across to the
+    // bottom right, as the lift comes.
+    let s = if sheen {
+        style::FOCUS_SHEEN * lift
+    } else {
+        0.0
+    };
+    let lit = |k: f32| 1.0 - (1.0 - TILE_SHEEN) * (1.0 - k);
+    let light = [lit(s), lit(s * 0.35), s * 0.35, 0.0];
     let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
-    let icon = tile
-        .app
-        .icon
-        .as_deref()
-        .and_then(|path| assets.icons.get(path, &mut assets.atlas));
+    // An icon on a square of its own colour goes on a tile of that colour,
+    // flat, so the icon's square melts into it. Focused, the light goes
+    // over the two together (white at each corner's lightness over a colour
+    // is that colour taken toward white as far), coming with the lift; at
+    // rest the tile stays flat, which spares a layer over every icon on the
+    // "Other apps" page (2026-11-10, 0a537bf with the B9's 30 icons: 17.9 ms
+    // a frame there).
+    if let (Some((uv, w, h)), Some(_)) = (icon, edge) {
+        batch.rounded_fill4(r.x, r.y, r.w, r.h, radius, [base.alpha(a); 4]);
+        let side = layout::ICON_ON_OWN_SIZE * zoom / w.max(h) as f32;
+        let (iw, ih) = (w as f32 * side, h as f32 * side);
+        // Dimmed with the tile at rest, as its colour is.
+        let tint = Rgba(shade, shade, shade, a);
+        batch.picture(cx - iw / 2.0, cy - ih / 2.0, iw, ih, uv, tint);
+        if lift > 0.0 {
+            let over = light.map(|k| WHITE.alpha(k * lift * a));
+            batch.rounded_fill4(r.x, r.y, r.w, r.h, radius, over);
+        }
+        return;
+    }
+    let colors = light.map(|k| base.lerp(WHITE, k).alpha(a));
+    batch.rounded_fill4(r.x, r.y, r.w, r.h, radius, colors);
+
+    if tile.app.id.as_str() == OTHERS_ID {
+        others_glyph(batch, cx, cy, zoom, ON_TILE.alpha(a));
+        return;
+    }
+    // An icon on a clear background stands on the app's colour.
     if let Some((uv, w, h)) = icon {
         let side = layout::ICON_SIZE * zoom / w.max(h) as f32;
         let (iw, ih) = (w as f32 * side, h as f32 * side);
-        batch.image(cx - iw / 2.0, cy - ih / 2.0, iw, ih, uv, ON_TILE.alpha(a));
+        batch.picture(cx - iw / 2.0, cy - ih / 2.0, iw, ih, uv, ON_TILE.alpha(a));
         return;
     }
     // Still loading: the plain tile, so its name does not flash up first.
@@ -637,6 +695,19 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, sheen: bool, assets: &mut A
         &name,
         color,
     );
+}
+
+/// The "Other apps" tile's mark, drawn in code: four rounded squares, two
+/// by two, centred at (cx, cy).
+fn others_glyph(batch: &mut Batch, cx: f32, cy: f32, zoom: f32, ink: Rgba) {
+    let side = layout::OTHERS_GLYPH * zoom;
+    let cell = side * 0.42;
+    let step = side - cell;
+    let (x0, y0) = (cx - side / 2.0, cy - side / 2.0);
+    for (i, j) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+        let (x, y) = (x0 + i * step, y0 + j * step);
+        batch.rounded_rect(x, y, cell, cell, cell * 0.28, ink, ink);
+    }
 }
 
 /// The light crossing a newly focused tile: a soft band of white, brightest
@@ -685,21 +756,28 @@ fn light(batch: &mut Batch, tile: &TileView<'_>, sweep: SweepView) {
     }
 }
 
-/// On the "Other apps" page, the focused tile's name below it, fading in as
-/// it lifts.
+/// On the "Other apps" page, a tile's name below it: dim at rest, and
+/// brightening as the tile lifts. A name is cut to its tile's width, so
+/// neighbours' names never meet. A tile that shows its name across itself
+/// (no icon, or one that failed) has none below, which would repeat it.
 fn grid_title(batch: &mut Batch, tile: &TileView<'_>, assets: &mut Assets) {
-    let lift = tile.lift.min(1.0);
-    if lift <= 0.01 {
+    if tile
+        .app
+        .icon
+        .as_deref()
+        .is_none_or(|path| assets.icons.has_failed(path))
+    {
         return;
     }
+    let lift = tile.lift.clamp(0.0, 1.0);
     let px = layout::GRID_TITLE_PX;
     let r = tile.rect;
     let text = &mut assets.text;
-    let name = text.fit(&tile.app.title, px, layout::TILE_W * layout::FOCUS_SCALE);
+    let name = text.fit(&tile.app.title, px, r.w);
     let w = text.width(&name, px);
     let baseline = r.bottom() + layout::TITLE_GAP + text.cap_height(px);
     let x = r.x + (r.w - w) / 2.0;
-    let color = TEXT.alpha(lift * tile.alpha);
+    let color = TEXT_DIM.lerp(TEXT, lift).alpha(tile.alpha);
     text.draw(batch, &mut assets.atlas, x, baseline, px, 1.0, &name, color);
 }
 
@@ -712,7 +790,8 @@ fn draw_chip(batch: &mut Batch, chip: &ChipView<'_>, assets: &mut Assets) {
     let fill = CHIP.lerp(CHIP_FOCUS, lift);
     let fill = fill.alpha(fill.3 * a);
     batch.rounded_rect(r.x, r.y, r.w, r.h, r.h / 2.0, fill, fill);
-    let zoom = r.w / layout::CHIP_W;
+    // Chips are each as wide as their names: the lift is in the height.
+    let zoom = r.h / layout::CHIP_H;
     let px = (style::CHIP_PX * layout::CHIP_FOCUS_SCALE).round();
     let scale = style::CHIP_PX * zoom / px;
     let dot = if chip.playing {
@@ -721,7 +800,7 @@ fn draw_chip(batch: &mut Batch, chip: &ChipView<'_>, assets: &mut Assets) {
         0.0
     };
     let text = &mut assets.text;
-    let room = (layout::CHIP_W - 2.0 * style::CHIP_PAD_X - dot) * layout::CHIP_FOCUS_SCALE;
+    let room = (r.w / zoom - 2.0 * style::CHIP_PAD_X - dot) * layout::CHIP_FOCUS_SCALE;
     let name = text.fit(&chip.app.title, px, room);
     let w = text.width(&name, px) * scale;
     let whole = w + dot * zoom;

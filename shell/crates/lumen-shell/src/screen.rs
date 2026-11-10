@@ -175,6 +175,10 @@ impl<W: Window> TvScreen<W> {
 }
 
 impl<W: Window> Screen for TvScreen<W> {
+    fn text_width(&self, text: &str, px: f32) -> f32 {
+        self.assets.text.width(text, px)
+    }
+
     fn paint(&mut self, home: &Home) {
         self.drawable = self.surface.drawable_size();
         let batch_from = Instant::now();

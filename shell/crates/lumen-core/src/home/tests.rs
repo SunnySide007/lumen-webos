@@ -1,6 +1,5 @@
 use super::*;
 use crate::apps::{AppKind, Launcher, MockLauncher};
-use crate::control::Motion;
 
 const FRAME: Duration = Duration::from_micros(16_667);
 
@@ -166,6 +165,52 @@ fn down_and_up_go_to_the_nearest_item_across() {
     assert_eq!(sim.focused_title(), "Plex");
     sim.presses(&[LEFT, LEFT, LEFT, DOWN]);
     assert_eq!(sim.focused_title(), "HDMI 1");
+}
+
+#[test]
+fn chips_are_sized_to_their_names_and_up_and_down_follow_their_middles() {
+    // The B9's inputs as the owner named them.
+    let mut apps = mock_apps();
+    let named = [("PC", 0), ("Home Theater", 1), ("Google Streamer", 2)];
+    for (name, k) in named {
+        let input = apps
+            .iter_mut()
+            .filter(|a| a.kind == AppKind::Input)
+            .nth(k)
+            .unwrap();
+        input.title = name.to_owned();
+    }
+    let mut home = Home::new(apps, BackAtTop::Stay);
+    // 15 px a character stands in for the font.
+    home.size_chips(|title| title.chars().count() as f32 * 15.0);
+    let mut sim = Sim::with(home);
+    sim.settle();
+    let view = sim.home.view();
+    let widths: Vec<f32> = view.chips.iter().map(|c| c.rect.w).collect();
+    let want = |name: &str| layout::chip_width(name.len() as f32 * 15.0);
+    assert_eq!(
+        widths[..3],
+        [want("PC"), want("Home Theater"), want("Google Streamer")]
+    );
+    assert_eq!(widths[0], layout::CHIP_MIN_W);
+    assert!(widths[2] > widths[1] && widths[1] > layout::CHIP_W);
+    for pair in view.chips.windows(2) {
+        assert!((pair[1].rect.x - pair[0].rect.right() - layout::CHIP_GAP).abs() < 1e-3);
+    }
+    // Down from Prime Video (its middle at 600 px) lands on the chip whose
+    // middle is nearest, as the chips now lie.
+    let nearest = view
+        .chips
+        .iter()
+        .min_by(|a, b| {
+            let d = |c: &&ChipView<'_>| (c.rect.centre_x() - 600.0).abs();
+            d(a).total_cmp(&d(b))
+        })
+        .map(|c| c.app.title.clone())
+        .unwrap();
+    sim.presses(&[RIGHT, DOWN]);
+    assert_eq!(sim.focused_title(), nearest);
+    assert_eq!(nearest, "Google Streamer");
 }
 
 #[test]
@@ -504,9 +549,11 @@ fn ok_on_the_gear_opens_the_control_center_and_back_closes_it() {
     assert_eq!((view.shown, view.offset), (1.0, 0.0));
     assert!(view.motion[0].focused);
 
-    // Left and right do nothing; Down moves along Reduce Motion's rows.
+    // Left, right and down do nothing: Reduce Motion is the one switch.
     sim.presses(&[LEFT, RIGHT, DOWN]);
-    assert!(sim.home.view().control.expect("open").motion[1].focused);
+    let view = sim.home.view().control.expect("open");
+    assert_eq!(view.motion.len(), 1);
+    assert!(view.motion[0].focused);
 
     sim.home.set_privacy(Reading::Failed("no exec".into()));
     assert_eq!(
@@ -526,34 +573,40 @@ fn ok_on_the_gear_opens_the_control_center_and_back_closes_it() {
 }
 
 #[test]
-fn reduce_motion_turns_an_effect_off_and_on_and_says_to_save_it() {
+fn reduce_motion_turns_every_effect_off_and_back_and_says_to_save_it() {
     let mut sim = Sim::full();
     sim.presses(&[UP]);
     sim.press(OK);
     sim.settle();
-    // Tilt, the first row.
     let Some(Effect::SaveMotion(reduced)) = sim.press(OK) else {
         panic!("OK saves");
     };
-    assert!(reduced.is_off(Motion::Tilt));
-    assert!(!sim.home.look.tilt && sim.home.look.light);
-    assert!(!sim.home.view().control.expect("open").motion[0].on);
+    assert_eq!(reduced, Reduced::ALL);
+    let look = sim.home.look;
+    assert!(!look.tilt && !look.light && !look.parallax && !look.slide && !look.fade);
+    assert!(look.hero && look.dim && look.shadow, "only motion");
+    assert!(sim.home.view().control.expect("open").motion[0].on);
     assert_eq!(sim.home.reduced(), reduced);
-    // Down to Light sweep and off; back up to Tilt and on again.
-    sim.presses(&[DOWN]);
-    sim.press(OK);
-    assert!(!sim.home.look.light);
-    sim.presses(&[UP]);
+    // Up and Down stay on the one switch; OK again turns it all back.
+    sim.presses(&[DOWN, UP]);
     let Some(Effect::SaveMotion(reduced)) = sim.press(OK) else {
         panic!("OK saves");
     };
-    assert!(!reduced.is_off(Motion::Tilt) && reduced.is_off(Motion::Light));
-    assert!(sim.home.look.tilt && !sim.home.look.light);
-    assert!(sim.home.look.hero && sim.home.look.dim, "others untouched");
+    assert_eq!(reduced, Reduced::default());
+    assert_eq!(sim.home.look, Look::FULL);
+    assert!(!sim.home.view().control.expect("open").motion[0].on);
 }
 
 #[test]
-fn what_the_launch_look_keeps_off_reduce_motion_cannot_turn_on() {
+fn with_nothing_moving_in_the_launch_look_the_switch_does_nothing() {
+    let mut sim = Sim::with(Home::new(mock_apps(), BackAtTop::Exit).with_look(Look::PLAIN));
+    sim.presses(&[UP]);
+    sim.press(OK);
+    assert_eq!(sim.press(OK), None, "nothing to take away");
+    assert_eq!(sim.home.look, Look::PLAIN);
+    let row = &sim.home.view().control.expect("open").motion[0];
+    assert!(!row.on && !row.editable);
+    // An effect the launch look keeps off stays off with the switch off.
     let launch = Look {
         light: false,
         ..Look::FULL
@@ -561,15 +614,9 @@ fn what_the_launch_look_keeps_off_reduce_motion_cannot_turn_on() {
     let mut sim = Sim::with(Home::new(mock_apps(), BackAtTop::Exit).with_look(launch));
     sim.presses(&[UP]);
     sim.press(OK);
-    sim.presses(&[DOWN]);
-    assert_eq!(
-        sim.press(OK),
-        None,
-        "Light sweep is not the TV's to turn on"
-    );
-    assert!(!sim.home.look.light);
-    let row = &sim.home.view().control.expect("open").motion[1];
-    assert!(!row.on && !row.editable);
+    sim.press(OK);
+    sim.press(OK);
+    assert_eq!(sim.home.look, launch);
 }
 
 #[test]

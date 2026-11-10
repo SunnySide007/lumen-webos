@@ -722,6 +722,14 @@ impl Batch {
         self.image_quad(texture, x, y, w, h, uv, tint, false);
     }
 
+    /// A large region of the atlas (a tile's icon), drawn by the art's
+    /// program: a texture times a colour, where the main program would carry
+    /// a shape and a kind for every pixel. A run of its own, so for images
+    /// drawn large, not for glyphs among shapes.
+    pub fn picture(&mut self, x: f32, y: f32, w: f32, h: f32, uv: Uv, tint: Rgba) {
+        self.image_quad(Texture::Atlas, x, y, w, h, uv, tint, true);
+    }
+
     /// Art behind everything: like `image_from`, drawn by the art's
     /// program, in a run of its own.
     // `image_from`'s arguments.

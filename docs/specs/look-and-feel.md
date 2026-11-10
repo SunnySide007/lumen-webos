@@ -486,7 +486,7 @@ These cost little or nothing per frame and do the most for the look:
 | Layered parallax | Only for art Lumen owns (the Top Shelf, Lumen's own tiles): 2–3 layers shift with the tilt. LG's icons are flat images, so they tilt as one piece | One quad per layer | Flat art |
 | Top Shelf hero | Superseded by the home's full-screen art ("The home" below). Was: full-bleed 1920 × 640 art for the focused row-0 app, crossfading on the scroll spring, with the title over a dark scrim at the bottom | 1–3 full-screen quads; 3.6 MB of texture each at 1280 × 720 | The gradient |
 | Glass | Control Center platter and dock (options below) | See below | Flat tinted panels, black at 75% |
-| Control Center | The roadmap's toggles that match LG Settings, on a glass platter; the Privacy panel, read-only (decision 12); Reduce Motion, one switch per effect (focus tilt, focus light, parallax, the hero's crossfade, dither) | Its glass | |
+| Control Center | The roadmap's toggles that match LG Settings, on a glass platter; the Privacy panel, read-only (decision 12); Reduce Motion, one switch for every moving effect (focus tilt, focus light, parallax, slides, crossfades) | Its glass | |
 | App editing | Done from Lumen Remote, not on the TV (decision 10): the first row, the order, "Other apps" | Nothing on the TV | |
 
 * **Top Shelf art:** the owner's own per app, stills from Lumen's ambient
@@ -519,22 +519,65 @@ everything. Over it, from the top:
   Video, YouTube, then Plex or the Homebrew Channel), then **Other apps**.
   With none of the contract's apps installed, the first four apps take the
   row.
-* A slim row of chips (220 × 60, fully round, y 900, up to seven): the
+* A slim row of chips (60 high, fully round, y 900, up to seven): the
   inputs, then Settings. What was playing has the green dot here too.
+  Each chip is as wide as its name, its 24 px padding each side and room
+  for the dot (`layout::chip_width`), from 160 px ("PC" is still a chip)
+  to 360 (a longer name is cut), 24 px apart; seven at the widest still
+  fit the safe area, and would be narrowed alike if they did not. Before
+  the font has measured them they are 220 wide. Up and Down go to the
+  nearest middle, as the chips lie.
 * The status pill, when there is one, top left.
 
 **Other apps** is a page of its own: Select on its tile turns to it (the
 home fades over the first 60% of a spring turn, the page over the last 60%,
 each sliding 48 px), a heading and a grid of five columns that scrolls a row
-at a time. Back turns back to the Other apps tile.
+at a time. Every tile that shows an icon has its name under it (30 px,
+cut to the tile's width), dim at rest and brightening as the tile lifts,
+so the page reads without moving focus over it; the first build named only
+the focused one. A tile that shows its name across itself (no icon, or one
+that failed to load) has none under it, which would only repeat it.
+Back turns back to the Other apps tile.
 
-**One tile style.** Every tile is the app's own colour (its icon's webOS
-colour, else the palette), a soft rest shadow, and the app's icon or, with
-none, its name, dark on a light colour. Focus lifts it (scale 1.12, a deeper
-shadow), leans it toward the move (tilt), sweeps a light across it once,
-and adds a sheen: the top-left corner 26% of the way to white, fading
-across to the bottom right, drawn as the tile's own corner colours, so it
-costs no quad. Chips light up white with
+**One tile style.** Every tile, "Other apps" included, is one rounded tile
+of a colour, a soft rest shadow, and on it an icon, a mark or a name;
+the first build had three looks (colour and name, an icon in a dark box,
+and "Other apps"), which the build review (2026-11-09) asked to make one.
+Its colour, in order:
+
+1. Its icon's own edge colour, when the icon sits on a square of its own
+   (at least half of its two outer rings of pixels opaque:
+   `icons::edge_color`). The icon is then drawn 150 px (most of the tile's
+   height), its square melting into the tile; the tile is flat under it.
+   Focused, its light (below) goes over tile and icon together as white at
+   each corner's lightness, which is the same as the colour taken toward
+   white, coming with the lift; at rest it stays flat. A layer of light
+   over every resting icon was most of what took "Other apps" over its
+   budget with the B9's 30 icons (2026-11-10, 0a537bf: 17.92 ms a frame,
+   0.78 screens of the fill's pixels and 0.62 of the main program's).
+2. Else webOS's `iconColor`, unless it is near white or a light grey (less
+   than 24 in 255 between its channels, and not dark): LG gives Netflix and
+   YouTube white, which as a whole tile beside dark ones pulls the eye from
+   focus, and shows only when their icons failed to copy.
+3. Else the palette's colour for its place in the list.
+
+An icon on a clear background is drawn 104 px on that colour; with no icon
+the name is drawn across the tile, dark on a light colour. Icons are drawn
+by the art's program (`Batch::picture`: a texture times a colour), not the
+main one. "Other apps"
+has a mark of its own drawn in code, four rounded squares two by two, on
+its slate; its name is the title above the row when it has focus. Every
+colour comes from the TV at run time, so no app's artwork is in the repo.
+Focus lifts a tile (scale 1.15, a deeper shadow, and a 3 px rim of white
+at 90% just outside it, coming with the lift), leans it toward the move
+(tilt), sweeps a light across it once, and adds a sheen: the top-left
+corner 26% of the way to white, fading across to the bottom right, drawn
+as the tile's own corner colours (or the light over an icon's tile), so
+it costs no quad on most tiles and one on an icon's. Resting tiles are at
+65% brightness, their icons too when the tile takes the icon's colour.
+The build review (2026-11-09) found focus too quiet from a couch at 1.12,
+no rim and 80%; the rim is drawn under the tile round the part the tile
+hides (`Batch::shadow_around`), so only its edge costs pixels. Chips light up white with
 dark text and lift 1.08; they never lean or take the light. The page and
 the art drift with focus (parallax) only on the home page.
 
@@ -662,15 +705,20 @@ read `/var/lib/lumen` itself, `lumend` isn't installed on the B9, and its
 lumend-side change). `lumen-ctl privacy.state` reads the same things for
 the phone and the PC.
 
-**Motion** (Reduce Motion, decision 7). A switch for each moving effect, in
-this order: Tilt, Light sweep, Parallax, Slides, Crossfades, green while
-the effect runs. Up and Down move along them; OK turns the focused one off
-or on again. Each drives the look's own switch (`tilt`, `light`,
-`parallax`, `slide`, `fade`), so the home and the bench see one set of
-switches. Reduce Motion can only take an effect away: one the launch
-parameters' `"look"` turns off stays off, and its row is drawn faint and
-ignores OK. An effect turned off stops where it is: tiles stand upright,
-the art stops drifting, a light sweep under way ends.
+**Motion** (Reduce Motion, decision 7). One switch, "Reduce Motion", green
+while it is on, with a note under it: "Stops tilt, light sweep, parallax,
+slides and fades". OK turns every moving effect off at once, and on again
+(`Reduced::toggled`). It drives the look's own switches (`tilt`, `light`,
+`parallax`, `slide`, `fade`), which stay separate in the launch
+parameters' `"look"` for the bench, so the home and the bench see one set
+of switches. The first build had a switch per effect; the build review
+(2026-11-09) asked for the one a viewer expects, as tvOS has. It is on
+when every effect the launch look runs is off; a file with only some off
+(an older one) reads as off, and OK then turns the rest off. Reduce Motion
+can only take effects away: what the launch look turns off stays off, and
+with nothing moving in it the switch is drawn faint and ignores OK. An
+effect turned off stops where it is: tiles stand upright, the art stops
+drifting, a light sweep under way ends.
 
 **Where Reduce Motion is kept.** In `reduce-motion`, a file beside the
 executable in Lumen's folder, as `platform` is: the words of the effects
@@ -810,9 +858,10 @@ Answered on 2026-11-05 (the design session, decisions 10, 12 and 15):
 6. **The grid shows the contract:** the contract's apps, then the inputs,
    then Settings; every other launch point in one "Other apps" tile.
    Edited from Lumen Remote, so on-TV editing is not built.
-7. **Reduce Motion** in the Control Center, one switch per effect, editable
-   on the TV. It drives the same switches as the launch parameters'
-   `"look"`.
+7. **Reduce Motion** in the Control Center, editable on the TV. It drives
+   the same switches as the launch parameters' `"look"`: one switch for
+   them all on the TV (the build review, 2026-11-09), each its own in the
+   launch parameters.
 8. **The hidden shell frees the heroes** (lane J's question 3) and keeps
    the icon atlas.
 9. **Heroes move to ASTC 4x4** on an ES 3.0 context once a B9 measurement
