@@ -195,7 +195,7 @@ fn the_art_is_drawn_first_by_its_own_program_over_the_whole_screen() {
     };
     let plex = Hero::Named("hero-plex");
     assets.heroes.insert(plex.clone(), vec![layer]);
-    home.show_hero(Some(plex));
+    home.show_hero(Some(plex), Duration::ZERO);
     home.settle_now();
     let batch = painted(&home, &mut assets);
     assert_eq!(batch.quad_bounds(0), (0.0, 0.0, SCREEN_W, SCREEN_H));
@@ -211,7 +211,7 @@ fn the_art_is_drawn_first_by_its_own_program_over_the_whole_screen() {
     let owner = Hero::Owner(AppId::new("netflix"));
     assets.heroes.insert(owner.clone(), vec![layer]);
     let plain = batch.quad_count();
-    home.show_hero(Some(owner));
+    home.show_hero(Some(owner), Duration::ZERO);
     home.settle_now();
     let batch = painted(&home, &mut assets);
     assert_eq!(batch.quad_count(), plain + 1);
@@ -230,7 +230,7 @@ fn the_ambient_heros_layers_drift_each_its_own_way_and_never_show_an_edge() {
     let mut assets = assets();
     let mut home = mock_home().with_look(Look::FULL);
     ambient(&mut assets);
-    home.show_hero(Some(Hero::Ambient));
+    home.show_hero(Some(Hero::Ambient), Duration::ZERO);
     home.settle_now();
     let windows =
         |home: &Home, assets: &mut Assets| painted(home, assets).image_uvs()[..3].to_vec();
@@ -713,7 +713,7 @@ fn every_screen_keeps_to_the_main_programs_pixel_budget() {
         every_screen(apps, &mut assets, check);
     }
     let mut home = control_open(Look::DEFAULT);
-    home.show_hero(Some(Hero::Ambient));
+    home.show_hero(Some(Hero::Ambient), Duration::ZERO);
     home.settle_now();
     let main = check("the control center", &home, &mut assets);
     assert!(main > 0.0);
@@ -736,7 +736,7 @@ fn a_fade_from_the_gradient_keeps_to_the_main_programs_budget() {
         .collect();
     let mut home = Home::new(apps, BackAtTop::Exit).with_look(Look::DEFAULT);
     home.settle_now();
-    home.show_hero(Some(Hero::Ambient));
+    home.show_hero(Some(Hero::Ambient), Duration::ZERO);
     home.advance_to(Duration::from_millis(150));
     assert!(home.is_fading());
     let _ = painted(&home, &mut assets);
@@ -755,7 +755,7 @@ fn every_screen(
     check: impl Fn(&str, &Home, &mut Assets) -> f32,
 ) {
     let mut home = Home::new(apps, BackAtTop::Exit).with_look(Look::DEFAULT);
-    home.show_hero(Some(Hero::Ambient));
+    home.show_hero(Some(Hero::Ambient), Duration::ZERO);
     home.settle_now();
     check("home", &home, assets);
     let _ = home.handle(press(Dir::Right), Duration::ZERO);

@@ -411,7 +411,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
                 heroes.shown(now);
                 // The time moved on while hidden.
                 time_due = time_due.map(|_| now);
-            } else if let Some(line) = heroes.hidden(&mut shell.home, screen) {
+            } else if let Some(line) = heroes.hidden(&mut shell.home, screen, now) {
                 info!("{line}");
             }
         }
@@ -1507,18 +1507,23 @@ mod tests {
     /// Back in front at 4 s: when the hero went into textures, and the
     /// lines about its fade's wait.
     fn back_in_front(focus_at: Option<u64>) -> (Duration, Vec<String>) {
-        let ran = with_heroes(|s| s)
-            .events(|e| {
-                let e = e
-                    .at(2_000, Event::Window(window::MINIMIZED))
-                    .at(4_000, Event::Window(window::RESTORED));
-                match focus_at {
-                    Some(at) => e.at(at, Event::Window(window::FOCUS_GAINED)),
-                    None => e,
-                }
-                .at(7_000, Event::Quit)
-            })
-            .run();
+        let mut setup = with_heroes(|s| s).events(|e| {
+            let e = e
+                .at(2_000, Event::Window(window::MINIMIZED))
+                .at(4_000, Event::Window(window::RESTORED));
+            match focus_at {
+                Some(at) => e.at(at, Event::Window(window::FOCUS_GAINED)),
+                None => e,
+            }
+            .at(7_000, Event::Quit)
+        });
+        setup.vsync = true;
+        let ran = setup.run();
+        // The fade back in front is as long as the start's, however long
+        // it waited.
+        let fades = ran.lines_starting("crossfade gradient to hero-ambient: ");
+        assert_eq!(fades.len(), 2, "{:?}", ran.lines);
+        assert_eq!(fades[0], fades[1]);
         let uploaded = ran
             .hero_acts()
             .iter()

@@ -200,7 +200,12 @@ impl HeroPlan {
     /// The shell went out of sight: every hero's textures and decoded
     /// pixels go, and the shelf will show its gradient when it is back. The
     /// atlas stays. Returns the line to log, if anything was freed.
-    pub(super) fn hidden(&mut self, home: &mut Home, screen: &mut impl Screen) -> Option<String> {
+    pub(super) fn hidden(
+        &mut self,
+        home: &mut Home,
+        screen: &mut impl Screen,
+        now: Duration,
+    ) -> Option<String> {
         if !self.on || std::mem::replace(&mut self.hidden, true) {
             return None;
         }
@@ -214,7 +219,7 @@ impl HeroPlan {
             screen.free_hero(&d.hero);
         }
         self.fading = None;
-        home.show_hero(None);
+        home.show_hero(None, now);
         home.settle_now();
         while home.take_faded().is_some() {}
         (uploaded + decoded > 0).then(|| {
@@ -304,12 +309,12 @@ impl HeroPlan {
             return lines;
         };
         if self.failed.contains(&wanted) {
-            home.show_hero(None);
+            home.show_hero(None, now);
         } else if self.holding(now) && (self.is_uploaded(&wanted) || self.is_decoded(&wanted)) {
             self.held_from.get_or_insert(now);
         } else if self.is_uploaded(&wanted) {
             self.said_hold(&wanted, now, &mut lines);
-            self.fade_to(home, wanted);
+            self.fade_to(home, wanted, now);
         } else if let Some(at) = self.decoded.iter().position(|d| d.hero == wanted) {
             let d = self.decoded.remove(at);
             let total = self.total() + d.bytes;
@@ -323,7 +328,7 @@ impl HeroPlan {
                     TEXTURE_BUDGET / 1024
                 ));
                 self.failed.push(d.hero);
-                home.show_hero(None);
+                home.show_hero(None, now);
             } else {
                 match screen.upload_hero(&d.hero) {
                     Ok(up) => {
@@ -338,7 +343,7 @@ impl HeroPlan {
                         ));
                         self.uploaded.push((d.hero.clone(), up.bytes));
                         self.said_hold(&d.hero, now, &mut lines);
-                        self.fade_to(home, d.hero);
+                        self.fade_to(home, d.hero, now);
                     }
                     Err(e) => {
                         lines.push(format!(
@@ -346,7 +351,7 @@ impl HeroPlan {
                             d.hero.name()
                         ));
                         self.failed.push(d.hero);
-                        home.show_hero(None);
+                        home.show_hero(None, now);
                     }
                 }
             }
@@ -376,7 +381,7 @@ impl HeroPlan {
     }
 
     /// Starts the crossfade to `hero`, whose textures are in.
-    fn fade_to(&mut self, home: &mut Home, hero: Hero) {
+    fn fade_to(&mut self, home: &mut Home, hero: Hero, now: Duration) {
         let total = self.total();
         self.peak = self.peak.max(total);
         self.fading = Some(Fading {
@@ -384,7 +389,7 @@ impl HeroPlan {
             peak: total,
             done: false,
         });
-        home.show_hero(Some(hero));
+        home.show_hero(Some(hero), now);
     }
 
     /// The texture total, once, at the first idle wait with a hero on the

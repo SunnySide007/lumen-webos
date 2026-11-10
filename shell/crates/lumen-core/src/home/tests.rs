@@ -708,7 +708,7 @@ fn the_owners_art_changes_the_wanted_hero() {
 fn the_view_carries_the_crossfade_and_the_screen_settles_after_it() {
     let mut sim = Sim::full();
     sim.settle();
-    sim.home.show_hero(Some(Hero::Ambient));
+    sim.home.show_hero(Some(Hero::Ambient), sim.now);
     assert!(!sim.home.is_settled(), "the crossfade owes frames");
     assert!(sim.home.is_fading());
     sim.frame();
@@ -728,14 +728,14 @@ fn the_view_carries_the_crossfade_and_the_screen_settles_after_it() {
             to: Some(Hero::Ambient)
         })
     );
-    sim.home.show_hero(Some(Hero::Ambient));
+    sim.home.show_hero(Some(Hero::Ambient), sim.now);
     assert!(sim.home.is_settled(), "the same hero again changes nothing");
 }
 
 #[test]
 fn settle_now_ends_a_crossfade() {
     let mut sim = Sim::full();
-    sim.home.show_hero(Some(PLEX));
+    sim.home.show_hero(Some(PLEX), sim.now);
     sim.frame();
     sim.home.settle_now();
     assert!(!sim.home.is_fading());
@@ -860,7 +860,7 @@ fn drifted(sim: &mut Sim) -> [f32; 2] {
 #[test]
 fn the_ambient_heros_layers_drift_against_a_move_and_not_behind_other_apps() {
     let mut sim = Sim::full();
-    sim.home.show_hero(Some(Hero::Ambient));
+    sim.home.show_hero(Some(Hero::Ambient), sim.now);
     sim.settle();
     sim.press(RIGHT);
     let most = drifted(&mut sim);
@@ -901,7 +901,7 @@ fn a_flat_hero_or_a_look_without_parallax_or_tilt_never_drifts() {
         (no_tilt, Hero::Ambient),
     ] {
         let mut sim = Sim::with(Home::new(mock_apps(), BackAtTop::Exit).with_look(look));
-        sim.home.show_hero(Some(hero.clone()));
+        sim.home.show_hero(Some(hero.clone()), sim.now);
         sim.settle();
         sim.press(RIGHT);
         assert_eq!(drifted(&mut sim), [0.0; 2], "{look:?} {hero:?}");
@@ -1112,4 +1112,17 @@ fn on_other_apps_the_pointer_takes_the_grid_and_never_scrolls_it() {
     let first = layout::grid_tile(layout::GRID_COLUMNS).offset(0.0, -scrolled);
     assert_eq!(sim.point_at(first), Over::Moved);
     assert_eq!(sim.home.focused(), Some(others[layout::GRID_COLUMNS]));
+}
+
+#[test]
+fn a_hero_shown_after_a_wait_fades_in_from_the_start() {
+    let mut sim = Sim::full();
+    sim.settle();
+    // The loop waited 300 ms, the home not stepped meanwhile.
+    sim.now += Duration::from_millis(300);
+    sim.home.show_hero(Some(Hero::Ambient), sim.now);
+    sim.frame();
+    // One frame in, the gradient it leaves still shows nearly whole.
+    let gradient = sim.home.view().art.placeholder;
+    assert!(gradient > 0.95, "one frame in: {gradient}");
 }
