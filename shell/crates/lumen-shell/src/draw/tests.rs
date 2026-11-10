@@ -720,6 +720,33 @@ fn every_screen_keeps_to_the_main_programs_pixel_budget() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+#[test]
+fn a_fade_from_the_gradient_keeps_to_the_main_programs_budget() {
+    // Back in front, the hero fades in over the gradient: the gradient is
+    // the fill program's, so the main program shades only the home's own
+    // pixels, as on a settled screen (it took a screen more before).
+    let mut assets = assets();
+    ambient(&mut assets);
+    let apps = MockLauncher::default()
+        .list()
+        .unwrap()
+        .into_iter()
+        .cycle()
+        .take(30)
+        .collect();
+    let mut home = Home::new(apps, BackAtTop::Exit).with_look(Look::DEFAULT);
+    home.settle_now();
+    home.show_hero(Some(Hero::Ambient));
+    home.advance_to(Duration::from_millis(150));
+    assert!(home.is_fading());
+    let _ = painted(&home, &mut assets);
+    let batch = painted(&home, &mut assets);
+    let s = batch.shaded();
+    assert!(main_pixels(&batch) <= MAIN_PIXEL_BUDGET, "{s:?}");
+    assert!(s[1] >= 1.0, "the gradient, a screen of the fill's: {s:?}");
+    assert!(s[0] >= 1.91, "the hero's three layers: {s:?}");
+}
+
 /// Walks `apps` through the home, the page turning and "Other apps", still
 /// and moving, `check`ing each.
 fn every_screen(

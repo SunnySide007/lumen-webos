@@ -701,6 +701,13 @@ frame of the mock home under 600. The art is one to three full-screen quads
 bench measures the rest on the B9. The Control Center, below, completes
 Stage 3.
 
+The gradient behind everything until a hero is in (and the owner's art's
+scrim) is the fill program's, not the main program's (2026-11-10): back in
+front the hero fades in over it, and through the main program it was a
+screen of that program's pixels, about 11 ms on the B9, under every frame
+of the fade. With the dither on it is still dithered, through the main
+program, as every fill is then.
+
 ### The Control Center
 
 Built 2026-11-08 (Stage 3 of the plan the owner approved that day, slide 8),

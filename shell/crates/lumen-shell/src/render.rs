@@ -409,7 +409,9 @@ impl Batch {
         self.add_to_run(q.texture, q.shader);
     }
 
-    /// A rectangle shaded from `top` to `bottom`.
+    /// A rectangle shaded from `top` to `bottom` by the main program: the
+    /// tests' plain quad of it. Large gradients are `fill4`s.
+    #[cfg(test)]
     pub fn gradient_rect(&mut self, x: f32, y: f32, w: f32, h: f32, top: Rgba, bottom: Rgba) {
         self.push(&Quad {
             x,
