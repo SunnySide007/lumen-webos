@@ -341,3 +341,22 @@ frames a trip, the worst submit 48.67, 64.68 and 88.39 ms. The draw before
 the fade took 50.6 ms on the first trip and 3.9 and 6.1 ms after, so the
 hero texture's first draw is not where the time goes. Its full look read
 17.01 ms and 0.45 skipped per 10 s. Not merged.
+
+**The fix that did: the fade waits for the window's focus.** In every slow
+trip above, the 50 to 90 ms frames came before the shell's `window focus
+gained` line, which LG's compositor sends 530 to 590 ms after the Home
+press. 06:29 to 06:55 UTC, in a lab window, the same pattern:
+
+| Build | Fade | Vsyncs skipped | Slow frames, worst submit | Key down to first frame |
+|---|---|---|---|---|
+| 57c4831 (before) | 35 frames in 695 ms | 8 | 3, 70.10 ms | 194 ms |
+| b98f274: the fade waits for the focus | 32 frames in 532 ms | 2 | 1, 32.24 ms | 230 ms |
+| 50e27b6: and the gradient is a fill | 32 frames in 513 ms | 1 | 0 | 217 ms |
+| a433623: and a fade after a wait starts whole | 41 frames in 678 ms | 2 | 1, 44.52 ms at most | 211 ms |
+
+The fade waited 136 to 263 ms for the focus, so the hero's art shows that
+much later than before. The first two rows' fades were cut short by the
+wait (a433623 fixes that). a433623 is merged: its home, full look, read
+17.01 ms and 0.90 skipped per 10 s; Pages 17.11 ms and 9.42 and the
+Control Center 16.50 ms and 0.58 were read on 50e27b6, every run with 30
+of 30 icons and past the gate.
