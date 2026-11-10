@@ -5,7 +5,9 @@
 //!
 //! * `tvpower/power/getPowerState`: `Active`, `Screen Saver`, `Screen Off`.
 //! * `applicationManager/getForegroundAppInfo`: the app in front, which names
-//!   what takes focus (LG's screensaver, LG's Home, another build).
+//!   what takes focus (LG's screensaver, LG's Home, another build), and what
+//!   the home says was playing: the last app or input in front that was not
+//!   Lumen, the screensaver or LG's Home.
 //! * `tvpower/power/registerScreenSaverRequest`: LG asks before its
 //!   screensaver starts. The shell answers `ack: true` (allowed, for the
 //!   OLED's sake) and logs the request; a bench run's launch parameter
@@ -29,6 +31,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
+use lumen_core::apps::LG_HOME;
+
 use crate::info;
 use crate::luna::{Api, Client, GMainContext, LsHandle, LsMessage};
 
@@ -37,6 +41,8 @@ pub const FRONT_APP: &str = "luna://com.webos.applicationManager/getForegroundAp
 pub const SCREENSAVER: &str = "luna://com.webos.service.tvpower/power/registerScreenSaverRequest";
 pub const SCREENSAVER_RESPONSE: &str =
     "luna://com.webos.service.tvpower/power/responseScreenSaverRequest";
+/// LG's screensaver, as the app in front.
+pub const SCREENSAVER_APP: &str = "com.webos.app.screensaver";
 /// The largest message kept; these are a few hundred bytes.
 const MAX_MESSAGE: usize = 64 << 10;
 /// The longest string from another service that reaches the log: a state, an
@@ -102,6 +108,8 @@ pub struct Shared {
     /// Milliseconds since the loop's clock started.
     last_input_ms: AtomicU64,
     power: Mutex<Option<String>>,
+    /// The last app in front that counts as playing (`plays`).
+    playing: Mutex<Option<String>>,
     stop: AtomicBool,
     /// The thread's context, to wake it at exit; `None` until it is attached
     /// and after the thread is done with it.
@@ -113,6 +121,7 @@ impl Shared {
         Arc::new(Self {
             last_input_ms: AtomicU64::new(0),
             power: Mutex::new(None),
+            playing: Mutex::new(None),
             stop: AtomicBool::new(false),
             wake: Mutex::new(None),
         })
@@ -138,6 +147,17 @@ impl Shared {
             *power = Some(state);
         }
     }
+
+    /// The last app in front that counts as playing, if one has been.
+    pub fn playing(&self) -> Option<String> {
+        self.playing.lock().ok().and_then(|p| p.clone())
+    }
+
+    pub fn set_playing(&self, id: String) {
+        if let Ok(mut playing) = self.playing.lock() {
+            *playing = Some(id);
+        }
+    }
 }
 
 /// What a message asks the thread to do.
@@ -148,11 +168,15 @@ pub enum Action {
     Respond(Value),
     /// Keep this power state for the heartbeat line.
     Power(String),
+    /// This app came to the front and counts as playing.
+    Playing(String),
 }
 
 /// The pure part: what each message means and the lines for it.
 #[derive(Debug)]
 pub struct Watch {
+    /// The shell's own app id: in front, it is not playing.
+    app_id: String,
     client_name: String,
     power: Option<String>,
     front_app: Option<String>,
@@ -168,6 +192,7 @@ impl Watch {
     /// `<appId>.wakelock` (webosbrew's SDL does the same).
     pub fn new(app_id: &str, hold_saver: bool) -> Self {
         Self {
+            app_id: app_id.to_owned(),
             client_name: format!("{app_id}.wakelock"),
             power: None,
             front_app: None,
@@ -235,6 +260,9 @@ impl Watch {
                         "front app {id}: last input {} s ago",
                         ago(since_input)
                     )));
+                    if plays(&id, &self.app_id) {
+                        actions.push(Action::Playing(id.clone()));
+                    }
                     self.front_app = Some(id);
                 }
             }
@@ -259,6 +287,13 @@ impl Watch {
         }
         actions
     }
+}
+
+/// Whether the app `id` in front counts as what was playing, for the
+/// home's corner and Back: anything but nothing (`(none)`), the shell
+/// itself (`self_id`), LG's screensaver and LG's Home.
+pub fn plays(id: &str, self_id: &str) -> bool {
+    !matches!(id, "(none)" | SCREENSAVER_APP | LG_HOME) && id != self_id
 }
 
 /// A message's JSON, refusing one over `MAX_MESSAGE` or unreadable.
@@ -556,6 +591,7 @@ unsafe extern "C" fn on_message(
         match action {
             Action::Log(line) => info!("{line}"),
             Action::Power(state) => ctx.shared.set_power(state),
+            Action::Playing(id) => ctx.shared.set_playing(id),
             Action::Respond(payload) => respond(api, ctx.handle, &payload),
         }
     }
@@ -665,6 +701,24 @@ mod tests {
     }
 
     #[test]
+    fn an_app_or_input_in_front_is_what_was_playing() {
+        let mut w = watch();
+        let hdmi =
+            br#"{"returnValue":true,"appId":"com.webos.app.hdmi2","windowId":"","processId":"77"}"#;
+        assert_eq!(
+            w.message(Which::FrontApp, hdmi, secs(4.0)),
+            [
+                Action::Log("front app com.webos.app.hdmi2: last input 4.0 s ago".to_owned()),
+                Action::Playing("com.webos.app.hdmi2".to_owned()),
+            ]
+        );
+        for id in [APP, "(none)", SCREENSAVER_APP, LG_HOME] {
+            assert!(!plays(id, APP), "{id}");
+        }
+        assert!(plays("netflix", APP) && plays("com.webos.app.livetv", APP));
+    }
+
+    #[test]
     fn the_front_app_is_logged_when_it_changes_and_nothing_in_front_counts() {
         let mut w = watch();
         let shell = br#"{"returnValue":true,"subscribed":true,"appId":"io.github.sunnyside007.lumen.shell","windowId":"","processId":"6899"}"#;
@@ -765,7 +819,11 @@ mod tests {
         );
         // A good message arms the warning again, so a later failure shows.
         let good = br#"{"returnValue":true,"appId":"netflix"}"#;
-        assert_eq!(w.message(Which::FrontApp, good, secs(2.0)).len(), 1);
+        assert_eq!(
+            w.message(Which::FrontApp, good, secs(2.0)).len(),
+            2,
+            "a line, and playing"
+        );
         assert_eq!(w.message(Which::FrontApp, refused, secs(3.0)).len(), 1);
         // Another subscription warns on its own.
         assert_eq!(

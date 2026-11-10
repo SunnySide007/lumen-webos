@@ -25,6 +25,7 @@ use crate::app::Options;
 use crate::frame_stats::{BurstEnd, FrameStats};
 use crate::gl;
 use crate::info;
+use crate::local_time::{self, TimeOfDay};
 use crate::sdl::{Event, Refresh};
 use crate::timing::{Faults, FrameSplit, StartTimes};
 use crate::watch;
@@ -130,6 +131,12 @@ pub struct Uploaded {
 /// The wall clock.
 pub trait WallClock {
     fn now(&self) -> Instant;
+
+    /// The local time of day, for the home's clock; `None` where there is
+    /// none, or the TV has not set its clock yet.
+    fn time_of_day(&self) -> Option<TimeOfDay> {
+        None
+    }
 }
 
 /// The TV's wall clock: the system's.
@@ -139,6 +146,10 @@ pub struct SystemClock;
 impl WallClock for SystemClock {
     fn now(&self) -> Instant {
         Instant::now()
+    }
+
+    fn time_of_day(&self) -> Option<TimeOfDay> {
+        local_time::now()
     }
 }
 
@@ -210,6 +221,20 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         clock.at(start.listing),
     );
     shell.can_hide_pointer = events.can_hide_pointer();
+    shell.set_motion(opts.reduced, opts.motion_file.clone());
+    if let Some(id) = &opts.playing {
+        shell.home.set_playing(Some(id.clone()));
+    }
+    // The clock in the corner: `--clock` fixes it, and a fixed clock shows
+    // none without it, so its frames stay the same. Otherwise the local time,
+    // read at once and then as each minute turns, while the shell is in
+    // front.
+    let mut time_due = if let Some(t) = opts.clock {
+        shell.home.set_time(t.hour, t.minute);
+        None
+    } else {
+        (!clock.is_fixed()).then_some(Duration::ZERO)
+    };
     if opts.hidden {
         shell.start_hidden("started hidden");
     }
@@ -307,6 +332,10 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
                 heroes
                     .hidden_deadline(clock.now())
                     .filter(|_| !shell.visible),
+                // The minute turning, for the clock.
+                time_due.filter(|_| shell.visible),
+                // The Privacy read's answer, on its way.
+                shell.privacy_poll_at(clock.now()),
             ]
             .into_iter()
             .flatten()
@@ -362,6 +391,7 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
         if let Some(line) = shell.heartbeat(now) {
             info!("{line}");
         }
+        shell.poll_privacy();
         if !shell.visible
             && let Some(start) = start_line.take()
         {
@@ -371,9 +401,22 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
             was_visible = shell.visible;
             if shell.visible {
                 heroes.shown(now);
+                // The time moved on while hidden.
+                time_due = time_due.map(|_| now);
             } else if let Some(line) = heroes.hidden(&mut shell.home, screen) {
                 info!("{line}");
             }
+        }
+        if shell.visible && time_due.is_some_and(|due| now >= due) {
+            let wait = match wall.time_of_day() {
+                Some(t) => {
+                    shell.home.set_time(t.hour, t.minute);
+                    t.seconds_to_next_minute()
+                }
+                // Not set yet: look again in a minute.
+                None => 60,
+            };
+            time_due = Some(now + Duration::from_secs(wait));
         }
         if shell.quit {
             break;
@@ -551,6 +594,7 @@ mod tests {
     use lumen_core::input::scancode;
     use lumen_core::style;
 
+    use crate::local_time::TimeOfDay;
     use crate::sdl::window;
     use fake::{Act, Acts, FakeEvents, FakeScreen, ManualClock, Painted, SharedLauncher, down};
 
@@ -1008,18 +1052,22 @@ mod tests {
 
     #[test]
     fn warm_titles_leave_no_upload_for_a_burst() {
-        // A walk over the mock grid, paced as on the TV: the glyphs are made
-        // 50 ms into the first settle, and no burst after uploads any.
+        // A walk over the mock's home and its Other apps page, paced as on
+        // the TV: the glyphs are made 50 ms into the first settle, and no
+        // burst after uploads any.
         let walk = [
             scancode::RIGHT,
             scancode::RIGHT,
             scancode::RIGHT,
             scancode::RIGHT,
-            scancode::DOWN,
+            scancode::RETURN,
             scancode::RIGHT,
             scancode::DOWN,
             scancode::LEFT,
-            scancode::UP,
+            scancode::WEBOS_BACK,
+            scancode::LEFT,
+            scancode::DOWN,
+            scancode::RIGHT,
             scancode::UP,
             scancode::RETURN,
             scancode::WEBOS_BACK,
@@ -1036,7 +1084,12 @@ mod tests {
             setup.run()
         };
         let ran = walked(None);
-        assert_eq!(ran.launched.len(), 1, "OK launched");
+        assert_eq!(
+            ran.launched.len(),
+            2,
+            "OK launched, and Back went back to it"
+        );
+        assert_eq!(ran.launched[0], ran.launched[1]);
         let first_wait = ran
             .acts
             .iter()
@@ -1061,6 +1114,75 @@ mod tests {
         // Cold, as a fixed clock leaves it, the same walk uploads mid-burst.
         let cold = walked(Some(fake::FRAME));
         assert!(cold.frames.iter().skip(1).map(|f| f.uploads).sum::<usize>() > 0);
+    }
+
+    // The clock.
+
+    #[test]
+    fn the_clock_turns_with_the_minute_and_wakes_the_loop_for_it() {
+        let mut setup = Setup::new().events(|e| e.at(95_000, Event::Quit));
+        setup.clock = setup.clock.with_time_of_day(TimeOfDay {
+            hour: 21,
+            minute: 41,
+            second: 30,
+        });
+        let ran = setup.run();
+        let first = |text: &str| {
+            ran.frames
+                .iter()
+                .find(|f| f.clock.as_deref() == Some(text))
+                .map(|f| f.shown)
+        };
+        assert_eq!(first("9:41"), ran.frames.first().map(|f| f.shown));
+        // A frame for each new minute, the moment it turns, and none
+        // between: nothing else moves.
+        let turned = first("9:42").expect("9:42");
+        assert!(turned >= ms(30_000) && turned < ms(30_100), "{turned:?}");
+        let again = first("9:43").expect("9:43");
+        assert!(again >= ms(90_000) && again < ms(90_100), "{again:?}");
+        assert_eq!(ran.frames.len(), 3, "{:?}", ran.frames);
+    }
+
+    #[test]
+    fn the_gear_opens_the_control_center_and_its_privacy_read_comes_back() {
+        let ran = Setup::new()
+            .events(|e| {
+                e.tap(1_000, scancode::UP)
+                    .tap(1_200, scancode::RETURN)
+                    .at(3_000, Event::Quit)
+            })
+            .run();
+        let said = ran.lines_starting("privacy: ");
+        assert_eq!(said.len(), 1, "{:?}", ran.lines);
+        assert!(
+            said[0].starts_with("privacy: Lumen Guard Blocking; "),
+            "{}",
+            said[0]
+        );
+        // The panel came in and the loop went back to waiting: no frame in
+        // the last second.
+        let last = ran.frames.last().expect("frames").shown;
+        assert!(last < ms(2_000), "{last:?}");
+    }
+
+    #[test]
+    fn a_fixed_clock_shows_no_time_unless_one_is_given() {
+        let run = |clock: Option<&str>| {
+            let mut setup = Setup::new().events(|e| e.at(1_000, Event::Quit));
+            setup.clock = setup.clock.with_time_of_day(TimeOfDay {
+                hour: 8,
+                minute: 0,
+                second: 0,
+            });
+            setup.opts.fixed_dt = Some(fake::FRAME);
+            setup.opts.clock = clock.and_then(TimeOfDay::parse);
+            setup.opts.playing = Some(AppId::new("com.webos.app.hdmi1"));
+            let ran = setup.run();
+            let last = ran.frames.last().expect("a frame").clone();
+            (last.clock, last.playing)
+        };
+        assert_eq!(run(None), (None, Some("HDMI 1".to_owned())));
+        assert_eq!(run(Some("9:41")).0.as_deref(), Some("9:41"));
     }
 
     // The Top Shelf hero.
@@ -1147,7 +1269,7 @@ mod tests {
             Some(&shows("hero-plex"))
         );
         assert_eq!(
-            ran.lines_starting("hero hero-plex: 1 layer, 4800 KB; decoded in 40.0 ms")
+            ran.lines_starting("hero hero-plex: 1 layer, 3600 KB; decoded in 40.0 ms")
                 .len(),
             1
         );

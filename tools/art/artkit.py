@@ -3,8 +3,9 @@
 Heroes are drawn as linear light with sRGB (BT.709) primaries, where 1.0 is
 the UI's white, in coordinates of picture heights: x runs from 0 to the
 aspect ratio, y from 0 at the top to 1 at the bottom. The same picture can
-then be drawn at any size. Finishing (finish()) darkens the bottom band for
-the title, adds film grain and encodes to sRGB; quantize() dithers the result
+then be drawn at any size. Finishing (finish()) adds film grain, encodes to
+sRGB and darkens where the home's text and tiles sit (home_scrim()), so the
+shell draws no fade of its own over the art; quantize() dithers the result
 to 8 bits with blue noise, so a dark gradient on the TV's 8-bit UI plane
 shows no bands. Everything is seeded: the same seed gives the same bytes.
 
@@ -17,10 +18,16 @@ import zlib
 
 import numpy as np
 
-# The shell's title colour (style.rs, TEXT) and the shelf's size.
+# The shell's title colour (style.rs, TEXT) and a hero's size: full screen
+# behind the home, drawn at two thirds of 1920 x 1080 and scaled up
+# (heroes.rs, LUMENS).
 TEXT = (235, 238, 245)
-WIDTH, HEIGHT = 1920, 640
-TITLE_BAND = 200  # the bottom rows (at full size) that darken for the title
+WIDTH, HEIGHT = 1280, 720
+# Where the home's text and chips sit, as fractions of the screen
+# (layout.rs): the focused app's name and its line (x0, x1, y0, y1), and the
+# chips' band (y0, y1).
+TITLE_BOX = (0.0, 0.62, 0.38, 0.54)
+CHIPS_BAND = (0.82, 0.90)
 
 # BT.709 luminance weights, for linear and for encoded (luma) values.
 LUMA = np.array((0.2126, 0.7152, 0.0722))
@@ -222,20 +229,20 @@ def shoulder(linear, knee=0.35, ceiling=0.8):
     return np.where(linear > knee, knee + span * np.tanh(over / span), linear)
 
 
-def title_scrim(height, width=None, band=TITLE_BAND / HEIGHT, floor=0.10):
-    """The factor (on the encoded signal) that darkens the bottom band toward
-    black for the shell's title: 1 above the band, `floor` at the bottom
-    edge, and a little darker toward the left, where the title sits.
-
-    band is a fraction of the height. Returns (H, 1) or, with width, (H, W).
-    """
-    y = (np.arange(height) + 0.5) / height
-    t = smoothstep(1.0 - band, 1.0, y)[:, None]
-    fall = 1.0 - (1.0 - floor) * t ** 0.8
-    if width is None:
-        return fall
+def home_scrim(height, width):
+    """The factor (on the encoded signal) that darkens the art where the
+    home sits on it (layout.rs): clear over the top third, falling to under
+    half by the focused app's name and to a fifth under the row and the
+    chips, a little darker still to the left across the name's rows, and
+    softly in the top right corner behind the clock. Returns (H, W)."""
+    y = ((np.arange(height) + 0.5) / height)[:, None]
     x = ((np.arange(width) + 0.5) / width)[None, :]
-    return fall * (1.0 - 0.35 * t * (1.0 - smoothstep(0.0, 0.6, x)))
+    aspect = width / height
+    down = 1.0 - 0.56 * smoothstep(0.24, 0.52, y) - 0.26 * smoothstep(0.52, 0.86, y)
+    rows = smoothstep(0.30, 0.40, y) * (1.0 - smoothstep(0.54, 0.64, y))
+    name = 1.0 - 0.40 * rows * (1.0 - smoothstep(0.20, 0.72, x))
+    corner = 1.0 - 0.38 * np.exp(-((1.0 - x) * aspect / 0.5) ** 2 - (y / 0.2) ** 2)
+    return down * name * corner
 
 
 def grain(rng, linear, amount, size=0.7):
@@ -249,14 +256,14 @@ def grain(rng, linear, amount, size=0.7):
 
 def finish(rng, linear, grain_amount=0.0, scrim=True):
     """Linear art to the encoded signal: grain, highlights rolled off (after
-    the grain, so it cannot push one past the ceiling), and the bottom band
-    darkened for the title. Returns (H, W, 3) in [0, 1]."""
+    the grain, so it cannot push one past the ceiling), and darkened where
+    the home sits (home_scrim()). Returns (H, W, 3) in [0, 1]."""
     out = np.maximum(linear, 0.0)
     if grain_amount:
         out = grain(rng, out, grain_amount)
     encoded = srgb_encode(shoulder(out))
     if scrim:
-        encoded = encoded * title_scrim(encoded.shape[0], encoded.shape[1])[:, :, None]
+        encoded = encoded * home_scrim(encoded.shape[0], encoded.shape[1])[:, :, None]
     return encoded
 
 
@@ -446,33 +453,33 @@ def read_png(data):
 
 # Checks.
 
-def light_stats(pixels, band=TITLE_BAND / HEIGHT):
+def light_stats(pixels, box=TITLE_BOX, chips=CHIPS_BAND):
     """How bright an 8-bit sRGB image is, as the heroes' rules measure it.
 
     mean and p99 are of luma (BT.709 weights on the encoded signal, 0 to 1);
     mean_linear is of relative luminance in linear light; band_mean is the
-    luma mean of the bottom band, band_end that of its last tenth, and
-    band_p99_linear the 99th percentile of linear luminance there, which sets
-    the contrast of the title (contrast) against 99% of the band's pixels.
-    white counts pixels at (255, 255, 255).
+    luma mean of the title's box, band_end that of the chips' band, and
+    band_p99_linear the 99th percentile of linear luminance in the box,
+    which sets the contrast of the title (contrast) against 99% of the
+    pixels behind it. white counts pixels at (255, 255, 255).
     """
     rgb = np.asarray(pixels)[:, :, :3]
     encoded = rgb / 255.0
     y_luma = encoded @ LUMA
     y_linear = srgb_decode(encoded) @ LUMA
-    h = rgb.shape[0]
-    top = h - int(round(band * h))
-    tail = h - max(1, int(round(band * h / 10)))
+    h, w = rgb.shape[:2]
+    x0, x1, y0, y1 = (int(round(v * n)) for v, n in zip(box, (w, w, h, h)))
+    c0, c1 = (int(round(v * h)) for v in chips)
     text = float(rgb8(*TEXT) @ LUMA)
-    p99_band = float(np.percentile(y_linear[top:], 99))
+    p99_band = float(np.percentile(y_linear[y0:y1, x0:x1], 99))
     return {
         'mean': float(y_luma.mean()),
         'median': float(np.median(y_luma)),
         'p99': float(np.percentile(y_luma, 99)),
         'max': float(y_luma.max()),
         'mean_linear': float(y_linear.mean()),
-        'band_mean': float(y_luma[top:].mean()),
-        'band_end': float(y_luma[tail:].mean()),
+        'band_mean': float(y_luma[y0:y1, x0:x1].mean()),
+        'band_end': float(y_luma[c0:c1].mean()),
         'band_p99_linear': p99_band,
         'contrast': (text + 0.05) / (p99_band + 0.05),
         'white': int(np.all(rgb == 255, axis=2).sum()),

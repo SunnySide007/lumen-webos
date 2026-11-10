@@ -140,10 +140,10 @@
 # Top Shelf hero lines, only from a shell with the look's hero on
 # (docs/specs/look-and-feel.md, "The Top Shelf hero's lines"), and the look
 # lines, from any shell since lane J ("The look's lines"):
-#   look: hero on, dither off, tilt on, light on, parallax on; art full size
+#   look: hero on, dither off, tilt on, light on, parallax on, shadow on, sheen on, fade on, slide on, dim on
 #   look: "sparkle" is not a feature; left out
 #   art-owner: art for 2 apps: com.webos.app.hdmi1, netflix
-#   art-owner/"hulu.png": 1920x1080; the owner's art is 1920x640 or 960x320; not used
+#   art-owner/"hulu.png": 1920x1080; the owner's art is 1280x720; not used
 #   hero hero-plex: 1 layer, 4800 KB; decoded in 92.4 ms, uploaded in 11.0 ms
 #   hero hero-plex: decoded in 92.4 ms; dropped, focus moved on
 #   hero hero-plex: hero-plex.png: not a PNG; the shelf shows its gradient
@@ -589,10 +589,15 @@ $2 == "warm:" && whole($3) && $4 == "glyphs," && whole($5) && $6 == "uploads," &
     next
 }
 
-# The look (look-and-feel.md, the look lines), once at each start-up.
+# The look (look-and-feel.md, the look lines), once at each start-up; the
+# builds since the Control Center add fade, slide and dim, those since the
+# home shadow and sheen, earlier ones said the art size.
+# look: hero on, dither off, tilt on, light on, parallax on, shadow on, sheen on, fade on, slide on, dim on
+# look: hero on, dither off, tilt on, light on, parallax on, shadow on, sheen on
 # look: hero on, dither off, tilt on, light on, parallax on; art full size
 $2 == "look:" && $3 == "hero" && $5 == "dither" && $7 == "tilt" && $9 == "light" && $11 == "parallax" &&
-    $13 == "art" && $NF == "size" && NF == 15 {
+    ($13 == "art" && $NF == "size" && NF == 15 ||
+     $13 == "shadow" && $15 == "sheen" && (NF == 16 || $17 == "fade" && $19 == "slide" && $21 == "dim" && NF == 22)) {
     s = rest(3)
     if (++nlook == 1) look_first = s
     else if (s != look_first) look_differ = 1

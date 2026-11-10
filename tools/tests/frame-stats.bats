@@ -1438,7 +1438,7 @@ EOF
     log="$BATS_TEST_TMPDIR/shelf.log"
     {
         echo '[1792799999.000] look: hero on, dither on, tilt on, light on, parallax on; art full size'
-        echo '[1792800000.000] art-owner/"hulu.png": 1920x1080; the owner'"'"'s art is 1920x640 or 960x320; not used'
+        echo '[1792800000.000] art-owner/"hulu.png": 1920x1080; the owner'"'"'s art is 1280x720; not used'
         echo '[1792800000.001] art-owner: art for 2 apps: com.webos.app.hdmi1, netflix'
         echo '[1792800000.100] hero hero-ambient: 3 layers, 9375 KB; decoded in 140.2 ms, uploaded in 30.5 ms'
         echo '[1792800000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 18.00 ms, 52 quads); idle'
@@ -1487,6 +1487,16 @@ EOF
     echo '[1792800200.000] look: hero on, dither off, tilt on, light on, parallax on; art half size' >> "$log"
     run "$STATS" "$log"
     [[ "$output" == *"; the first of 3 runs, not all alike"$'\n'* ]]
+    # The home's builds say shadow and sheen, and no art size.
+    printf '%s\n' '[1792800000.000] look: hero on, dither on, tilt off, light on, parallax on, shadow off, sheen on' \
+        '[1792800000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 18.00 ms, 52 quads); idle' > "$log"
+    run "$STATS" "$log"
+    [[ "$output" == *"  look             hero on, dither on, tilt off, light on, parallax on, shadow off, sheen on"* ]]
+    # The Control Center's builds add fade, slide and dim.
+    printf '%s\n' '[1792800000.000] look: hero on, dither on, tilt on, light on, parallax on, shadow on, sheen on, fade off, slide on, dim off' \
+        '[1792800000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 18.00 ms, 52 quads); idle' > "$log"
+    run "$STATS" "$log"
+    [[ "$output" == *"  look             hero on, dither on, tilt on, light on, parallax on, shadow on, sheen on, fade off, slide on, dim off" ]]
     # A line that does not read right is no look.
     printf '%s\n' '[1792800000.000] look: hero off, dither off; art full size' \
         '[1792800000.200] drew 21 frames in 343 ms (avg 17.13 ms, worst 18.00 ms, 52 quads); idle' > "$log"

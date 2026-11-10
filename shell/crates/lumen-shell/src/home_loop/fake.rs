@@ -20,6 +20,8 @@ use crate::render::{Batch, Texture};
 use crate::sdl::{Event, Rate, Refresh};
 use crate::timing::FrameSplit;
 
+use crate::local_time::TimeOfDay;
+
 use super::hero::ATLAS_BYTES;
 use super::{Events, Frame, HeroNews, Screen, Uploaded, WallClock};
 
@@ -31,12 +33,12 @@ const LIMIT: Duration = Duration::from_secs(3600);
 /// is taken to spin: a pass that neither waits nor draws moves no clock.
 const SPIN: u32 = 10_000;
 /// What the ambient hero's three layers count against the texture budget,
-/// as `heroes.rs` decodes lane E's art (its tests hold the two to this).
-pub const AMBIENT_BYTES: usize = 9_600_000;
-/// What any other hero counts: one 1920 x 640 layer at 4 bytes a pixel.
-pub const FLAT_BYTES: usize = 1920 * 640 * 4;
+/// as `heroes.rs` decodes the home's art (its tests hold the two to this).
+pub const AMBIENT_BYTES: usize = 7_255_040;
+/// What any other hero counts: one 1280 x 720 layer at 4 bytes a pixel.
+pub const FLAT_BYTES: usize = 1280 * 720 * 4;
 /// The rows the ambient hero's layers cover, back to front.
-const AMBIENT_ROWS: [(f32, f32); 3] = [(0.0, 1.0), (0.0, 425.0 / 640.0), (455.0 / 640.0, 1.0)];
+const AMBIENT_ROWS: [(f32, f32); 3] = [(0.0, 1.0), (0.0, 489.0 / 720.0), (512.0 / 720.0, 1.0)];
 
 /// Wall time that moves only when a fake moves it: a wait to its deadline or
 /// to the next event, a swap by the frame's time, a launch by luna's.
@@ -44,6 +46,9 @@ const AMBIENT_ROWS: [(f32, f32); 3] = [(0.0, 1.0), (0.0, 425.0 / 640.0), (455.0 
 pub struct ManualClock {
     zero: Instant,
     now: Rc<Cell<Instant>>,
+    /// The time of day at its zero, in seconds after midnight, for the
+    /// tests of the home's clock; the others have none.
+    day: Option<u64>,
 }
 
 impl ManualClock {
@@ -52,6 +57,16 @@ impl ManualClock {
         Self {
             zero,
             now: Rc::new(Cell::new(zero)),
+            day: None,
+        }
+    }
+
+    /// The same clock, `at` the time of day at its zero.
+    pub fn with_time_of_day(self, at: TimeOfDay) -> Self {
+        let seconds = u64::from(at.hour) * 3600 + u64::from(at.minute) * 60 + u64::from(at.second);
+        Self {
+            day: Some(seconds),
+            ..self
         }
     }
 
@@ -77,6 +92,17 @@ impl ManualClock {
 impl WallClock for ManualClock {
     fn now(&self) -> Instant {
         self.now.get()
+    }
+
+    fn time_of_day(&self) -> Option<TimeOfDay> {
+        let seconds = (self.day? + self.elapsed().as_secs()) % 86_400;
+        // Each below 60 or 24 by the arithmetic.
+        let part = |n: u64| u8::try_from(n).unwrap_or(0);
+        Some(TimeOfDay {
+            hour: part(seconds / 3600),
+            minute: part(seconds / 60 % 60),
+            second: part(seconds % 60),
+        })
     }
 }
 
@@ -232,6 +258,9 @@ pub struct Painted {
     /// The Top Shelf: the hero drawn at full, if one is, and the one fading
     /// over it with its alpha (`None` for the placeholder).
     pub shelf: (Option<String>, Option<(Option<String>, f32)>),
+    /// The clock in the corner, and what it says is playing.
+    pub clock: Option<String>,
+    pub playing: Option<String>,
 }
 
 /// A screen that paints with the real draw code into the CPU atlas, and
@@ -313,7 +342,7 @@ impl FakeScreen {
     /// A hero's layers and what they count against the budget.
     fn layers(&self, hero: &Hero) -> Vec<((f32, f32), usize)> {
         if hero.is_layered(&self.look) {
-            let sizes = [FLAT_BYTES, 3_264_000, 1_420_800];
+            let sizes = [FLAT_BYTES, 1280 * 489 * 4, 1280 * 208 * 4];
             AMBIENT_ROWS.into_iter().zip(sizes).collect()
         } else {
             vec![((0.0, 1.0), FLAT_BYTES)]
@@ -354,11 +383,13 @@ impl Screen for FakeScreen {
                 .map(|tile| (tile.index, tile.lift)),
             uploads: uploads.len(),
             shelf: (
-                view.shelf_art.base.map(Hero::name),
-                view.shelf_art
+                view.art.base.map(Hero::name),
+                view.art
                     .over
                     .map(|(hero, alpha)| (hero.map(Hero::name), alpha)),
             ),
+            clock: view.clock.clone(),
+            playing: view.playing.map(str::to_owned),
         };
         self.painting = Some((painted, bytes));
     }
@@ -539,5 +570,13 @@ impl Launcher for SharedLauncher {
         act(&self.acts, &self.clock, Act::Launch);
         self.clock.advance(self.takes);
         self.mock.borrow_mut().launch(id)
+    }
+
+    fn read_privacy(&mut self) {
+        self.mock.borrow_mut().read_privacy();
+    }
+
+    fn take_privacy(&mut self) -> Option<Result<String, String>> {
+        self.mock.borrow_mut().take_privacy()
     }
 }

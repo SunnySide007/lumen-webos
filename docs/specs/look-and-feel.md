@@ -305,25 +305,49 @@ Proposed by lane J with the hero's lines. Each starts with
 `[<unix seconds>] ` like the others.
 
 ```text
-look: hero <on|off>, dither <on|off>, tilt <on|off>, light <on|off>, parallax <on|off>; art <full|half> size
+look: hero <on|off>, dither <on|off>, tilt <on|off>, light <on|off>, parallax <on|off>, shadow <on|off>, sheen <on|off>, fade <on|off>, slide <on|off>, dim <on|off>
 look: "<word>" is not a feature; left out
 ```
 
 * The first, once at start-up, before SDL starts: the Phase 4 features this
-  run has. All are on unless the launch parameters' `"look"` says otherwise,
-  in words applied in order: `{"look":"plain"}` turns every one off (the
-  home screen as before Phase 4), `{"look":"-dither,-tilt"}` those two,
-  `{"look":"plain,hero"}` leaves the hero alone on, `half` takes the heroes
-  from their 960 × 320 files, and `full` turns everything on again.
+  run has. All but the dither are on (`Look::DEFAULT`, since 2026-11-08:
+  the dither cost the B9 about 12.5 ms a frame) unless the launch
+  parameters' `"look"` says otherwise, in words applied in order:
+  `{"look":"plain"}` turns every one off (the home screen as before
+  Phase 4), `{"look":"-tilt,-light"}` those two, `{"look":"plain,hero"}`
+  leaves the hero alone on, `{"look":"dither"}` adds the dither, and `full`
+  turns everything on, the dither too. Before the home (2026-11-08) the line ended
+  `; art <full|half> size` and had no `shadow` or `sheen`; `half` is now an
+  unknown word. Before the Control Center (2026-11-08) it ended at `sheen`.
+  `tools/frame-stats.sh` reads all three forms.
   `tools/tv.sh launch <app id> '<json>'` passes them (close the shell
   first: a running app is not started again); a Home press passes LG's
-  own, which have no `"look"`, so the full look. `tools/sim.ps1 -Look`
-  does the same on the PC.
+  own, which have no `"look"`, so the default look. `tools/sim.ps1 -Look`
+  does the same on the PC. `tools/bench/looks.sh` passes no `"look"` for
+  its `full`, so on builds since the default changed its `full` runs are
+  the default; `{"look":"full"}` is the look with the dither.
 * The second, for each word that names no feature, or a `"look"` that is
   not text: it changes nothing. A typo must never keep the TV's Home from
   starting.
 * `tools/frame-stats.sh` repeats the first in its "top shelf" section, so
   a report says which look it measured.
+
+#### The Control Center's lines
+
+```text
+reduce motion: <none|<effect>, <effect> off>
+reduce motion: <effect> off; <saved|not saved: <error>|not kept>
+privacy: Lumen Guard <value>; Today <value>; LG's reporting <value>; Port 11111 <value>
+```
+
+* The first, once at start-up after the look lines: what the
+  `reduce-motion` file turns off (look-and-feel.md, "The Control Center").
+  The look line is the launch parameters' look; the effects listed here
+  are off on top of it.
+* The second, each time a switch in the Control Center is turned: what is
+  off now, and whether the file took it.
+* The third, each time the Privacy panel's read comes back: what the panel
+  says, line by line (or `Lumen Guard Can't read: <why>`).
 
 ### What blocks measuring now
 
@@ -433,8 +457,21 @@ These cost little or nothing per frame and do the most for the look:
    everything those quads cover; where the time goes is not measured yet.
    Until it is made cheap (a small dither texture in place of the
    arithmetic, or one pass over the finished frame), the default look
-   should leave it off; the home's branch owns the look switches and makes
-   that change.
+   leaves it off: `Look::DEFAULT`, on the home's branch since 2026-11-08.
+   `{"look":"dither"}` or `full` turns it on, for a pair against the
+   default.
+
+   **The cheap dither** (the home's branch, 2026-11-08, not yet measured).
+   The threshold is now one fetch from a 4x4 texture of the same 16 Bayer
+   levels on unit 1 (repeating, nearest texel), in place of two Bayer steps,
+   two floors and a divide for every pixel: the dithered program adds a
+   fetch and one multiply-add to the plain one. The pattern is the same
+   (a test checks every level against the old arithmetic). The dithered
+   program covers about 0.4 screens of the full look's pixels in the
+   simulator, so the 12.5 ms was likely the frame tipping past its vsync
+   (17.1 ms without the dither, already just over 16.7) more than the
+   arithmetic alone. The bench pairs the default against `dither` on it;
+   the aim is within 0.3 ms.
 3. **Kerning.** Inter wasn't kerned: fontdue reads kerning only from a `kern`
    table, and Inter keeps it in GPOS. The 72 px shelf title shows it most.
    Done on 2026-10-23 (e823515): the pairs are pulled out of GPOS ahead of
@@ -447,7 +484,7 @@ These cost little or nothing per frame and do the most for the look:
 |---|---|---|---|
 | Focus light and tilt | The newly focused tile leans a few degrees toward the move and springs back; a soft highlight sweeps across it once, then stops so the screen settles | 1–3 quads (estimate) | Light only |
 | Layered parallax | Only for art Lumen owns (the Top Shelf, Lumen's own tiles): 2–3 layers shift with the tilt. LG's icons are flat images, so they tilt as one piece | One quad per layer | Flat art |
-| Top Shelf hero | Full-bleed 1920 × 640 art for the focused row-0 app, crossfading on the scroll spring, with the title over a dark scrim at the bottom | 1–2 full-width quads; about 5 MB of texture each, 10 MB during a crossfade | Half-size art (960 × 320) scaled up, about 1.2 MB |
+| Top Shelf hero | Superseded by the home's full-screen art ("The home" below). Was: full-bleed 1920 × 640 art for the focused row-0 app, crossfading on the scroll spring, with the title over a dark scrim at the bottom | 1–3 full-screen quads; 3.6 MB of texture each at 1280 × 720 | The gradient |
 | Glass | Control Center platter and dock (options below) | See below | Flat tinted panels, black at 75% |
 | Control Center | The roadmap's toggles that match LG Settings, on a glass platter; the Privacy panel, read-only (decision 12); Reduce Motion, one switch per effect (focus tilt, focus light, parallax, the hero's crossfade, dither) | Its glass | |
 | App editing | Done from Lumen Remote, not on the TV (decision 10): the first row, the order, "Other apps" | Nothing on the TV | |
@@ -458,6 +495,232 @@ These cost little or nothing per frame and do the most for the look:
 * **No video in the Top Shelf:** video is on a hardware plane that GL can't
   read. Whether GL could leave a clear hole over it is untested, so it isn't
   planned.
+
+### The home
+
+Stage 3 of the plan the owner approved on 2026-11-08 (slide 8 of
+`tools/out/plan-20261108/lumen-streamline.html`): the Top Shelf grid gives
+way to one screen of art with one row on it. Built on 2026-11-08
+(`claude/home-design`); the simulator shows the layout, and the frame times
+are the bench's to give. Places are in the 1920 × 1080 space
+(`lumen-core`'s `layout`), values in `style`.
+
+**What is on it.** The focused app's art fills the screen behind
+everything. Over it, from the top:
+
+* Top right, the clock (Inter SemiBold 48, twelve hours, `9:41`) and under
+  it what was playing (28 px, dim, after a green dot), from the TV's local
+  time and the luna watch.
+* The focused item's name (88 px, baseline 500) and a line under it (30 px,
+  dim, baseline 556): `Playing now` for what was playing, `Opened 5 minutes
+  ago` for an app opened this run, `6 more apps` on the Other apps tile.
+* One row of up to five wide tiles (320 × 180, radius 14, their tops at
+  y 612), in decision 10's order: the contract's apps (Netflix, Prime
+  Video, YouTube, then Plex or the Homebrew Channel), then **Other apps**.
+  With none of the contract's apps installed, the first four apps take the
+  row.
+* A slim row of chips (220 × 60, fully round, y 900, up to seven): the
+  inputs, then Settings. What was playing has the green dot here too.
+* The status pill, when there is one, top left.
+
+**Other apps** is a page of its own: Select on its tile turns to it (the
+home fades over the first 60% of a spring turn, the page over the last 60%,
+each sliding 48 px), a heading and a grid of five columns that scrolls a row
+at a time. Back turns back to the Other apps tile.
+
+**One tile style.** Every tile is the app's own colour (its icon's webOS
+colour, else the palette), a soft rest shadow, and the app's icon or, with
+none, its name, dark on a light colour. Focus lifts it (scale 1.12, a deeper
+shadow), leans it toward the move (tilt), sweeps a light across it once,
+and adds a sheen: the top-left corner 26% of the way to white, fading
+across to the bottom right, drawn as the tile's own corner colours, so it
+costs no quad. Chips light up white with
+dark text and lift 1.08; they never lean or take the light. The page and
+the art drift with focus (parallax) only on the home page.
+
+**Moves.** Left and Right along a line; Up and Down to the nearest item by
+centre in the line above or below; Home brings focus back to the first tile.
+Back from a chip goes to the row; from the Other apps page, to its tile; on
+the row, it goes back to what was playing (a launch), and with nothing
+playing it does nothing: the shell owns Home now (`BackAtTop::Stay`), so
+Back no longer closes it.
+
+**What was playing** is the last app in front that was not Lumen, LG's
+screensaver, LG's Home or nothing, as `getForegroundAppInfo` says (the
+luna watch), read when the shell comes back to the front; an app the shell
+launched counts at once. It is not checked that the app still runs: Back
+after the app itself was closed starts it again.
+
+**The clock** reads the local time with `localtime_r` after `tzset` (so a
+time zone set in LG's settings shows within the minute) when the shell
+comes to the front and then as each minute turns: one frame a minute while
+settled, none while hidden. Before 2026 by the TV's clock (not set yet
+after a boot) it shows nothing. `--clock 9:41` fixes it for screenshots; a
+fixed clock (`--fixed-dt`) shows none without it. `--playing <app id>` (and
+`tools/sim.ps1 -Clock`, `-Playing`) stands in for the luna watch on the PC.
+
+**The art** is Lumen's own (`tools/art`, CC BY-SA 4.0), redrawn for the
+home:
+
+* At 1280 × 720, scaled up 1.5 times on the TV. The art is soft light and
+  haze, and at this size a crossfade out of the layered ambient hero holds
+  the texture budget: the atlas (8,192 KB), the ambient hero's three layers
+  (7,085 KB) and the hero it fades to (3,600 KB) make 18,877 KB of the
+  23,437 KB. At 1920 × 1080 the same moment would need about 32,000 KB.
+  The owner's art is 1280 × 720 too, for the same reason: two full-size
+  pictures in one crossfade would not fit with the atlas.
+* With the home's scrim in the art (`artkit.home_scrim`): clear over the
+  top third, darker under the name and the row, darkest under the chips,
+  and softly behind the clock. No full-screen scrim is drawn over Lumen's
+  art; the owner's art gets one quad of scrim from 30% of the height down.
+  The name reads at 10.9:1 or better over 99% of its box on every hero.
+* Drawn by a program of its own (`render.rs`, the art program): texture
+  times colour, nothing else. The main program's per-pixel branches, the
+  shapes and the dither stay off the screen's biggest quads.
+
+**J2 to J5** (the plan's look items):
+
+* J2, the seams: the ambient hero is drawn from frame 160 of the aurora
+  loop, where no curtain fades out part way across (at frame 0 one did, and
+  read as a hard edge). The input heroes' glass face drew a line: the
+  lines' halos stopped at the face, the glints' glows (12 px) joined down
+  it, and the ticks too. The halos now blend across a band, the glows are
+  4 px, the ticks a third as tall.
+* J3, the textures freed while hidden: the shell frees every hero when it
+  goes out of sight and keeps the atlas (decision 15; the
+  `hidden: Top Shelf art freed …` line), and loads the wanted one again
+  when it comes back.
+* J4, the half-size art: gone from the IPK and the repository, with the
+  `half` look word. The full-size heroes are 8.6 MB of PNGs.
+* J5, the amounts: tilt, light and parallax keep their tokens
+  (`TILT_*`, `SWEEP_*`, `PARALLAX_PX`) until the bench and the owner's weekly
+  look set them.
+
+**Every effect has a switch** in the launch parameters' `"look"`
+(`Look::parse`): `hero`, `dither`, `tilt`, `light`, `parallax`, `shadow`
+(the resting tiles' shadows: one quad each), `sheen` (free, but a switch
+like the rest), `fade` (the art's crossfade: off, the art cuts), `slide`
+(the pages', and the Control Center's, slide as they turn: off, they only
+fade) and `dim` (the dim behind "Other apps" and the Control Center: no
+quad, the colours under it darkened as they are drawn). The look line says
+them all (below).
+
+**Cost.** The simulator's frames hold 80 to 95 quads; a test holds every
+frame of the mock home under 600. The art is one to three full-screen quads
+(three for the ambient hero's layers), which is the frame's fill; the
+bench measures the rest on the B9. The Control Center, below, completes
+Stage 3.
+
+### The Control Center
+
+Built 2026-11-08 (Stage 3 of the plan the owner approved that day, slide 8),
+on the home's branch; the bench has not measured it yet.
+
+**The gear.** A round button at the top right, left of the clock
+(`layout::GEAR`), drawn like a chip with a cog of ten circles (eight teeth,
+a disc and its hole), so nothing in it has to turn. Up from the row reaches
+it, and Up from the chips when there is no row; Down, or Back, goes to the
+row's tile nearest below it. On the gear the title reads "Control Center"
+over "Privacy and motion", and the art stays the last app's. OK opens the
+Control Center.
+
+**The panel.** It comes in from the right over the home, 640 px wide and as
+tall as the safe area (`layout::PANEL`): near-black at 94%, the flat
+fallback for glass. With the look's `slide` it slides in 96 px as it fades
+(`PAGE`'s spring); with `dim` the home behind it dims (no quad: see Cost).
+Back closes it and leaves focus on the gear; the Home key closes it
+and goes to the first tile, as it does from anywhere.
+
+**Privacy, which only reads** (decision 12; privacy.md, G5's first part).
+Four lines, each a label and a value, the value amber when it wants a look:
+
+| Line | Values |
+|------|--------|
+| Lumen Guard | Blocking, Logging only, Not running (its status file is over 60 s old), Not installed |
+| Today | "512 of 6,789 lookups blocked", or "… would be blocked" while Guard only logs |
+| LG's reporting | All stopped, "1 of 4 jobs running", Unknown |
+| Port 11111 | Closed, Open, Unknown |
+
+Under them: "Read only: change these from your phone or PC". Nothing on the
+TV loosens anything. The lines are judged as `lumen-ctl`'s `privacy.state`
+judges them: a `REJECT` or `DROP` of tcp `dpt:11111` in `INPUT`, and a job
+running only if `initctl status` says ` start/`.
+
+**Where the panel's data comes from.** Each time the panel opens, the shell
+asks Homebrew Channel's `exec`, on a thread of its own, to run
+`lumen-privacy-read.sh`, which the IPK ships beside `lumen-icons.sh` and
+which the shell names by its fixed path, with no arguments. As root, it
+prints Guard's status file (`/var/lib/lumen/guard/status`), a `--- rules`
+line, `iptables -L INPUT -n`, a `--- jobs` line, and `initctl status` for
+crashreportd, rdxd, uploadd and remotelogger. It writes nothing, starts and
+stops nothing, and leaves any part it cannot read empty; `lumen-core`'s
+`privacy.rs` parses the output. The panel says "Reading…" meanwhile, and
+"Can't read: no answer" if `exec` fails or takes over 10 s. This is the
+simplest source that needs no new root daemon part: the jailed shell can't
+read `/var/lib/lumen` itself, `lumend` isn't installed on the B9, and its
+`status` request carries no Guard counts (adding them would be a
+lumend-side change). `lumen-ctl privacy.state` reads the same things for
+the phone and the PC.
+
+**Motion** (Reduce Motion, decision 7). A switch for each moving effect, in
+this order: Tilt, Light sweep, Parallax, Slides, Crossfades, green while
+the effect runs. Up and Down move along them; OK turns the focused one off
+or on again. Each drives the look's own switch (`tilt`, `light`,
+`parallax`, `slide`, `fade`), so the home and the bench see one set of
+switches. Reduce Motion can only take an effect away: one the launch
+parameters' `"look"` turns off stays off, and its row is drawn faint and
+ignores OK. An effect turned off stops where it is: tiles stand upright,
+the art stops drifting, a light sweep under way ends.
+
+**Where Reduce Motion is kept.** In `reduce-motion`, a file beside the
+executable in Lumen's folder, as `platform` is: the words of the effects
+turned off, on one line (`tilt slide`). It is read at start-up and written
+on each change; a missing, empty or unreadable file turns nothing off, and
+a word that names no effect is passed over. Reinstalling the IPK removes
+it, so a bench run, which installs, always starts with nothing turned off.
+Under a fixed clock (`--fixed-dt`) it is neither read nor written, so
+screenshots never depend on an earlier run. Whether the jailed shell may
+write Lumen's folder on the B9 has not been tried: the `reduce motion: …;
+saved` or `…; not saved: <error>` line says so the first time a switch is
+turned. If it may not, the change lasts until the shell closes, and a
+lasting store (lumend's, or the phone's through Remote) would be a
+lumend-side change.
+
+**Cost.** Open, the frame holds about 305 quads in the simulator (the home
+under it, the panel's text a quad a glyph); a test holds it under 600. The
+panel's glyphs are made with the rest at warm-up (`warm.rs`), so opening it
+uploads nothing in its burst.
+
+The first build drew the dim as a black quad over the whole screen and the
+panel as one shape quad, about 1.3 screens of the main program's pixels
+over the art, and "Other apps" its own dim, one screen more. On the B9
+(OLED55B9PUA, firmware 05.50.00, 2026-11-09, 9d5a988) both ran at about
+28 ms a frame in their bursts where the home ran at 16.9, which puts a
+screen of the main program (a shape, a kind and a texture place for every
+pixel) at about 11 ms. So neither dim is a quad now. Both are black, and
+colours blend premultiplied, so a black quad of alpha `a` over what is
+drawn is the same as every colour under it times `1 - a` (`Batch::set_dim`): the
+art is darkened by both dims, the home by the Control Center's, and the
+panel is drawn after, undimmed. The panel's middle is drawn by a third
+program that carries the colour alone (`Batch::fill4`, mediump), and only
+the bands holding its corners and a two-pixel strip down each side are
+shape quads (`Batch::rounded_fill`). A test holds both screens to the
+home's main-program pixels plus a tenth of a screen; the simulator's
+frames match the old ones to within 2 in 255 (all but 7 pixels within 1).
+
+That fixed the Control Center (2026-11-10, bc053bd: 16.84 ms a frame)
+but not "Other apps" while focus moves in it (about 25 ms): its grid of
+some 19 tiles, each with its resting shadow, was 1.03 screens of the
+main program's pixels. So every tile's body is a `Batch::rounded_fill4`
+too (the fill's program for its middle, gradient and sheen included, and
+shape quads only along its edges), and a resting shadow under a level,
+opaque tile leaves out the part the tile hides, all but its rounded
+corners (`Batch::shadow_around`, four quads round the hole). With the
+B9's 30 apps the grid is now about 0.36 screens of the main program and
+0.36 of the fill's, the home 0.16 and 0.12. A test holds every screen,
+still and moving, to 0.4 screens of each (`MAIN_PIXEL_BUDGET`,
+`FILL_PIXEL_BUDGET`). While the dither is on the fills go back to the
+main program, so their gradients are dithered with the rest.
 
 ### Glass: two options (owner picks)
 

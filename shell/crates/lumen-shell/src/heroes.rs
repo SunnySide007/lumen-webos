@@ -1,15 +1,15 @@
-//! Top Shelf heroes (docs/specs/look-and-feel.md, "Phase 4 features"): the
-//! PNG files a hero is drawn from, decoded off the frame on a thread of their
+//! The heroes, the art behind the home (docs/specs/look-and-feel.md, "The
+//! home"): the PNG files a hero is drawn from, decoded off the frame on a thread of their
 //! own and kept as pixels until the home loop says to upload them, and the
 //! owner's own art, listed once.
 //!
 //! A hero comes out ready for its textures. Opaque art (every hero but the
 //! ambient one's front layers) loses its alpha and keeps 3 bytes a pixel.
 //! The ambient hero's light and ridge layers keep theirs, premultiplied
-//! (lane E drew them with straight alpha), cropped to the rows they cover:
-//! the light lies over the sky's top two thirds and the ridge over its bottom
-//! third, so the three layers of a crossfade out of the ambient hero fit the
-//! texture budget with the hero after it.
+//! (tools/art draws them with straight alpha), cropped to the rows they
+//! cover: the light lies over the sky's upper part and the ridge and lake
+//! over its lower part, so the three layers of a crossfade out of the
+//! ambient hero fit the texture budget with the hero after it.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read};
@@ -23,9 +23,15 @@ use lumen_core::art::{Hero, Look};
 use crate::home_loop::HeroNews;
 use crate::icons::open_regular;
 
-/// The sizes a hero's file may be: the shelf's 1920 x 640, or half that,
-/// scaled up when drawn.
-pub const SIZES: [(u32, u32); 2] = [(1920, 640), (960, 320)];
+/// The size of Lumen's own heroes: two thirds of the screen each way,
+/// scaled up when drawn. Their art is soft, light and haze, and at this
+/// size a crossfade out of the layered ambient hero holds the texture
+/// budget (look-and-feel.md, "The home").
+pub const LUMENS: (u32, u32) = (1280, 720);
+/// The sizes a hero's file may be: Lumen's, for the owner's art too. Two
+/// full-screen 1920x1080 pictures in one crossfade would take the textures
+/// over the budget with the atlas.
+pub const SIZES: [(u32, u32); 1] = [LUMENS];
 /// The largest file read. Lumen's heroes are under 1 MB; the owner's art may
 /// be a photograph.
 const MAX_FILE: u64 = 8 << 20;
@@ -68,7 +74,7 @@ pub fn decode(bytes: &[u8], keep_alpha: bool) -> Result<Layer, String> {
     let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
     let (w, h) = (reader.info().width, reader.info().height);
     if !SIZES.contains(&(w, h)) {
-        return Err(format!("{w}x{h}; a hero is 1920x640 or 960x320"));
+        return Err(format!("{w}x{h}; a hero is 1280x720"));
     }
     let size = reader
         .output_buffer_size()
@@ -146,7 +152,7 @@ pub fn load(path: &Path, keep_alpha: bool) -> Result<Layer, String> {
 }
 
 /// The apps the owner made art for: each `<app id>.png` in `dir` whose PNG
-/// header says it is 1920x640 or 960x320. Also gives a line for each file
+/// header says it is 1280x720. Also gives a line for each file
 /// refused, and why. Files whose names start with a dot are passed over;
 /// with no folder there is no art, and nothing to say.
 pub fn list_owner(dir: &Path) -> (HashSet<AppId>, Vec<String>) {
@@ -172,9 +178,7 @@ pub fn list_owner(dir: &Path) -> (HashSet<AppId>, Vec<String>) {
             Ok(size) if SIZES.contains(&size) => {
                 apps.insert(AppId::new(id));
             }
-            Ok((w, h)) => refused.push(format!(
-                "{shown}: {w}x{h}; the owner's art is 1920x640 or 960x320"
-            )),
+            Ok((w, h)) => refused.push(format!("{shown}: {w}x{h}; the owner's art is 1280x720")),
             Err(e) => refused.push(format!("{shown}: {e}")),
         }
     }
@@ -451,12 +455,10 @@ mod tests {
     #[test]
     fn an_opaque_hero_is_kept_as_rgb() {
         let layer = load(&art().join("hero-plex.png"), false).unwrap();
-        assert_eq!((layer.w, layer.h, layer.rgb), (1920, 640, true));
-        assert_eq!(layer.pixels.len(), 1920 * 640 * 3);
+        assert_eq!((layer.w, layer.h, layer.rgb), (1280, 720, true));
+        assert_eq!(layer.pixels.len(), 1280 * 720 * 3);
         assert_eq!(layer.rows, (0.0, 1.0));
-        assert_eq!(layer.texture_bytes(), 1920 * 640 * 4, "counted at 4 bytes");
-        let half = load(&art().join("hero-plex-half.png"), false).unwrap();
-        assert_eq!((half.w, half.h), (960, 320));
+        assert_eq!(layer.texture_bytes(), 1280 * 720 * 4, "counted at 4 bytes");
     }
 
     #[test]
@@ -471,20 +473,20 @@ mod tests {
             panic!("three layers")
         };
         // The sky is opaque, whatever its file's alpha channel says.
-        assert_eq!((bg.rgb, bg.h, bg.rows), (true, 640, (0.0, 1.0)));
-        // The light lies on rows 0 to 423 and the ridge on 456 to 639 (lane
-        // E's files, 2026-10-31), each with a clear row either side.
-        assert_eq!((mid.rgb, mid.h), (false, 425));
-        assert_eq!(mid.rows, (0.0, 425.0 / 640.0));
-        assert_eq!((fg.rgb, fg.h), (false, 185));
-        assert_eq!(fg.rows, (455.0 / 640.0, 1.0));
+        assert_eq!((bg.rgb, bg.h, bg.rows), (true, 720, (0.0, 1.0)));
+        // The light lies on rows 0 to 487 and the ridge on 513 to 719 (the
+        // home's files, 2026-11-08), each with a clear row either side.
+        assert_eq!((mid.rgb, mid.h), (false, 489));
+        assert_eq!(mid.rows, (0.0, 489.0 / 720.0));
+        assert_eq!((fg.rgb, fg.h), (false, 208));
+        assert_eq!(fg.rows, (512.0 / 720.0, 1.0));
         for layer in [mid, fg] {
             for px in layer.pixels.as_chunks::<4>().0 {
                 assert!(px[..3].iter().all(|&c| c <= px[3]), "premultiplied: {px:?}");
             }
         }
         let bytes: usize = layers.iter().map(Layer::texture_bytes).sum();
-        assert_eq!(bytes, 9_600_000);
+        assert_eq!(bytes, 7_255_040);
         assert_eq!(bytes, crate::home_loop::fake::AMBIENT_BYTES);
         // Flat, it is the one picture.
         let flat = Folders {
@@ -506,7 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn every_hero_the_lookup_names_is_there_at_both_sizes() {
+    fn every_hero_the_lookup_names_is_there_at_lumens_size() {
         let folders = Folders {
             art: art(),
             owner: art(),
@@ -517,18 +519,15 @@ mod tests {
             .collect();
         heroes.extend((0..lumen_core::style::TILE_PALETTE.len()).map(Hero::Palette));
         heroes.push(Hero::Ambient);
-        for half in [false, true] {
-            for parallax in [false, true] {
-                let look = Look {
-                    half,
-                    parallax,
-                    ..Look::FULL
-                };
-                for hero in &heroes {
-                    for (path, _) in folders.files(hero, &look) {
-                        let size = png_size(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
-                        assert_eq!(size, SIZES[usize::from(half)], "{path:?}");
-                    }
+        for parallax in [false, true] {
+            let look = Look {
+                parallax,
+                ..Look::FULL
+            };
+            for hero in &heroes {
+                for (path, _) in folders.files(hero, &look) {
+                    let size = png_size(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+                    assert_eq!(size, LUMENS, "{path:?}");
                 }
             }
         }
@@ -538,30 +537,30 @@ mod tests {
     fn straight_alpha_is_premultiplied_and_clear_rows_are_cut() {
         // Rows 0-2 clear (RGB left in, as lane E's light layer has), row 3
         // half-lit red, the rest clear.
-        let bytes = png_bytes(960, 320, png::ColorType::Rgba, &|_, y| match y {
+        let bytes = png_bytes(1280, 720, png::ColorType::Rgba, &|_, y| match y {
             3 => vec![255, 0, 0, 128],
             _ => vec![9, 9, 9, 0],
         });
         let layer = decode(&bytes, true).unwrap();
         assert_eq!((layer.rgb, layer.h), (false, 3), "rows 2 to 4");
-        assert_eq!(layer.rows, (2.0 / 320.0, 5.0 / 320.0));
+        assert_eq!(layer.rows, (2.0 / 720.0, 5.0 / 720.0));
         assert_eq!(&layer.pixels[..4], &[0, 0, 0, 0], "clear RGB goes");
-        assert_eq!(&layer.pixels[960 * 4..960 * 4 + 4], &[128, 0, 0, 128]);
+        assert_eq!(&layer.pixels[1280 * 4..1280 * 4 + 4], &[128, 0, 0, 128]);
         // Without its alpha, the same layer is laid on black.
         let flat = decode(&bytes, false).unwrap();
-        assert_eq!((flat.rgb, flat.h), (true, 320));
-        assert_eq!(&flat.pixels[960 * 3 * 3..][..3], &[128, 0, 0]);
+        assert_eq!((flat.rgb, flat.h), (true, 720));
+        assert_eq!(&flat.pixels[1280 * 3 * 3..][..3], &[128, 0, 0]);
     }
 
     #[test]
     fn a_layer_with_nothing_in_it_or_of_another_size_is_refused() {
-        let clear = png_bytes(960, 320, png::ColorType::Rgba, &|_, _| vec![0, 0, 0, 0]);
+        let clear = png_bytes(1280, 720, png::ColorType::Rgba, &|_, _| vec![0, 0, 0, 0]);
         assert!(decode(&clear, true).unwrap_err().contains("clear"));
-        let odd = png_bytes(1280, 720, png::ColorType::Rgb, &|_, _| vec![1, 2, 3]);
+        let odd = png_bytes(1920, 640, png::ColorType::Rgb, &|_, _| vec![1, 2, 3]);
         let err = decode(&odd, false).unwrap_err();
         assert!(err.contains("1280x720"), "{err}");
         assert!(decode(b"not a png", false).is_err());
-        let grey = png_bytes(960, 320, png::ColorType::Grayscale, &|_, _| vec![77]);
+        let grey = png_bytes(1280, 720, png::ColorType::Grayscale, &|_, _| vec![77]);
         assert_eq!(&decode(&grey, false).unwrap().pixels[..3], &[77, 77, 77]);
     }
 
@@ -569,11 +568,11 @@ mod tests {
     fn the_owners_art_is_listed_by_app_id_and_checked_for_size() {
         let dir = scratch("owner");
         let rgb = |w, h| png_bytes(w, h, png::ColorType::Rgb, &|_, _| vec![1, 2, 3]);
-        std::fs::write(dir.join("netflix.png"), rgb(1920, 640)).unwrap();
-        std::fs::write(dir.join("com.webos.app.hdmi1.png"), rgb(960, 320)).unwrap();
+        std::fs::write(dir.join("netflix.png"), rgb(1280, 720)).unwrap();
+        std::fs::write(dir.join("com.webos.app.hdmi1.png"), rgb(1280, 720)).unwrap();
         std::fs::write(dir.join("hulu.png"), rgb(1920, 1080)).unwrap();
         std::fs::write(dir.join("notes.txt"), b"hi").unwrap();
-        std::fs::write(dir.join("bad name.png"), rgb(960, 320)).unwrap();
+        std::fs::write(dir.join("bad name.png"), rgb(1280, 720)).unwrap();
         std::fs::write(dir.join("junk.png"), b"not a png at all, honestly").unwrap();
         std::fs::write(dir.join(".DS_Store"), b"x").unwrap();
         let (apps, refused) = list_owner(&dir);
@@ -584,7 +583,7 @@ mod tests {
             refused,
             [
                 "\"bad name.png\": not named <app id>.png",
-                "\"hulu.png\": 1920x1080; the owner's art is 1920x640 or 960x320",
+                "\"hulu.png\": 1920x1080; the owner's art is 1280x720",
                 "\"junk.png\": not a PNG",
                 "\"notes.txt\": not named <app id>.png",
             ]
@@ -618,17 +617,13 @@ mod tests {
     #[test]
     fn the_thread_lists_the_owners_art_then_loads_what_is_asked() {
         let owner = scratch("threaded");
-        let rgb = png_bytes(960, 320, png::ColorType::Rgb, &|_, _| vec![1, 2, 3]);
+        let rgb = png_bytes(1280, 720, png::ColorType::Rgb, &|_, _| vec![1, 2, 3]);
         std::fs::write(owner.join("netflix.png"), rgb).unwrap();
         let folders = Folders {
             art: art(),
             owner: owner.clone(),
         };
-        let look = Look {
-            half: true,
-            ..Look::FULL
-        };
-        let mut heroes = Heroes::threaded(folders, look);
+        let mut heroes = Heroes::threaded(folders, Look::FULL);
         let hero = Hero::Owner(AppId::new("netflix"));
         heroes.load(&hero);
         let news = wait_for_hero(&mut heroes);
@@ -645,9 +640,9 @@ mod tests {
         else {
             panic!("{news:?}")
         };
-        assert_eq!((got, *layers, *bytes), (&hero, 1, 960 * 320 * 4));
+        assert_eq!((got, *layers, *bytes), (&hero, 1, 1280 * 720 * 4));
         let layers = heroes.take(&hero).expect("its pixels wait");
-        assert_eq!(layers[0].pixels.len(), 960 * 320 * 3);
+        assert_eq!(layers[0].pixels.len(), 1280 * 720 * 3);
         assert!(heroes.take(&hero).is_none(), "taken once");
         let _ = std::fs::remove_dir_all(&owner);
     }

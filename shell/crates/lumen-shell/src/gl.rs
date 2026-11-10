@@ -32,6 +32,9 @@ pub const TEXTURE_WRAP_S: u32 = 0x2802;
 pub const TEXTURE_WRAP_T: u32 = 0x2803;
 pub const LINEAR: i32 = 0x2601;
 pub const CLAMP_TO_EDGE: i32 = 0x812F;
+pub const NEAREST: i32 = 0x2600;
+pub const REPEAT: i32 = 0x2901;
+pub const LUMINANCE: u32 = 0x1909;
 pub const UNPACK_ALIGNMENT: u32 = 0x0CF5;
 pub const RGB: u32 = 0x1907;
 

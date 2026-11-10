@@ -14,6 +14,7 @@ mod gl;
 mod heroes;
 mod home_loop;
 mod icons;
+mod local_time;
 mod log;
 mod luna;
 mod platform;

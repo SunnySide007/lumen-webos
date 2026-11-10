@@ -9,8 +9,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use lumen_core::apps::{Launcher, MockLauncher};
+use lumen_core::apps::{AppId, Launcher, MockLauncher};
 use lumen_core::art::Look;
+use lumen_core::control::Reduced;
 use lumen_core::script::Script;
 
 use crate::draw;
@@ -18,6 +19,7 @@ use crate::gl::{self, Gl};
 use crate::heroes::{Folders, Heroes};
 use crate::home_loop::{self, Events, Start, SystemClock, WallClock};
 use crate::info;
+use crate::local_time::TimeOfDay;
 use crate::luna::{self, Ls2, LunaLauncher};
 use crate::platform::launch::{Launch, Params, window_type};
 use crate::platform::lifecycle::Method;
@@ -30,6 +32,10 @@ use crate::watch;
 
 /// The file beside the executable that may name the platform.
 const PLATFORM_FILE: &str = "platform";
+/// The file beside the executable that keeps Reduce Motion: the words of
+/// the effects the owner turned off in the Control Center, on one line.
+/// Reinstalling the IPK removes it, as it does `platform`.
+const MOTION_FILE: &str = "reduce-motion";
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Options {
@@ -82,14 +88,26 @@ pub struct Options {
     /// Lines about the launch argument for the log: what was left out, and
     /// SAM's reason for a version 2 launch.
     pub launch_lines: Vec<String>,
+    /// The clock in the corner, fixed (`--clock HH:MM`), for screenshots. A
+    /// fixed clock (`--fixed-dt`) shows none without it, so its frames stay
+    /// the same; otherwise it is the local time.
+    pub clock: Option<TimeOfDay>,
+    /// What the home says was playing at the start (`--playing <app id>`),
+    /// for the simulator, which has no luna watch to say it.
+    pub playing: Option<AppId>,
+    /// Reduce Motion, as kept in `MOTION_FILE` (read by `run`).
+    pub reduced: Reduced,
+    /// Where Reduce Motion is kept; `None`: its changes last this run only.
+    pub motion_file: Option<PathBuf>,
 }
 
 impl Options {
     /// Reads `--exit-after <seconds>`, `--windowed`, `--gles`,
     /// `--screenshot <path>`, `--screenshot-at <seconds>`, `--keys <list>`,
     /// `--fixed-dt <seconds>`, `--screenshot-when-settled <path>`,
-    /// `--platform <sdl|wayland>`, `--gles3`, `--probe`, `--hidden` and
-    /// `--window <type>`, and the launch argument webOS passes as JSON
+    /// `--platform <sdl|wayland>`, `--gles3`, `--probe`, `--hidden`,
+    /// `--window <type>`, `--clock <HH:MM>` and `--playing <app id>`, and
+    /// the launch argument webOS passes as JSON
     /// (`read_launch`). Anything else is ignored. A bad flag is an error,
     /// since only automation and the owner's trials use them; a bad launch
     /// parameter is not, since it must never keep the TV's Home from
@@ -154,6 +172,16 @@ impl Options {
                     let path = it.next().ok_or("--screenshot-when-settled needs a path")?;
                     opts.screenshot_when_settled = Some(PathBuf::from(path));
                 }
+                "--clock" => {
+                    let time = it.next().and_then(|t| TimeOfDay::parse(t));
+                    opts.clock = Some(time.ok_or("--clock needs a time of day, such as 9:41")?);
+                }
+                "--playing" => {
+                    let id = it
+                        .next()
+                        .filter(|id| !id.is_empty() && !id.starts_with('-'));
+                    opts.playing = Some(AppId::new(id.ok_or("--playing needs an app id")?));
+                }
                 json if json.starts_with('{') => opts.read_launch(json),
                 _ => {}
             }
@@ -176,7 +204,7 @@ impl Options {
                 (self.look, self.look_unknown) = Look::parse(text);
             }
             Some(other) => {
-                self.look = Look::FULL;
+                self.look = Look::DEFAULT;
                 self.look_unknown = vec![other.to_string()];
             }
             None => {}
@@ -231,6 +259,18 @@ fn choose_platform(opts: &Options) -> (Platform, String) {
     (Platform::Sdl, "the default".to_owned())
 }
 
+/// What a short file of Reduce Motion's words turns off; a missing or
+/// unreadable file turns off nothing.
+fn read_motion_file(path: &std::path::Path) -> Reduced {
+    use std::io::Read;
+    let mut text = String::new();
+    if let Ok(file) = std::fs::File::open(path) {
+        // Not text: nothing.
+        let _ = file.take(256).read_to_string(&mut text);
+    }
+    Reduced::from_words(&text)
+}
+
 /// The platform a short file names, or `None`.
 fn read_platform_file(path: &std::path::Path) -> Option<Platform> {
     use std::io::Read;
@@ -251,6 +291,17 @@ pub fn run(mut opts: Options, started: Instant) -> Result<(), String> {
     for word in &opts.look_unknown {
         info!("look: {word:?} is not a feature; left out");
     }
+    // A fixed clock's runs (tests, screenshots) neither read nor keep it, so
+    // one run's switch never changes the next run's frames.
+    if opts.motion_file.is_none() && opts.fixed_dt.is_none() {
+        opts.motion_file = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join(MOTION_FILE)));
+    }
+    if let Some(file) = &opts.motion_file {
+        opts.reduced = read_motion_file(file);
+    }
+    info!("{}", opts.reduced);
     for line in &opts.launch_lines {
         info!("{line}");
     }
@@ -623,9 +674,11 @@ mod tests {
 
     #[test]
     fn the_launch_parameters_look_turns_features_off() {
-        // LG's own parameters, as a Home press gives them: the full look.
+        // LG's own parameters, as a Home press gives them: the default
+        // look, everything but the dither.
         let home = parse(&[r#"{"@system_native_app": true, "launchType": "homeKey", "nid": "x"}"#]);
-        assert_eq!((home.look, home.look_unknown.len()), (Look::FULL, 0));
+        assert_eq!((home.look, home.look_unknown.len()), (Look::DEFAULT, 0));
+        assert_eq!(parse(&[r#"{"look":"full"}"#]).look, Look::FULL);
         assert_eq!(parse(&[r#"{"look":"plain"}"#]).look, Look::PLAIN);
         let some = parse(&["--windowed", r#"{"look":"-dither,-tilt"}"#]);
         assert_eq!(
@@ -651,9 +704,9 @@ mod tests {
         let number = parse(&[r#"{"look":3}"#]);
         assert_eq!(
             (number.look, number.look_unknown),
-            (Look::FULL, vec!["3".to_owned()])
+            (Look::DEFAULT, vec!["3".to_owned()])
         );
-        assert_eq!(parse(&[r#"{"look":"plain""#]).look, Look::FULL);
+        assert_eq!(parse(&[r#"{"look":"plain""#]).look, Look::DEFAULT);
     }
 
     #[test]
@@ -667,8 +720,14 @@ mod tests {
             "/tmp/settled.png",
             "--screenshot-at",
             "0.62",
+            "--clock",
+            "9:41",
+            "--playing",
+            "com.webos.app.hdmi2",
         ]);
         assert_eq!(opts.screenshot_at, Some(Duration::from_millis(620)));
+        assert_eq!(opts.clock, TimeOfDay::parse("09:41"));
+        assert_eq!(opts.playing, Some(AppId::new("com.webos.app.hdmi2")));
         assert_eq!(opts.keys, Some(Script::parse("R,R,D,OK").unwrap()));
         assert_eq!(opts.fixed_dt, Some(Duration::from_millis(20)));
         assert_eq!(
@@ -781,6 +840,10 @@ mod tests {
             &["--screenshot-when-settled"],
             &["--screenshot-at", "-1"],
             &["--screenshot-at"],
+            &["--clock", "25:00"],
+            &["--clock"],
+            &["--playing"],
+            &["--playing", "--clock"],
         ] {
             assert!(Options::from_args(&args(bad)).is_err(), "{bad:?}");
         }

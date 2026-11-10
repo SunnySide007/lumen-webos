@@ -19,9 +19,14 @@
   mock apps it names to the front, onto row 0, and -Colors gives mock apps a
   webOS icon colour, as "id=rrggbb,id=rrggbb".
 
+  -Clock fixes the clock in the corner (HH:MM); with -FixedDt there is none
+  without it. -Playing names the app or input the home says was playing,
+  as the TV's luna watch would; Back on the row goes back to it.
+
   -Look passes the look as the TV's launch parameters would, as
   {"look":"<look>"}: "plain" is the home screen without Phase 4's features,
-  "-dither,-tilt" every feature but those. All are on without it.
+  "-tilt,-light" the default but those, "full" every feature with the
+  dither. Without it, all but the dither are on, as on the TV.
 
 .EXAMPLE
   pwsh tools/sim.ps1
@@ -30,6 +35,7 @@
   pwsh tools/sim.ps1 -Keys "R,R,D" -FixedDt 0.016667 -ScreenshotWhenSettled row1.png
   pwsh tools/sim.ps1 -First com.webos.app.hdmi1 -Colors "spotify-beehive=1db954"
   pwsh tools/sim.ps1 -Look plain
+  pwsh tools/sim.ps1 -Clock 9:41 -Playing com.webos.app.hdmi2
 #>
 param(
     [double]$ExitAfter = 0,
@@ -41,6 +47,8 @@ param(
     [string]$First = '',
     [string]$Colors = '',
     [string]$Look = '',
+    [string]$Clock = '',
+    [string]$Playing = '',
     [switch]$Release
 )
 
@@ -91,6 +99,8 @@ if ($FixedDt -gt 0) { $cargoArgs += @('--fixed-dt', "$FixedDt") }
 if ($ScreenshotWhenSettled) {
     $cargoArgs += @('--screenshot-when-settled', [System.IO.Path]::GetFullPath($ScreenshotWhenSettled))
 }
+if ($Clock) { $cargoArgs += @('--clock', $Clock) }
+if ($Playing) { $cargoArgs += @('--playing', $Playing) }
 if ($Look) {
     if ($Look -notmatch '^[A-Za-z0-9 ,+-]+$') { throw "-Look takes feature names, such as plain or -dither,-tilt" }
     # Quotes reach the shell as typed, as webOS passes its JSON argument.

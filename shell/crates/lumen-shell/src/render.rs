@@ -13,10 +13,19 @@
 //! Colours blend premultiplied, which keeps the edges of scaled icons and
 //! glyphs free of dark fringes.
 //!
-//! The batch is drawn in runs, one for each change of texture: the heroes'
+//! The batch is drawn in runs, one for each change of texture: the art's
 //! quads come first, under everything, so a frame has one run per hero layer
 //! on screen and one for the atlas. The shader keeps its one sampler, and the
 //! vertices go to GL in one upload.
+//!
+//! The art behind everything covers every pixel of the screen, so it is
+//! drawn by a program of its own (`Batch::art`): a texture times a colour,
+//! with two varyings and no branch, where the main program would carry its
+//! shape, kind and dither for every pixel. The main program draws the rest,
+//! but for the large plain middles of panels and tiles (`Batch::fill4`),
+//! which a third program draws with their blended colour alone. A black dim
+//! over what is drawn is no quad at all: the colours under it are darkened
+//! as they are pushed (`Batch::set_dim`).
 
 use std::ffi::c_void;
 
@@ -158,8 +167,22 @@ pub struct Run {
     pub first: usize,
     pub count: usize,
     /// Whether any of its quads samples the texture; flat and shape quads
-    /// draw the same with any texture bound, so they join any run.
+    /// draw the same with any texture bound, so they join any run but the
+    /// art's.
     sampled: bool,
+    /// The program that draws it.
+    pub shader: Shader,
+}
+
+/// Which program draws a quad.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shader {
+    /// The main program: every kind, shape and dither.
+    Main,
+    /// The art's: a texture times a colour (`Batch::art`).
+    Art,
+    /// The fill's: a colour and nothing else (`Batch::fill4`).
+    Fill,
 }
 
 /// A quad's corners, and what they carry besides position.
@@ -175,6 +198,7 @@ struct Quad {
     kind: f32,
     /// What an image quad samples; `None` for flat and shape quads.
     texture: Option<Texture>,
+    shader: Shader,
 }
 
 #[derive(Default)]
@@ -183,6 +207,8 @@ pub struct Batch {
     runs: Vec<Run>,
     /// The lean the quads pushed now take, if any.
     tilt: Option<Tilt>,
+    /// How dark the quads pushed now are made (`set_dim`).
+    dim: f32,
 }
 
 impl Batch {
@@ -190,6 +216,18 @@ impl Batch {
         self.verts.clear();
         self.runs.clear();
         self.tilt = None;
+        self.dim = 0.0;
+    }
+
+    /// Darkens the quads pushed from now on, until set to 0, as a black quad
+    /// of alpha `dim` drawn over them would: their colours times `1 - dim`,
+    /// their alphas kept. Colours blend premultiplied, so a dim over a stack
+    /// of quads is the same as each of them dimmed, and it costs no pixel:
+    /// a full-screen dim through the main program cost the B9 about as much
+    /// as everything else on the home (2026-11-09, 9d5a988: 28 ms a frame on
+    /// "Other apps" and the Control Center against 16.9 on the home).
+    pub fn set_dim(&mut self, dim: f32) {
+        self.dim = dim.clamp(0.0, 1.0);
     }
 
     /// Leans the quads pushed from now on, until set to `None`.
@@ -205,10 +243,17 @@ impl Batch {
 
     /// Counts a quad's six vertices into a run: the last one if it can take
     /// them, else a new one. `texture` is what the quad samples, `None` for
-    /// a flat or shape quad.
-    fn add_to_run(&mut self, texture: Option<Texture>) {
+    /// a flat or shape quad; `shader`, the program that draws it.
+    fn add_to_run(&mut self, texture: Option<Texture>, shader: Shader) {
         let first = self.vertex_count() - VERTICES_PER_QUAD;
         match (self.runs.last_mut(), texture) {
+            (Some(run), _) if run.shader != shader => self.runs.push(Run {
+                texture: texture.unwrap_or(Texture::Atlas),
+                first,
+                count: VERTICES_PER_QUAD,
+                sampled: texture.is_some(),
+                shader,
+            }),
             (Some(run), None) => run.count += VERTICES_PER_QUAD,
             (Some(run), Some(t)) if run.texture == t || !run.sampled => {
                 run.texture = t;
@@ -220,6 +265,7 @@ impl Batch {
                 first,
                 count: VERTICES_PER_QUAD,
                 sampled: texture.is_some(),
+                shader,
             }),
         }
     }
@@ -254,6 +300,13 @@ impl Batch {
             .count()
     }
 
+    /// Quad `n`'s colour at its top left corner, as pushed.
+    #[cfg(test)]
+    pub fn quad_color(&self, n: usize) -> Rgba {
+        let v = &self.verts[n * VERTICES_PER_QUAD * FLOATS_PER_VERTEX..];
+        Rgba(v[4], v[5], v[6], v[7])
+    }
+
     /// Quad `n`'s box: left, top, right, bottom.
     #[cfg(test)]
     pub fn quad_bounds(&self, n: usize) -> (f32, f32, f32, f32) {
@@ -266,8 +319,39 @@ impl Batch {
                 .to_vec(),
             runs: Vec::new(),
             tilt: None,
+            dim: 0.0,
         };
         quad.bounds()
+    }
+
+    /// The pixels each program shades, in screens (1920 x 1080), from each
+    /// quad's box: the art's, the fill's, then the main program's flat,
+    /// shape and image quads.
+    #[cfg(test)]
+    pub fn shaded(&self) -> [f32; 5] {
+        let mut screens = [0.0; 5];
+        for (n, quad) in self
+            .verts
+            .chunks(FLOATS_PER_VERTEX * VERTICES_PER_QUAD)
+            .enumerate()
+        {
+            let (x0, y0, x1, y1) = self.quad_bounds(n);
+            let area = (x1.min(SCREEN_W) - x0.max(0.0)).max(0.0)
+                * (y1.min(SCREEN_H) - y0.max(0.0)).max(0.0);
+            let first = n * VERTICES_PER_QUAD;
+            let shader = self
+                .runs
+                .iter()
+                .find(|r| (r.first..r.first + r.count).contains(&first))
+                .map(|r| r.shader);
+            let class = match shader {
+                Some(Shader::Art) => 0,
+                Some(Shader::Fill) => 1,
+                _ => 2 + quad[14] as usize,
+            };
+            screens[class] += area / (SCREEN_W * SCREEN_H);
+        }
+        screens
     }
 
     /// Each image quad's atlas region: u0, v0, u1, v1.
@@ -292,11 +376,13 @@ impl Batch {
     fn push(&mut self, q: &Quad) {
         let (x1, y1) = (q.x + q.w, q.y + q.h);
         let s = q.shape;
+        let k = 1.0 - self.dim;
+        let c = q.colors.map(|c| Rgba(c.0 * k, c.1 * k, c.2 * k, c.3));
         let corners = [
-            (q.x, q.y, q.uv.u0, q.uv.v0, q.colors[0]),
-            (x1, q.y, q.uv.u1, q.uv.v0, q.colors[1]),
-            (q.x, y1, q.uv.u0, q.uv.v1, q.colors[2]),
-            (x1, y1, q.uv.u1, q.uv.v1, q.colors[3]),
+            (q.x, q.y, q.uv.u0, q.uv.v0, c[0]),
+            (x1, q.y, q.uv.u1, q.uv.v0, c[1]),
+            (q.x, y1, q.uv.u0, q.uv.v1, c[2]),
+            (x1, y1, q.uv.u1, q.uv.v1, c[3]),
         ];
         for i in [0, 1, 2, 1, 3, 2] {
             let (x, y, u, v, c) = corners[i];
@@ -320,7 +406,7 @@ impl Batch {
                 w,
             ]);
         }
-        self.add_to_run(q.texture);
+        self.add_to_run(q.texture, q.shader);
     }
 
     /// A rectangle shaded from `top` to `bottom`.
@@ -335,6 +421,118 @@ impl Batch {
             shape: NO_SHAPE,
             kind: FLAT,
             texture: None,
+            shader: Shader::Main,
+        });
+    }
+
+    /// A rectangle drawn by the fill's program, each corner its own colour
+    /// (top left, top right, bottom left, bottom right): for a large area,
+    /// whose pixels carry nothing but the colour (no shape, kind or dither).
+    pub fn fill4(&mut self, x: f32, y: f32, w: f32, h: f32, colors: [Rgba; 4]) {
+        if w <= 0.0 || h <= 0.0 || colors.iter().all(|c| c.3 <= 0.0) {
+            return;
+        }
+        self.push(&Quad {
+            x,
+            y,
+            w,
+            h,
+            uv: NO_UV,
+            colors,
+            shape: NO_SHAPE,
+            kind: FLAT,
+            texture: None,
+            shader: Shader::Fill,
+        });
+    }
+
+    /// A large rounded rectangle of one colour, as `rounded_rect` draws it
+    /// (`rounded_fill4`).
+    pub fn rounded_fill(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, c: Rgba) {
+        self.rounded_fill4(x, y, w, h, r, [c; 4]);
+    }
+
+    /// A large rounded rectangle, each corner its own colour, as
+    /// `rounded_rect4` draws it: the middle a `fill4`, and only the bands
+    /// that hold its corners and the two pixels down each side shape quads,
+    /// so the shape's work is done only near an edge. Five quads, each
+    /// corner of each its colour at that place.
+    pub fn rounded_fill4(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, colors: [Rgba; 4]) {
+        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+        let band = r.max(1.0);
+        if w <= 2.0 || h <= 2.0 * band {
+            self.rounded_rect4(x, y, w, h, r, colors);
+            return;
+        }
+        // The colour at a place, blended across the rectangle and carried
+        // past its edges as `rounded_rect4` blends it.
+        let at = |px: f32, py: f32| {
+            let (u, v) = ((px - x) / w, (py - y) / h);
+            let top = colors[0].lerp(colors[1], u);
+            let bottom = colors[2].lerp(colors[3], u);
+            top.lerp(bottom, v)
+        };
+        let corners = |p: Rect| {
+            [
+                at(p.x, p.y),
+                at(p.right(), p.y),
+                at(p.x, p.bottom()),
+                at(p.right(), p.bottom()),
+            ]
+        };
+        let rect = Rect::new(x, y, w, h);
+        let middle = Rect::new(x + 1.0, y + band, w - 2.0, h - 2.0 * band);
+        self.fill4(middle.x, middle.y, middle.w, middle.h, corners(middle));
+        // Out to a pixel past the rectangle, for its soft edge.
+        let parts = [
+            Rect::new(x - 1.0, y - 1.0, w + 2.0, band + 1.0),
+            Rect::new(x - 1.0, middle.y, 2.0, middle.h),
+            Rect::new(x + w - 1.0, middle.y, 2.0, middle.h),
+            Rect::new(x - 1.0, y + h - band, w + 2.0, band + 1.0),
+        ];
+        for part in parts {
+            self.rounded_part(rect, r, part, corners(part));
+        }
+    }
+
+    /// A rounded rectangle like `rounded_rect`, each corner its own colour:
+    /// top left, top right, bottom left, bottom right, blended across it.
+    /// The focused tile's sheen is its top left corner, at no cost.
+    // The rectangle, its radius and the four colours.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rounded_rect4(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, colors: [Rgba; 4]) {
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+        let margin = 1.0;
+        // The colours carried out to the grown edges, so the blend stays
+        // where it was.
+        let at = |u: f32, v: f32| {
+            let top = colors[0].lerp(colors[1], u);
+            let bottom = colors[2].lerp(colors[3], u);
+            top.lerp(bottom, v)
+        };
+        let (u0, u1) = (-margin / w, 1.0 + margin / w);
+        let (v0, v1) = (-margin / h, 1.0 + margin / h);
+        self.push(&Quad {
+            x: x - margin,
+            y: y - margin,
+            w: w + 2.0 * margin,
+            h: h + 2.0 * margin,
+            uv: NO_UV,
+            colors: [at(u0, v0), at(u1, v0), at(u0, v1), at(u1, v1)],
+            shape: Shape {
+                cx: x + w / 2.0,
+                cy: y + h / 2.0,
+                half_w: w / 2.0,
+                half_h: h / 2.0,
+                radius: r,
+                soft: 0.5,
+            },
+            kind: SHAPE,
+            texture: None,
+            shader: Shader::Main,
         });
     }
 
@@ -373,6 +571,56 @@ impl Batch {
         self.shape(x, y, w, h, r, blur, (c, c), blur + 0.5);
     }
 
+    /// A `shadow` with `hole` left out: the part something drawn opaque
+    /// over it will hide, so those pixels cost nothing. Up to four shape
+    /// quads round the hole, each cutting the whole shadow's shape.
+    // `shadow`'s arguments, and the hole.
+    #[allow(clippy::too_many_arguments)]
+    pub fn shadow_around(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        r: f32,
+        blur: f32,
+        c: Rgba,
+        hole: Rect,
+    ) {
+        if w <= 0.0 || h <= 0.0 || c.3 <= 0.0 {
+            return;
+        }
+        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+        let blur = blur.max(0.5);
+        let grown = Rect::new(x, y, w, h).outset(blur + 0.5);
+        let (x0, y0) = (hole.x.max(grown.x), hole.y.max(grown.y));
+        let (x1, y1) = (
+            hole.right().min(grown.right()),
+            hole.bottom().min(grown.bottom()),
+        );
+        if x1 <= x0 || y1 <= y0 {
+            self.shadow(x, y, w, h, r, blur, c);
+            return;
+        }
+        let shape = Shape {
+            cx: x + w / 2.0,
+            cy: y + h / 2.0,
+            half_w: w / 2.0,
+            half_h: h / 2.0,
+            radius: r,
+            soft: blur,
+        };
+        let parts = [
+            Rect::new(grown.x, grown.y, grown.w, y0 - grown.y),
+            Rect::new(grown.x, y0, x0 - grown.x, y1 - y0),
+            Rect::new(x1, y0, grown.right() - x1, y1 - y0),
+            Rect::new(grown.x, y1, grown.w, grown.bottom() - y1),
+        ];
+        for part in parts {
+            self.shape_part(shape, part, [c; 4]);
+        }
+    }
+
     /// A shape quad grown by `margin` on every side, its colours carried out
     /// to the grown edges so the gradient stays where it was.
     // Private; the public callers name every argument.
@@ -409,6 +657,7 @@ impl Batch {
             },
             kind: SHAPE,
             texture: None,
+            shader: Shader::Main,
         });
     }
 
@@ -421,6 +670,22 @@ impl Batch {
             return;
         }
         let r = r.min(rect.w / 2.0).min(rect.h / 2.0).max(0.0);
+        let shape = Shape {
+            cx: rect.x + rect.w / 2.0,
+            cy: rect.y + rect.h / 2.0,
+            half_w: rect.w / 2.0,
+            half_h: rect.h / 2.0,
+            radius: r,
+            soft: 0.5,
+        };
+        self.shape_part(shape, part, colors);
+    }
+
+    /// The `part` of `shape`, each corner of the part its own colour.
+    fn shape_part(&mut self, shape: Shape, part: Rect, colors: [Rgba; 4]) {
+        if part.w <= 0.0 || part.h <= 0.0 {
+            return;
+        }
         self.push(&Quad {
             x: part.x,
             y: part.y,
@@ -428,16 +693,10 @@ impl Batch {
             h: part.h,
             uv: NO_UV,
             colors,
-            shape: Shape {
-                cx: rect.x + rect.w / 2.0,
-                cy: rect.y + rect.h / 2.0,
-                half_w: rect.w / 2.0,
-                half_h: rect.h / 2.0,
-                radius: r,
-                soft: 0.5,
-            },
+            shape,
             kind: SHAPE,
             texture: None,
+            shader: Shader::Main,
         });
     }
 
@@ -460,6 +719,30 @@ impl Batch {
         uv: Uv,
         tint: Rgba,
     ) {
+        self.image_quad(texture, x, y, w, h, uv, tint, false);
+    }
+
+    /// Art behind everything: like `image_from`, drawn by the art's
+    /// program, in a run of its own.
+    // `image_from`'s arguments.
+    #[allow(clippy::too_many_arguments)]
+    pub fn art(&mut self, texture: Texture, x: f32, y: f32, w: f32, h: f32, uv: Uv, tint: Rgba) {
+        self.image_quad(texture, x, y, w, h, uv, tint, true);
+    }
+
+    // `image_from`'s arguments, and whether it is art.
+    #[allow(clippy::too_many_arguments)]
+    fn image_quad(
+        &mut self,
+        texture: Texture,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        uv: Uv,
+        tint: Rgba,
+        art: bool,
+    ) {
         if w <= 0.0 || h <= 0.0 || tint.3 <= 0.0 {
             return;
         }
@@ -473,6 +756,7 @@ impl Batch {
             shape: NO_SHAPE,
             kind: IMAGE,
             texture: Some(texture),
+            shader: if art { Shader::Art } else { Shader::Main },
         });
     }
 }
@@ -498,7 +782,7 @@ attribute float a_kind;
 attribute float a_w;
 uniform vec2 u_screen;
 #ifdef DITHER
-varying vec3 v_pos;
+varying vec3 v_bayer;
 #endif
 varying vec2 v_uv;
 varying vec4 v_color;
@@ -509,7 +793,7 @@ void main() {
     vec2 ndc = vec2(a_pos.x / u_screen.x * 2.0 - 1.0, 1.0 - a_pos.y / u_screen.y * 2.0);
     gl_Position = vec4(ndc * a_w, 0.0, a_w);
 #ifdef DITHER
-    v_pos = vec3(a_pos * a_w, a_w);
+    v_bayer = vec3(a_pos * (0.25 * a_w), a_w);
 #endif
     v_uv = a_uv;
     v_color = a_color;
@@ -523,19 +807,24 @@ void main() {
 // distances across a 300 px pill or texels in a 2048 px atlas.
 //
 // Flat and shape quads are dithered when `u_dither` is above 0: a 4x4 Bayer
-// threshold from the pixel's place, centred, times `u_dither` (peak to
-// peak) and the pixel's alpha, so the 8-bit framebuffer's rounding breaks a
-// gradient's bands into a pattern finer than the eye resolves. Images, the
-// heroes and the atlas, are left as they are.
+// threshold from the pixel's place, centred, times `u_dither` and the
+// pixel's alpha, so the 8-bit framebuffer's rounding breaks a gradient's
+// bands into a pattern finer than the eye resolves. Images, the heroes and
+// the atlas, are left as they are.
 //
-// The place is `v_pos`, the design-space position, which on the TV is the
-// framebuffer's pixel: a varying takes the shader's highp, where GLSL ES
-// declares `gl_FragCoord` mediump. It goes as (x w, y w, w) and comes back
-// divided, which undoes the perspective interpolation a leaning quad gets,
-// so the pattern stays on the screen's pixels there too. In 16-bit floats a position past 1024
-// holds only even pixel centres, which would leave 8 levels in x and bias
-// the pattern in y; `tests` work the arithmetic both ways. Mod 4 is
-// p - 4 floor(p / 4), exact for whole numbers either way.
+// The threshold is one fetch from `BAYER`, a 4x4 texture on unit 1 that
+// repeats, nearest texel: no arithmetic but the fetch and one multiply-add.
+// Worked out in the shader (two Bayer steps, two floors and a divide for
+// every pixel), the dither put the B9's full look past its vsync
+// (2026-11-08: 29.6 ms a frame against 17.1 without it). Its place is
+// `v_bayer`, the design-space position in texels (a quarter of a pixel),
+// which on the TV is the framebuffer's pixel: a highp varying, where GLSL
+// ES declares `gl_FragCoord` mediump, whose 16-bit floats past 1024 hold
+// only even pixel centres. It goes as (x w, y w, w) and `texture2DProj`
+// divides it back, undoing the perspective interpolation a leaning quad
+// gets, so the pattern stays on the screen's pixels there too. A pixel's
+// centre lands half a texel from the texel's edges, so nearest filtering
+// picks the same texel on any GPU.
 //
 // The dither is built in only where `DITHER` is defined (`Program::build`):
 // a separate program, made when the dither is turned on. Without it the
@@ -554,20 +843,15 @@ precision mediump float;
 #endif
 uniform sampler2D u_atlas;
 #ifdef DITHER
+uniform sampler2D u_bayer;
 uniform float u_dither;
-varying vec3 v_pos;
+varying vec3 v_bayer;
 #endif
 varying vec2 v_uv;
 varying vec4 v_color;
 varying vec2 v_local;
 varying vec4 v_shape;
 varying float v_kind;
-#ifdef DITHER
-float bayer2(vec2 a) {
-    a = floor(a);
-    return fract(dot(a, vec2(0.5, a.y * 0.75)));
-}
-#endif
 void main() {
     vec4 c = vec4(v_color.rgb * v_color.a, v_color.a);
     if (v_kind > 1.5) {
@@ -583,13 +867,76 @@ void main() {
         gl_FragColor = c;
     }
 #ifdef DITHER
-    vec2 p = floor(v_pos.xy / v_pos.z);
-    p -= 4.0 * floor(p * 0.25);
-    float t = bayer2(p * 0.5) * 0.25 + bayer2(p);
-    gl_FragColor.rgb += (t - 15.0 / 32.0) * u_dither * gl_FragColor.a;
+    gl_FragColor.rgb += (texture2DProj(u_bayer, v_bayer).r - 0.5) * u_dither * gl_FragColor.a;
 #endif
 }
 ";
+
+// The art's program: a texture times a colour, nothing else. Highp for the
+// texture place where the GPU has it, as above: 16-bit floats step 0.6 of a
+// texel across a 1280 px texture.
+const ART_VERTEX_SHADER: &str = "
+attribute vec2 a_pos;
+attribute vec2 a_uv;
+attribute vec4 a_color;
+attribute float a_w;
+uniform vec2 u_screen;
+varying vec2 v_uv;
+varying vec4 v_color;
+void main() {
+    vec2 ndc = vec2(a_pos.x / u_screen.x * 2.0 - 1.0, 1.0 - a_pos.y / u_screen.y * 2.0);
+    gl_Position = vec4(ndc * a_w, 0.0, a_w);
+    v_uv = a_uv;
+    v_color = vec4(a_color.rgb * a_color.a, a_color.a);
+}
+";
+
+const ART_FRAGMENT_SHADER: &str = "
+#ifdef GL_ES
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+#endif
+uniform sampler2D u_atlas;
+varying vec2 v_uv;
+varying vec4 v_color;
+void main() {
+    gl_FragColor = texture2D(u_atlas, v_uv) * v_color;
+}
+";
+
+/// The fill's program: a colour and nothing else, in mediump, where the
+/// main program carries a shape, a kind and a texture place for every pixel.
+const FILL_VERTEX_SHADER: &str = "
+attribute vec2 a_pos;
+attribute vec4 a_color;
+attribute float a_w;
+uniform vec2 u_screen;
+varying mediump vec4 v_color;
+void main() {
+    vec2 ndc = vec2(a_pos.x / u_screen.x * 2.0 - 1.0, 1.0 - a_pos.y / u_screen.y * 2.0);
+    gl_Position = vec4(ndc * a_w, 0.0, a_w);
+    v_color = vec4(a_color.rgb * a_color.a, a_color.a);
+}
+";
+
+const FILL_FRAGMENT_SHADER: &str = "
+#ifdef GL_ES
+precision mediump float;
+#endif
+varying vec4 v_color;
+void main() {
+    gl_FragColor = v_color;
+}
+";
+
+/// The attributes the fill's program reads.
+const FILL_ATTRIBUTES: [&std::ffi::CStr; 3] = [c"a_pos", c"a_color", c"a_w"];
+
+/// The attributes the art's program reads.
+const ART_ATTRIBUTES: [&std::ffi::CStr; 4] = [c"a_pos", c"a_uv", c"a_color", c"a_w"];
 
 /// Each attribute: its name and how many floats it takes, in vertex order.
 const ATTRIBUTES: [(&std::ffi::CStr, i32); 7] = [
@@ -602,44 +949,151 @@ const ATTRIBUTES: [(&std::ffi::CStr, i32); 7] = [
     (c"a_w", 1),
 ];
 
+/// One attribute of a program: where it is, and its floats' offset and
+/// count in a vertex.
+#[derive(Debug, Clone, Copy)]
+struct Attribute {
+    at: u32,
+    offset: usize,
+    floats: i32,
+}
+
+/// The program that draws a run of `shader`'s: the main program draws
+/// the fills too while the dither is on, so their gradients are dithered
+/// with the rest.
+fn draws_with(shader: Shader, dithering: bool) -> Shader {
+    match shader {
+        Shader::Fill if dithering => Shader::Main,
+        other => other,
+    }
+}
+
+/// The dither's 4x4 Bayer thresholds, row by row: each of the 16 levels
+/// once, as `level * 17`, so a fetch gives `level / 15`. The same pattern
+/// the shader worked out before (`tests`).
+const BAYER: [u8; 16] = {
+    let levels = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+    let mut bytes = [0; 16];
+    let mut i = 0;
+    while i < 16 {
+        bytes[i] = levels[i] * 17;
+        i += 1;
+    }
+    bytes
+};
+/// The texture unit `BAYER` is on; the atlas and the art use unit 0.
+const BAYER_UNIT: i32 = 1;
+
+/// `u_dither` for a dither of `peak` to peak: a fetch minus a half spans
+/// 15/16 of the 16 levels' range, so the levels step as they did when
+/// the shader worked out `level / 16 - 15 / 32`.
+fn dither_uniform(peak: f32) -> f32 {
+    peak * 15.0 / 16.0
+}
+
 /// A linked program and where its inputs are.
 struct Program {
     id: u32,
-    attributes: [u32; ATTRIBUTES.len()],
+    attributes: Vec<Attribute>,
     u_screen: i32,
     /// The dither's strength; only the dithered program has it.
     u_dither: Option<i32>,
 }
 
+/// Where each of `names` is in a linked program, with its place in a vertex.
+fn attributes_of(gl: &Gl, id: u32, names: &[&std::ffi::CStr]) -> Result<Vec<Attribute>, String> {
+    let mut offset = 0;
+    let mut found = Vec::with_capacity(names.len());
+    for (name, floats) in ATTRIBUTES {
+        if names.contains(&name) {
+            // SAFETY: the program linked and the name is a NUL-terminated literal.
+            let at = unsafe { (gl.get_attrib_location)(id, name.as_ptr()) };
+            let at = u32::try_from(at)
+                .map_err(|_| format!("shader is missing {}", name.to_string_lossy()))?;
+            found.push(Attribute { at, offset, floats });
+        }
+        offset += floats as usize;
+    }
+    Ok(found)
+}
+
 impl Program {
+    /// The art's program (`ART_VERTEX_SHADER`).
+    fn build_art(gl: &Gl) -> Result<Self, String> {
+        let vs = gl.compile_shader(gl::VERTEX_SHADER, ART_VERTEX_SHADER)?;
+        let fs = gl.compile_shader(gl::FRAGMENT_SHADER, ART_FRAGMENT_SHADER)?;
+        let id = gl.link_program(vs, fs)?;
+        let attributes = attributes_of(gl, id, &ART_ATTRIBUTES)?;
+        // SAFETY: the program linked and the names are NUL-terminated literals.
+        let (u_screen, u_atlas) = unsafe {
+            (
+                (gl.get_uniform_location)(id, c"u_screen".as_ptr()),
+                (gl.get_uniform_location)(id, c"u_atlas".as_ptr()),
+            )
+        };
+        if u_screen < 0 || u_atlas < 0 {
+            return Err("the art's shader is missing u_screen or u_atlas".to_owned());
+        }
+        // SAFETY: the program linked above; its sampler reads texture unit 0.
+        unsafe {
+            (gl.use_program)(id);
+            (gl.uniform1i)(u_atlas, 0);
+        }
+        Ok(Self {
+            id,
+            attributes,
+            u_screen,
+            u_dither: None,
+        })
+    }
+
+    /// The fill's program (`FILL_VERTEX_SHADER`).
+    fn build_fill(gl: &Gl) -> Result<Self, String> {
+        let vs = gl.compile_shader(gl::VERTEX_SHADER, FILL_VERTEX_SHADER)?;
+        let fs = gl.compile_shader(gl::FRAGMENT_SHADER, FILL_FRAGMENT_SHADER)?;
+        let id = gl.link_program(vs, fs)?;
+        let attributes = attributes_of(gl, id, &FILL_ATTRIBUTES)?;
+        // SAFETY: the program linked and the name is a NUL-terminated literal.
+        let u_screen = unsafe { (gl.get_uniform_location)(id, c"u_screen".as_ptr()) };
+        if u_screen < 0 {
+            return Err("the fill's shader is missing u_screen".to_owned());
+        }
+        Ok(Self {
+            id,
+            attributes,
+            u_screen,
+            u_dither: None,
+        })
+    }
+
     /// The shaders, with the dither built in if `dither`.
     fn build(gl: &Gl, dither: bool) -> Result<Self, String> {
         let define = if dither { "#define DITHER\n" } else { "" };
         let vs = gl.compile_shader(gl::VERTEX_SHADER, &format!("{define}{VERTEX_SHADER}"))?;
         let fs = gl.compile_shader(gl::FRAGMENT_SHADER, &format!("{define}{FRAGMENT_SHADER}"))?;
         let id = gl.link_program(vs, fs)?;
-        let mut attributes = [0; ATTRIBUTES.len()];
-        for (slot, (name, _)) in attributes.iter_mut().zip(ATTRIBUTES) {
-            // SAFETY: the program linked and the name is a NUL-terminated literal.
-            let at = unsafe { (gl.get_attrib_location)(id, name.as_ptr()) };
-            *slot = u32::try_from(at)
-                .map_err(|_| format!("shader is missing {}", name.to_string_lossy()))?;
-        }
+        let names = ATTRIBUTES.map(|(name, _)| name);
+        let attributes = attributes_of(gl, id, &names)?;
         // SAFETY: as above.
-        let (u_screen, u_atlas, u_dither) = unsafe {
+        let (u_screen, u_atlas, u_dither, u_bayer) = unsafe {
             (
                 (gl.get_uniform_location)(id, c"u_screen".as_ptr()),
                 (gl.get_uniform_location)(id, c"u_atlas".as_ptr()),
                 (gl.get_uniform_location)(id, c"u_dither".as_ptr()),
+                (gl.get_uniform_location)(id, c"u_bayer".as_ptr()),
             )
         };
-        if u_screen < 0 || u_atlas < 0 || (dither && u_dither < 0) {
-            return Err("shader is missing u_screen, u_atlas or u_dither".to_owned());
+        if u_screen < 0 || u_atlas < 0 || (dither && (u_dither < 0 || u_bayer < 0)) {
+            return Err("shader is missing u_screen, u_atlas, u_dither or u_bayer".to_owned());
         }
-        // SAFETY: the program linked above; the atlas is texture unit 0.
+        // SAFETY: the program linked above; the atlas is texture unit 0 and
+        // the Bayer texture unit 1.
         unsafe {
             (gl.use_program)(id);
             (gl.uniform1i)(u_atlas, 0);
+            if dither {
+                (gl.uniform1i)(u_bayer, BAYER_UNIT);
+            }
         }
         Ok(Self {
             id,
@@ -656,8 +1110,14 @@ pub struct Renderer {
     /// first needed.
     plain: Option<Program>,
     dithered: Option<Program>,
+    /// The art's program and the fill's; without one (the GPU refused it)
+    /// the main program draws its quads.
+    art: Option<Program>,
+    fill: Option<Program>,
     vbo: u32,
     texture: u32,
+    /// The dither's thresholds (`BAYER`), on unit 1 once made; 0 before.
+    bayer: u32,
     /// The dither's peak to peak, 0 for none.
     dither: f32,
 }
@@ -697,8 +1157,11 @@ impl Renderer {
             gl,
             plain: None,
             dithered: None,
+            art: None,
+            fill: None,
             vbo,
             texture,
+            bayer: 0,
             dither: 0.0,
         };
         if dither {
@@ -706,6 +1169,14 @@ impl Renderer {
         }
         if renderer.program().is_none() {
             renderer.plain = Some(Program::build(&renderer.gl, false)?);
+        }
+        match Program::build_art(&renderer.gl) {
+            Ok(p) => renderer.art = Some(p),
+            Err(e) => crate::info!("the art's program: {e}; the main one draws the art"),
+        }
+        match Program::build_fill(&renderer.gl) {
+            Ok(p) => renderer.fill = Some(p),
+            Err(e) => crate::info!("the fill's program: {e}; the main one draws fills"),
         }
         Ok(renderer)
     }
@@ -718,7 +1189,13 @@ impl Renderer {
     /// the program for it if it isn't yet. A dithered program the GPU
     /// refuses is logged, and the dither stays off.
     pub fn set_dither(&mut self, on: bool) {
-        if on && self.dithered.is_none() {
+        if on && self.bayer == 0 {
+            match self.make_bayer() {
+                Ok(name) => self.bayer = name,
+                Err(e) => crate::info!("dither: {e}; drawn without it"),
+            }
+        }
+        if on && self.bayer != 0 && self.dithered.is_none() {
             match Program::build(&self.gl, true) {
                 Ok(p) => self.dithered = Some(p),
                 Err(e) => crate::info!("dither: {e}; drawn without it"),
@@ -733,6 +1210,51 @@ impl Renderer {
             match Program::build(&self.gl, false) {
                 Ok(p) => self.plain = Some(p),
                 Err(e) => crate::info!("the plain program: {e}"),
+            }
+        }
+    }
+
+    /// Makes the dither's texture: `BAYER`, 4x4 bytes of luminance on unit
+    /// 1, repeating, nearest texel. Unit 0 is left active. GL's error if it
+    /// would not take it (it is deleted then).
+    fn make_bayer(&self) -> Result<u32, String> {
+        let gl = &self.gl;
+        let before = gl.error();
+        if before != gl::NO_ERROR {
+            crate::info!("GL error {before:#x}");
+        }
+        let mut name = 0;
+        // SAFETY: `name` is a valid out-pointer for one name; `BAYER` holds
+        // the 4 x 4 one-byte pixels GL reads at an alignment of 1, and is a
+        // constant, so it outlives the call.
+        unsafe {
+            (gl.gen_textures)(1, &mut name);
+            (gl.active_texture)(gl::TEXTURE0 + BAYER_UNIT as u32);
+            (gl.bind_texture)(gl::TEXTURE_2D, name);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT);
+            (gl.tex_parameteri)(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT);
+            (gl.pixel_storei)(gl::UNPACK_ALIGNMENT, 1);
+            (gl.tex_image_2d)(
+                gl::TEXTURE_2D,
+                0,
+                gl::LUMINANCE as i32,
+                4,
+                4,
+                0,
+                gl::LUMINANCE,
+                gl::UNSIGNED_BYTE,
+                BAYER.as_ptr().cast(),
+            );
+            (gl.active_texture)(gl::TEXTURE0);
+        }
+        match gl.error() {
+            gl::NO_ERROR => Ok(name),
+            e => {
+                // SAFETY: `name` was made just above on this context.
+                unsafe { (gl.delete_textures)(1, &name) };
+                Err(format!("its texture: GL error {e:#x}"))
             }
         }
     }
@@ -779,29 +1301,20 @@ impl Renderer {
     pub fn draw(&self, batch: &Batch, drawable: (i32, i32)) {
         let gl = &self.gl;
         // `new` and `set_dither` leave a program for the mode they set.
-        let Some(program) = self.program() else {
+        let Some(main) = self.program() else {
             return;
         };
         let (x, y, w, h) = fit_viewport(drawable.0, drawable.1);
-        let stride = (FLOATS_PER_VERTEX * size_of::<f32>()) as i32;
         let bytes = (batch.verts.len() * size_of::<f32>()) as isize;
-        // SAFETY: the program and its attribute locations were made by
-        // `Program::build`, the buffer and texture by `new`, all on this
-        // context; the upload reads exactly `bytes`
-        // from the batch, which outlives the call; every attribute's offset
-        // and size stay inside one vertex (they sum to FLOATS_PER_VERTEX).
+        // SAFETY: the buffer and texture were made by `new` on this
+        // context; the upload reads exactly `bytes` from the batch, which
+        // outlives the call.
         unsafe {
             (gl.viewport)(0, 0, drawable.0, drawable.1);
             (gl.clear_color)(0.0, 0.0, 0.0, 1.0);
             (gl.clear)(gl::COLOR_BUFFER_BIT);
             (gl.viewport)(x, y, w, h);
-            (gl.use_program)(program.id);
-            (gl.uniform2f)(program.u_screen, SCREEN_W, SCREEN_H);
-            if let Some(u_dither) = program.u_dither {
-                (gl.uniform1f)(u_dither, self.dither);
-            }
             (gl.active_texture)(gl::TEXTURE0);
-            (gl.bind_texture)(gl::TEXTURE_2D, self.texture);
             (gl.bind_buffer)(gl::ARRAY_BUFFER, self.vbo);
             (gl.buffer_data)(
                 gl::ARRAY_BUFFER,
@@ -809,26 +1322,61 @@ impl Renderer {
                 batch.verts.as_ptr().cast(),
                 gl::STREAM_DRAW,
             );
-            let mut offset = 0;
-            for (&at, (_, floats)) in program.attributes.iter().zip(ATTRIBUTES) {
-                (gl.enable_vertex_attrib_array)(at);
+        }
+        let mut current: Option<u32> = None;
+        for run in batch.runs() {
+            let program = match (
+                draws_with(run.shader, self.dither > 0.0),
+                &self.art,
+                &self.fill,
+            ) {
+                (Shader::Art, Some(art), _) => art,
+                (Shader::Fill, _, Some(fill)) => fill,
+                _ => main,
+            };
+            if current != Some(program.id) {
+                current = Some(program.id);
+                self.use_program(program);
+            }
+            let name = match run.texture {
+                Texture::Atlas => self.texture,
+                Texture::Own(name) => name,
+            };
+            // SAFETY: the texture is the atlas or one `create_texture` made,
+            // and the run's vertices lie inside the buffer uploaded above.
+            unsafe {
+                (gl.bind_texture)(gl::TEXTURE_2D, name);
+                (gl.draw_arrays)(gl::TRIANGLES, run.first as i32, run.count as i32);
+            }
+        }
+    }
+
+    /// Makes `program` current, with its uniforms and its attributes'
+    /// places in the bound buffer.
+    fn use_program(&self, program: &Program) {
+        let gl = &self.gl;
+        let stride = (FLOATS_PER_VERTEX * size_of::<f32>()) as i32;
+        // SAFETY: the program and its attribute locations were made by
+        // `Program::build`, `build_art` or `build_fill` on this context, and the vertex
+        // buffer is bound; every attribute's offset and size stay inside one
+        // vertex (`attributes_of` takes them from ATTRIBUTES, which sum to
+        // FLOATS_PER_VERTEX).
+        unsafe {
+            (gl.use_program)(program.id);
+            (gl.uniform2f)(program.u_screen, SCREEN_W, SCREEN_H);
+            if let Some(u_dither) = program.u_dither {
+                (gl.uniform1f)(u_dither, dither_uniform(self.dither));
+            }
+            for a in &program.attributes {
+                (gl.enable_vertex_attrib_array)(a.at);
                 (gl.vertex_attrib_pointer)(
-                    at,
-                    floats,
+                    a.at,
+                    a.floats,
                     gl::FLOAT,
                     gl::FALSE,
                     stride,
-                    (offset * size_of::<f32>()) as *const c_void,
+                    (a.offset * size_of::<f32>()) as *const c_void,
                 );
-                offset += floats as usize;
-            }
-            for run in batch.runs() {
-                let name = match run.texture {
-                    Texture::Atlas => self.texture,
-                    Texture::Own(name) => name,
-                };
-                (gl.bind_texture)(gl::TEXTURE_2D, name);
-                (gl.draw_arrays)(gl::TRIANGLES, run.first as i32, run.count as i32);
             }
         }
     }
@@ -970,7 +1518,7 @@ void main() {
         );
         // Nor does the vertex shader hand over the place the dither reads.
         let vs = with_dither(VERTEX_SHADER, false);
-        assert!(!vs.contains("v_pos"), "{vs}");
+        assert!(!vs.contains("v_bayer"), "{vs}");
         assert!(vs.contains("gl_Position = vec4(ndc * a_w, 0.0, a_w);"));
     }
 
@@ -978,13 +1526,17 @@ void main() {
     fn with_the_dither_both_shaders_carry_its_place_and_strength() {
         let vs = with_dither(VERTEX_SHADER, true);
         let fs = with_dither(FRAGMENT_SHADER, true);
-        for line in ["varying vec3 v_pos;", "v_pos = vec3(a_pos * a_w, a_w);"] {
+        for line in [
+            "varying vec3 v_bayer;",
+            "v_bayer = vec3(a_pos * (0.25 * a_w), a_w);",
+        ] {
             assert!(vs.contains(line), "{line}");
         }
         for line in [
+            "uniform sampler2D u_bayer;",
             "uniform float u_dither;",
-            "varying vec3 v_pos;",
-            "vec2 p = floor(v_pos.xy / v_pos.z);",
+            "varying vec3 v_bayer;",
+            "texture2DProj(u_bayer, v_bayer).r - 0.5",
             // Images are not dithered: they leave before it.
             "gl_FragColor = texture2D(u_atlas, v_uv) * c;\n        return;",
         ] {
@@ -1021,6 +1573,162 @@ void main() {
         }
         // The top-left corner sits 161 px left of and 97 px above the centre.
         assert_eq!(&vertices(&batch)[0][8..10], &[-161.0, -97.0]);
+    }
+
+    #[test]
+    fn a_dim_darkens_what_is_pushed_after_it_and_keeps_alpha() {
+        let mut batch = Batch::default();
+        let c = Rgba(0.8, 0.4, 0.2, 0.5);
+        batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        batch.set_dim(0.25);
+        batch.rounded_rect(0.0, 0.0, 10.0, 10.0, 2.0, c, c);
+        batch.image(0.0, 0.0, 10.0, 10.0, NO_UV, c);
+        batch.set_dim(0.0);
+        batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        assert_eq!(batch.quad_count(), 4, "a dim is no quad");
+        let dimmed = Rgba(0.6, 0.3, 0.15, 0.5);
+        let colors: Vec<Rgba> = (0..4).map(|n| batch.quad_color(n)).collect();
+        assert_eq!(colors, [c, dimmed, dimmed, c]);
+        // A new frame starts undimmed.
+        batch.set_dim(0.5);
+        batch.clear();
+        batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        assert_eq!(batch.quad_color(0), c);
+    }
+
+    #[test]
+    fn a_fill_is_drawn_by_its_own_program_in_a_run_of_its_own() {
+        let mut batch = Batch::default();
+        let c = Rgba::rgb8(1, 2, 3);
+        batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        batch.fill4(0.0, 0.0, 10.0, 10.0, [c; 4]);
+        batch.fill4(0.0, 0.0, 0.0, 10.0, [c; 4]);
+        batch.fill4(0.0, 0.0, 10.0, 10.0, [c.alpha(0.0); 4]);
+        batch.gradient_rect(0.0, 0.0, 10.0, 10.0, c, c);
+        let shaders: Vec<Shader> = batch.runs().iter().map(|r| r.shader).collect();
+        assert_eq!(shaders, [Shader::Main, Shader::Fill, Shader::Main]);
+        assert_eq!(batch.quad_count(), 3, "empty and clear fills are skipped");
+    }
+
+    #[test]
+    fn a_rounded_fill_is_a_fill_framed_by_the_rounded_rects_edges() {
+        let c = Rgba::rgb8(18, 20, 28).alpha(0.94);
+        let (x, y, w, h, r) = (1192.0, 54.0, 640.0, 972.0, 28.0);
+        let mut whole = Batch::default();
+        whole.rounded_rect(x, y, w, h, r, c, c);
+        let mut framed = Batch::default();
+        framed.rounded_fill(x, y, w, h, r, c);
+        assert_eq!(framed.quad_count(), 5);
+        assert_eq!(framed.bounds(), whole.bounds());
+        let runs = framed.runs();
+        assert_eq!(runs[0].shader, Shader::Fill);
+        assert_eq!(runs[0].count, VERTICES_PER_QUAD);
+        assert!(runs[1..].iter().all(|r| r.shader == Shader::Main));
+        // The pieces tile the rounded rect's quad with no pixel twice: their
+        // areas add up to its area.
+        let area = |b: &Batch, n: usize| {
+            let (x0, y0, x1, y1) = b.quad_bounds(n);
+            (x1 - x0) * (y1 - y0)
+        };
+        let pieces: f32 = (0..5).map(|n| area(&framed, n)).sum();
+        assert!((pieces - area(&whole, 0)).abs() < 0.01, "{pieces}");
+        // Each edge piece cuts the same rounded rect the whole one does.
+        for v in &vertices(&framed)[VERTICES_PER_QUAD..] {
+            let whole = vertices(&whole)[0];
+            assert_eq!(v[10..14], whole[10..14]);
+            assert_eq!(v[14], SHAPE);
+        }
+        // Too small to frame, it is the rounded rect.
+        let mut small = Batch::default();
+        small.rounded_fill(0.0, 0.0, 40.0, 20.0, 12.0, c);
+        assert_eq!(small.quad_count(), 1);
+        assert_eq!(small.runs()[0].shader, Shader::Main);
+    }
+
+    #[test]
+    fn a_rounded_fill4_blends_its_corners_across_its_pieces_as_one_quad_would() {
+        let colors = [
+            Rgba(1.0, 0.0, 0.0, 1.0),
+            Rgba(0.0, 1.0, 0.0, 1.0),
+            Rgba(0.0, 0.0, 1.0, 1.0),
+            Rgba(1.0, 1.0, 1.0, 1.0),
+        ];
+        let (x, y, w, h) = (100.0, 200.0, 320.0, 180.0);
+        let mut whole = Batch::default();
+        whole.rounded_rect4(x, y, w, h, 14.0, colors);
+        let mut framed = Batch::default();
+        framed.rounded_fill4(x, y, w, h, 14.0, colors);
+        assert_eq!(framed.quad_count(), 5);
+        assert_eq!(framed.bounds(), whole.bounds());
+        // Every corner of every piece has the colour the one quad blends to
+        // at that place.
+        let at = |px: f32, py: f32| {
+            let (u, v) = ((px - x) / w, (py - y) / h);
+            colors[0]
+                .lerp(colors[1], u)
+                .lerp(colors[2].lerp(colors[3], u), v)
+        };
+        for v in vertices(&framed) {
+            let want = at(v[0], v[1]);
+            for (got, want) in v[4..8].iter().zip([want.0, want.1, want.2, want.3]) {
+                assert!((got - want).abs() < 1e-5, "{v:?}");
+            }
+        }
+        // The one quad's own corners, carried a pixel out, agree.
+        let corner = vertices(&whole)[0];
+        let want = at(corner[0], corner[1]);
+        assert!((corner[4] - want.0).abs() < 1e-5 && (corner[5] - want.1).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_shadow_around_a_hole_leaves_it_out_and_cuts_the_same_shape() {
+        let c = Rgba(0.0, 0.0, 0.0, 0.35);
+        let (x, y, w, h, r, blur) = (80.0, 238.0, 320.0, 180.0, 14.0, 16.0);
+        let mut whole = Batch::default();
+        whole.shadow(x, y, w, h, r, blur, c);
+        let hole = Rect::new(94.0, 244.0, 292.0, 152.0);
+        let mut around = Batch::default();
+        around.shadow_around(x, y, w, h, r, blur, c, hole);
+        assert_eq!(around.quad_count(), 4);
+        assert_eq!(around.bounds(), whole.bounds());
+        let area = |b: &Batch, n: usize| {
+            let (x0, y0, x1, y1) = b.quad_bounds(n);
+            (x1 - x0) * (y1 - y0)
+        };
+        let pieces: f32 = (0..4).map(|n| area(&around, n)).sum();
+        let left_out = area(&whole, 0) - pieces;
+        assert!((left_out - hole.w * hole.h).abs() < 0.01, "{left_out}");
+        let shape = vertices(&whole)[0];
+        for v in vertices(&around) {
+            assert_eq!(v[10..15], shape[10..15]);
+            assert_eq!(v[4..8], shape[4..8]);
+        }
+        // A hole the shadow does not reach changes nothing.
+        let mut far = Batch::default();
+        far.shadow_around(x, y, w, h, r, blur, c, Rect::new(900.0, 0.0, 10.0, 10.0));
+        assert_eq!(far.quad_count(), 1);
+        assert_eq!(vertices(&far), vertices(&whole));
+    }
+
+    #[test]
+    fn fills_are_the_main_programs_while_the_dither_is_on() {
+        assert_eq!(draws_with(Shader::Fill, false), Shader::Fill);
+        assert_eq!(draws_with(Shader::Fill, true), Shader::Main);
+        for dithering in [false, true] {
+            assert_eq!(draws_with(Shader::Art, dithering), Shader::Art);
+            assert_eq!(draws_with(Shader::Main, dithering), Shader::Main);
+        }
+    }
+
+    #[test]
+    fn the_fill_shader_takes_the_colour_alone_in_mediump() {
+        assert!(FILL_FRAGMENT_SHADER.contains("precision mediump float;"));
+        assert!(!FILL_FRAGMENT_SHADER.contains("highp"));
+        assert!(FILL_FRAGMENT_SHADER.contains("gl_FragColor = v_color;"));
+        for name in FILL_ATTRIBUTES {
+            let name = name.to_str().unwrap();
+            assert!(FILL_VERTEX_SHADER.contains(&format!(" {name};")), "{name}");
+        }
     }
 
     #[test]
@@ -1199,8 +1907,9 @@ void main() {
         (v / ulp).round_ties_even() * ulp
     }
 
-    /// The fragment shader's dither threshold at pixel (x, y), each step
-    /// rounded by `r`: `half` for mediump, nothing for highp.
+    /// The dither threshold the shader worked out at pixel (x, y) before the
+    /// texture (2026-11-08), each step rounded by `r`: `half` for mediump,
+    /// nothing for highp.
     fn threshold(x: u32, y: u32, r: fn(f32) -> f32) -> f32 {
         let bayer2 = |ax: f32, ay: f32| {
             let (ax, ay) = (ax.floor(), ay.floor());
@@ -1215,18 +1924,35 @@ void main() {
         r(r(bayer2(r(px * 0.5), r(py * 0.5)) * 0.25) + bayer2(px, py))
     }
 
+    /// The texel `BAYER` gives pixel `x`'s centre, with its place rounded by
+    /// `r`: `(x + 0.5) / 4` texels, repeating every 4, nearest.
+    fn texel(x: u32, r: fn(f32) -> f32) -> u32 {
+        let u = r((x as f32 + 0.5) * 0.25);
+        ((u - u.floor()) * 4.0).floor() as u32
+    }
+
     #[test]
-    fn the_dither_is_a_4x4_bayer_pattern_at_highp_and_mediump() {
-        // The shader holds the arithmetic these tests work.
-        for line in [
-            "return fract(dot(a, vec2(0.5, a.y * 0.75)));",
-            "vec2 p = floor(v_pos.xy / v_pos.z);",
-            "p -= 4.0 * floor(p * 0.25);",
-            "float t = bayer2(p * 0.5) * 0.25 + bayer2(p);",
-            "gl_FragColor.rgb += (t - 15.0 / 32.0) * u_dither * gl_FragColor.a;",
-        ] {
-            assert!(FRAGMENT_SHADER.contains(line), "{line}");
+    fn the_texture_holds_the_pattern_the_shader_worked_out() {
+        let exact = |v: f32| v;
+        // At every pixel of the screen, the fetch less a half, times the
+        // uniform, is the offset the arithmetic gave.
+        for y in (0..1080).step_by(7) {
+            for x in (0..1920).step_by(5) {
+                let level = BAYER[(texel(y, exact) * 4 + texel(x, exact)) as usize];
+                let fetched = f32::from(level) / 255.0;
+                let now = (fetched - 0.5) * dither_uniform(1.0);
+                let before = threshold(x, y, exact) - 15.0 / 32.0;
+                assert!((now - before).abs() < 1e-6, "({x}, {y}): {now} {before}");
+            }
         }
+        // A highp place picks the right texel all the way across; a 16-bit
+        // one past 1024 px would not, which is why the varying is highp.
+        assert!((0..1920).all(|x| texel(x, exact) == x % 4));
+        assert!((1024..1920).any(|x| texel(x, half) != x % 4));
+    }
+
+    #[test]
+    fn the_old_arithmetic_was_a_4x4_bayer_pattern_at_highp_and_mediump() {
         let block = |x0: u32, y0: u32, r: fn(f32) -> f32| {
             let mut ts: Vec<f32> = (0..16)
                 .map(|i| threshold(x0 + i % 4, y0 + i / 4, r))

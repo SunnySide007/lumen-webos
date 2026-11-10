@@ -97,7 +97,7 @@ ipk: check-trial build-tv
 	rm -rf dist/stage
 	mkdir -p $(STAGE)
 	install -m 0755 $(BIN) $(STAGE)/lumen-shell
-	install -m 0755 packaging/shell/lumen-icons.sh $(STAGE)/
+	install -m 0755 packaging/shell/lumen-icons.sh packaging/shell/lumen-privacy-read.sh $(STAGE)/
 	install -m 0644 packaging/shell/icon80.png packaging/shell/icon130.png $(STAGE)/
 	install -m 0644 shell/assets/fonts/Inter-LICENSE.txt $(STAGE)/
 	mkdir -p $(STAGE)/art
