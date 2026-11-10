@@ -97,7 +97,7 @@ Google Home ─ Google's cloud ─▶ TV Streamer ─ HDMI-CEC ─▶ TV: on, of
 | Sound | `volume.up`, `volume.down`, `volume.set` (0–100), `mute.set` | LG's audio service |
 | Inputs and apps | `apps.list`, `launch <id>` for apps and HDMI inputs | `applicationManager`, as the shell does |
 | Remote | `key <name>` from a fixed list (arrows, OK, Back, Home, play, pause …); `text.insert`, `text.enter`, `text.delete` | Keys: the route R0 finds. Text: LG's input method service |
-| Lumen | `lumen.open`, `ambient.start`, `privacy.state` (the boot hook's log, the 11111 rule, the stopped jobs, and Guard's counts once Guard exists) | `applicationManager`, Lumen's own files |
+| Lumen | `lumen.open`, `ambient.start`, `privacy.state` (the boot hook's log, the 11111 rule, the stopped jobs, and Guard's counts, mode and upstream route, with when a fallback in clear began, once Guard exists) | `applicationManager`, Lumen's own files |
 | Picture and sound | `settings.get`, and `settings.set` for a fixed list of keys and values (picture mode, OLED light, sound mode …) | LG's `settingsservice`, as the Control Center plans |
 | On the TV | `toast <text>` (pairing codes, "Volume 20") | LG's notification service |
 

@@ -5,8 +5,9 @@
 //!   and the end of this boot's log, `/var/lib/lumen/log/lumen-privacy.log`.
 //! * The rule rejecting tcp 11111: `iptables -L INPUT -n`.
 //! * LG's diagnostics jobs the hook stops: `initctl status <job>`.
-//! * Lumen Guard's counts: `/var/lib/lumen/guard/status`; `null` before
-//!   Guard has run.
+//! * Lumen Guard's counts, mode and upstream route (G3: over TLS, or in
+//!   clear through the router and since when): `/var/lib/lumen/guard/status`;
+//!   `null` before Guard has run.
 //!
 //! Each file is read only if it is a regular file owned by root, opened
 //! without following a link and without blocking on a pipe someone left in
@@ -173,8 +174,24 @@ fn guard(text: &str) -> Option<Value> {
     if let Some(updated) = number("updated") {
         g["updated"] = json!(iso8601(updated));
     }
+    // G3's upstream: one of Guard's four words, or nothing (G1 and G2 have
+    // no `route` line). While a fallback lasts, lookups go to the router in
+    // clear, and `fallbackSince` says from when.
+    if let Some(route) = field("route").filter(|r| ROUTES.contains(r)) {
+        g["route"] = json!(route);
+        let since = number("fallback_since").filter(|&s| s > 0);
+        if let Some(since) = since.filter(|_| route.starts_with("fallback-")) {
+            g["fallbackSince"] = json!(iso8601(since));
+        }
+    }
     Some(g)
 }
+
+/// Guard's `route` words (lumen-guard's `upstream.rs`): over TLS to Quad9;
+/// in clear through the router because the owner's switch is off; and in
+/// clear through the router as a fallback, while the clock is implausible
+/// or Quad9 can't be reached.
+const ROUTES: [&str; 4] = ["tls", "clear", "fallback-clock", "fallback-down"];
 
 /// Reads it all. Nothing here fails the verb: a part that can't be read
 /// reads as "no", with the reason beside it for the log and the curious.
@@ -340,6 +357,42 @@ mod tests {
         fs::write(&paths.guard_status, "mode log\n").unwrap();
         assert_eq!(read(&paths, &runner)["guard"], Value::Null);
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn says_each_route_and_since_when_a_fallback_lasts() {
+        const COUNTS: &str = "started 1793318400\nlookups 12\n";
+        let at = |text: &str| guard(&format!("{COUNTS}{text}")).unwrap();
+        // While the switch is on and Quad9 answers.
+        let g = at("route tls\nfallback_since 0\n");
+        assert_eq!(g["route"], json!("tls"));
+        assert_eq!(g.get("fallbackSince"), None);
+        // The owner's switch is off: in clear, but not a fallback.
+        let g = at("route clear\nfallback_since 0\n");
+        assert_eq!(g["route"], json!("clear"));
+        assert_eq!(g.get("fallbackSince"), None);
+        // The two fallbacks, with when they began.
+        let g = at("route fallback-clock\nfallback_since 1793318405\n");
+        assert_eq!(g["route"], json!("fallback-clock"));
+        assert_eq!(g["fallbackSince"], json!("2026-10-30T00:00:05Z"));
+        let g = at("route fallback-down\nfallback_since 1793318410\n");
+        assert_eq!(g["route"], json!("fallback-down"));
+        assert_eq!(g["fallbackSince"], json!("2026-10-30T00:00:10Z"));
+        // A fallback without its time still says the route.
+        let g = at("route fallback-down\n");
+        assert_eq!(g["route"], json!("fallback-down"));
+        assert_eq!(g.get("fallbackSince"), None);
+        // Before G3 there is no route line, and a word Guard doesn't write
+        // is left out rather than passed on.
+        assert_eq!(at("mode block\n").get("route"), None);
+        let g = at("route <b>clear</b>\nfallback_since 1793318410\n");
+        assert_eq!(g.get("route"), None);
+        assert_eq!(g.get("fallbackSince"), None);
+        // A stale time beside a route that is not a fallback is ignored.
+        assert_eq!(
+            at("route tls\nfallback_since 1793318410\n").get("fallbackSince"),
+            None
+        );
     }
 
     #[test]
