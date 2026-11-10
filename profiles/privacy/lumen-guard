@@ -229,6 +229,14 @@ OUT=$(log_to)
     # Back to connman, in this order: its resolv.conf, the rules, then Guard
     # (SIGTERM, so it writes its status; SIGKILL after 5 s).
     fail_open() {
+        # A Guard this run didn't start has taken over (guard-undo.sh, then
+        # guard-apply.sh, while this watchdog slept): the mount, the rules
+        # and the pid file are its own now. On the B9 on 2026-11-10 an old
+        # watchdog removed the new Guard's pid file a second after its start.
+        if ! alive && other=$(running) && [ "$other" != "$pid" ]; then
+            say "$1; another Guard (pid $other) runs now, so nothing is undone"
+            exit 0
+        fi
         state="resolv.conf is connman's, no nat rules"
         unmount || state="FAILED to unmount $RESOLV"
         remove_rules || state="$state; FAILED to remove a nat rule"
@@ -242,7 +250,8 @@ OUT=$(log_to)
             alive && kill -KILL "$pid" 2>/dev/null
         fi
         wait "$pid"
-        rm -f "$PIDFILE"
+        # Only this run's own pid file: a newer Guard may have written its.
+        [ "$(cat "$PIDFILE" 2>/dev/null)" != "$pid" ] || rm -f "$PIDFILE"
         say "$1; $state, Guard stopped (fail open)"
         exit 0
     }
