@@ -86,8 +86,11 @@ impl Clock {
     }
 }
 
-/// An event older than this is taken to be stamped on another clock.
-const MAX_AGE_MS: u32 = 10_000;
+/// An event older than this is taken to be stamped on another clock. The
+/// B9's compositor stamps keys on a clock of its own that read 2.9 s behind
+/// CLOCK_MONOTONIC (2026-11-10), which a looser limit took for that clock,
+/// so every key read as shown 2.9 s late.
+const MAX_AGE_MS: u32 = 250;
 
 /// How long ago a stamp of `stamp_ms` was, by a clock reading `now_ms`, both
 /// in wrapping milliseconds; `None` if it cannot be on that clock.
@@ -178,11 +181,22 @@ mod tests {
     }
 
     #[test]
-    fn ages_wrap_and_stop_at_ten_seconds() {
+    fn ages_wrap_and_stop_at_a_quarter_second() {
         assert_eq!(age(1000, 1025), Some(Duration::from_millis(25)));
         assert_eq!(age(u32::MAX - 4, 5), Some(Duration::from_millis(10)));
         assert_eq!(age(1001, 1000), None, "from the future");
-        assert_eq!(age(0, 10_001), None);
+        assert_eq!(age(0, 250), Some(Duration::from_millis(250)));
+        assert_eq!(age(0, 251), None);
+    }
+
+    #[test]
+    fn a_compositors_own_clock_a_few_seconds_off_fits_neither() {
+        // The B9: a key stamped 369,955 ms read with CLOCK_MONOTONIC at
+        // 372,841 ms, 2,886 ms on.
+        let mut clock = KeyClock::default();
+        let (age, line) = clock.age(369_955, 372_841, 1_794_281_638);
+        assert_eq!(age, None);
+        assert!(line.is_some_and(|l| l.contains("fits neither clock")));
     }
 
     #[test]

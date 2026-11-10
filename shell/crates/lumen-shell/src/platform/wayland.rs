@@ -179,10 +179,22 @@ struct State {
     unknown_keys: Vec<u32>,
     named: Vec<String>,
     globals: Vec<String>,
-    seat_version: u32,
     /// The connection broke; said once.
     failed: bool,
 }
+
+/// One `wl_seat` and the devices made from it; a device is null until the
+/// seat says it has one.
+#[derive(Clone, Copy)]
+struct Seat {
+    seat: *mut Proxy,
+    keyboard: *mut Proxy,
+    pointer: *mut Proxy,
+    version: u32,
+}
+
+/// More seats than this are left unbound (the B9 has two).
+const SEATS_MAX: usize = 4;
 
 /// What the dispatcher reaches: the objects, the events for the loop and
 /// the state behind them. Boxed, so its address holds for the proxies.
@@ -194,9 +206,10 @@ struct Inner {
     compositor: Cell<*mut Proxy>,
     shell: Cell<*mut Proxy>,
     webos_shell: Cell<*mut Proxy>,
-    seat: Cell<*mut Proxy>,
-    keyboard: Cell<*mut Proxy>,
-    pointer: Cell<*mut Proxy>,
+    /// Every `wl_seat` the compositor lists, each with its own devices. The
+    /// B9 lists two, and the remote's keys come on the second (measured
+    /// 2026-11-10: with only the first bound, no key reached the shell).
+    seats: RefCell<Vec<Seat>>,
     output: Cell<*mut Proxy>,
     input_manager: Cell<*mut Proxy>,
     surface: Cell<*mut Proxy>,
@@ -307,9 +320,7 @@ impl Wayland {
                 compositor: null(),
                 shell: null(),
                 webos_shell: null(),
-                seat: null(),
-                keyboard: null(),
-                pointer: null(),
+                seats: RefCell::new(Vec::new()),
                 output: null(),
                 input_manager: null(),
                 surface: null(),
@@ -557,10 +568,14 @@ impl Drop for Wayland {
                 lib.send(surface, inner.ops.surface_destroy, &mut []);
                 (lib.proxy_destroy)(surface);
             }
+            for seat in inner.seats.take() {
+                for proxy in [seat.keyboard, seat.pointer, seat.seat] {
+                    if !proxy.is_null() {
+                        (lib.proxy_destroy)(proxy);
+                    }
+                }
+            }
             for cell in [
-                &inner.keyboard,
-                &inner.pointer,
-                &inner.seat,
                 &inner.output,
                 &inner.input_manager,
                 &inner.webos_shell,
@@ -753,18 +768,23 @@ impl Inner {
 
     fn kind_of(&self, target: *mut Proxy) -> Kind {
         let is = |cell: &Cell<*mut Proxy>| cell.get() == target;
+        for seat in self.seats.borrow().iter() {
+            if seat.keyboard == target {
+                return Kind::Keyboard;
+            }
+            if seat.pointer == target {
+                return Kind::Pointer;
+            }
+            if seat.seat == target {
+                return Kind::Seat;
+            }
+        }
         if is(&self.registry) {
             Kind::Registry
-        } else if is(&self.keyboard) {
-            Kind::Keyboard
-        } else if is(&self.pointer) {
-            Kind::Pointer
         } else if is(&self.webos_surface) {
             Kind::WebosSurface
         } else if is(&self.shell_surface) {
             Kind::ShellSurface
-        } else if is(&self.seat) {
-            Kind::Seat
         } else if is(&self.output) {
             Kind::Output
         } else if is(&self.input_manager) {
@@ -788,7 +808,7 @@ impl Inner {
         let uint = |n: usize| args.get(n).and_then(Arg::uint);
         match (kind, name) {
             (Kind::Registry, "global") => self.global(args),
-            (Kind::Seat, "capabilities") => self.capabilities(uint(0).unwrap_or(0)),
+            (Kind::Seat, "capabilities") => self.capabilities(target, uint(0).unwrap_or(0)),
             (Kind::Keyboard, "keymap") => {
                 if let Some(Arg::Fd(fd)) = args.get(1) {
                     // SAFETY: libwayland handed the keymap's descriptor to
@@ -956,9 +976,17 @@ impl Inner {
             "wl_shell" => bind_into(&self.shell, lib.shell, 1),
             "wl_webos_shell" => bind_into(&self.webos_shell, lib.webos_shell, 1),
             "wl_seat" => {
-                bind_into(&self.seat, Some(lib.seat), 4);
-                let bound = version.min(lib.seat.version()).clamp(1, 4);
-                self.state.borrow_mut().seat_version = bound;
+                if self.seats.borrow().len() < SEATS_MAX {
+                    let seat = self.bind(name, lib.seat, version, 4);
+                    if !seat.is_null() {
+                        self.seats.borrow_mut().push(Seat {
+                            seat,
+                            keyboard: std::ptr::null_mut(),
+                            pointer: std::ptr::null_mut(),
+                            version: version.min(lib.seat.version()).clamp(1, 4),
+                        });
+                    }
+                }
             }
             "wl_output" => bind_into(&self.output, Some(lib.output), 2),
             "wl_webos_input_manager" => {
@@ -998,37 +1026,30 @@ impl Inner {
         proxy
     }
 
-    fn capabilities(&self, caps: u32) {
-        let seat = self.seat.get();
-        if seat.is_null() {
+    /// Makes the keyboard and the pointer of the seat `target`, once each,
+    /// when it says it has them.
+    fn capabilities(&self, target: *mut Proxy, caps: u32) {
+        let Some(at) = self.seats.borrow().iter().position(|s| s.seat == target) else {
             return;
-        }
-        let version = self.state.borrow().seat_version.max(1);
+        };
+        let mut seat = self.seats.borrow()[at];
         let lib = self.lib;
-        for (bit, cell, op, table) in [
-            (
-                SEAT_KEYBOARD,
-                &self.keyboard,
-                self.ops.get_keyboard,
-                lib.keyboard,
-            ),
-            (
-                SEAT_POINTER,
-                &self.pointer,
-                self.ops.get_pointer,
-                lib.pointer,
-            ),
-        ] {
-            if caps & bit != 0 && cell.get().is_null() {
-                let mut args = [Argument::NULL];
-                // SAFETY: a live seat (this runs in its dispatch); "n".
-                let device = unsafe { lib.create(seat, op, &mut args, table, version) };
-                if !device.is_null() {
-                    cell.set(device);
-                    self.listen(device);
-                }
+        let make = |op: u32, table: &'static Interface| {
+            let mut args = [Argument::NULL];
+            // SAFETY: a live seat (this runs in its dispatch); "n".
+            let device = unsafe { lib.create(seat.seat, op, &mut args, table, seat.version) };
+            if !device.is_null() {
+                self.listen(device);
             }
+            device
+        };
+        if caps & SEAT_KEYBOARD != 0 && seat.keyboard.is_null() {
+            seat.keyboard = make(self.ops.get_keyboard, lib.keyboard);
         }
+        if caps & SEAT_POINTER != 0 && seat.pointer.is_null() {
+            seat.pointer = make(self.ops.get_pointer, lib.pointer);
+        }
+        self.seats.borrow_mut()[at] = seat;
     }
 
     /// A key pressed or released at the compositor's `time`.
