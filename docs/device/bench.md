@@ -332,3 +332,12 @@ swap under 1 ms). The hero was decoded in 344, 324 and 324 ms, and
 Lumen's first frame came 192, 201 and 194 ms after the key went down.
 With 4 icons the fade read the same (8 skipped, worst submit 73.56 ms),
 so the icon tiles are not the cause. This is the baseline for the fix.
+
+**A first fix for coming back in front did not help.** f6d2025 draws each
+hero layer once right after its upload, before the fade (06:07 to 06:13
+UTC, the same conditions): the fade drew 34, 35 and 33 frames in 637, 696
+and 686 ms with 9, 8 and 10 vsyncs skipped (median 9), and four slow
+frames a trip, the worst submit 48.67, 64.68 and 88.39 ms. The draw before
+the fade took 50.6 ms on the first trip and 3.9 and 6.1 ms after, so the
+hero texture's first draw is not where the time goes. Its full look read
+17.01 ms and 0.45 skipped per 10 s. Not merged.

@@ -20,16 +20,16 @@ which.
 | 0. Rules | **Done** (324de1a). Night window 00:00 to 06:00 TV time with a dark screen; daytime idle windows; from 2026-11-10 the owner's weekday slot, 10:00 to 15:00, in which an HDMI input in front is no bar. | In force |
 | 1. Fix and measure | **Done** (2026-11-08). Baselines in [device/bench.md, "Measured"](device/bench.md#measured). | Measured |
 | 2. Speed | **The Home press meets its target.** `lumend` keeps the shell hidden on the Wayland path from boot and after a close; a Home press then shows Lumen 194 to 229 ms after the key goes down with a 180 ms hold, which is 14 to 49 ms after its release (LG acts on the release), against 843 to 864 ms with the shell closed. `tools/tv.sh close` and `install` hold the keeper for two minutes. Left: the lean track, lifecycle version 2, and starting the shell sooner than 157 s after a boot. | `lumend` with six parts (`s1`, `senders` acr2, `lg-home`, `icons`, `modes`, `shell`), rebooted twice |
-| 3. Design | **The new home and the six design notes are merged** (9ef55e1 and a1d9a58, at 90a3880) past the gate with all 30 icons: home 17.04 ms, Pages 17.14 ms, Control Center 16.98 ms. The owner's first test with the real remote (2026-11-10): the pointer must select the tile under it; a click opened the focused tile. The fix, 57c4831 (on `claude/home-design-6d71ec`, not merged), passes the gate with all 30 icons (home 17.02 ms, Pages 17.12 ms, Control Center 16.50 ms) and waits for the owner's own test. The stutter on coming back in front has a bench pattern (`tools/bench.sh front`) and a baseline: 8 vsyncs skipped in the 0.7 s fade, slow frames of up to 74 ms, all submit time. | 57c4831 installed for the owner's pointer test, on the Wayland path; f5419d9 is the bench's last good |
+| 3. Design | **The new home and the six design notes are merged** (9ef55e1 and a1d9a58, at 90a3880) past the gate with all 30 icons: home 17.04 ms, Pages 17.14 ms, Control Center 16.98 ms. The owner's first test with the real remote (2026-11-10): the pointer must select the tile under it; a click opened the focused tile. The fix, 57c4831, is merged (fd3d44e) past the gate with all 30 icons (home 17.02 ms, Pages 17.12 ms, Control Center 16.50 ms) and after the owner's own test ("Pointer is right"). The stutter on coming back in front has a bench pattern (`tools/bench.sh front`) and a baseline: 8 vsyncs skipped in the 0.7 s fade, slow frames of up to 74 ms, all submit time. A first fix (f6d2025, a hero's first draw before its fade) left it as it was (9 skipped) and is not merged. | The pointer build, 57c4831, installed as the Home and the bench's last good |
 | 4. Privacy | Guard **G3's build runs in log mode**, in clear, from its own boot hook. Tried on the TV: default deny (`block trial`) with the live store-safe check and Netflix, YouTube and Plex launching; the learning window; Quad9 over TLS (`tls trial`), its fallback when port 853 is refused and its return; the clock fallback. Blocking for the family, and TLS for good, are the owner's tier C yes. | G3 binary and hook, log mode |
 | 5. Finish | R3 and R4 are merged, neither verified: the Windows app never saved a TV or opened a link. The sitting for both waits for the owner. | Nothing |
 
 ## On the TV
 
-* **Installed:** 57c4831 (the pointer build, not merged), since
-  2026-11-10 05:54 UTC, for the owner's test, launched on the Wayland
-  path. `sh tools/bench.sh restore` puts back main at f5419d9 (the six
-  design notes), the bench's last good. A Home press shows the shell
+* **Installed:** the pointer build, 57c4831 (main at fd3d44e has the
+  same shell code), as the Home and the bench's last good. The build
+  before it, f5419d9, is kept in `tools/out/bench/last-good-f5419d9/`.
+  A Home press shows the shell
   lumend keeps hidden, on the Wayland path; a launch by a tool or after a
   bench is on SDL until the shell next closes.
   The old home, 3a89955, is kept in
@@ -42,8 +42,7 @@ which.
 
 ## Next
 
-1. The owner's test of the pointer on 57c4831, then its merge; the
-   crossfade fix for coming back in front (the home-design session),
+1. A second fix for coming back in front (the home-design session),
    measured with `tools/bench.sh front` against the baseline. Wayland for
    every launch (the IPK's `platform` file) once the pointer works. A
    build installed over one that carried the icon copy shows 4 of 30
