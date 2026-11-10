@@ -611,12 +611,14 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, sheen: bool, assets: &mut A
     let own = app_color(tile.app, tile.index, edge);
     let base = own.shade(shade);
     let a = tile.alpha;
-    // The rim, under the tile and a little larger, so only its edge shows.
+    // The rim, under the tile and a little larger, so only its edge shows:
+    // drawn round the part the tile hides, which costs nothing.
     if lift > 0.0 {
         let rim = style::FOCUS_RIM * zoom;
         let c = FOCUS_RIM.alpha(FOCUS_RIM.3 * lift * a);
         let o = r.outset(rim);
-        batch.rounded_fill4(o.x, o.y, o.w, o.h, radius + rim, [c; 4]);
+        let hole = r.outset(-radius);
+        batch.shadow_around(o.x, o.y, o.w, o.h, radius + rim, 0.5, c, hole);
     }
     // The light on a tile, as how far each corner (top left, top right,
     // bottom left, bottom right) goes toward white: its top lit a little,
@@ -631,18 +633,23 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, sheen: bool, assets: &mut A
     let light = [lit(s), lit(s * 0.35), s * 0.35, 0.0];
     let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
     // An icon on a square of its own colour goes on a tile of that colour,
-    // flat, and the light goes over the two together, so the icon's square
-    // melts into the tile: white at each corner's lightness over a colour is
-    // that colour taken toward white as far.
+    // flat, so the icon's square melts into it. Focused, the light goes
+    // over the two together (white at each corner's lightness over a colour
+    // is that colour taken toward white as far), coming with the lift; at
+    // rest the tile stays flat, which spares a layer over every icon on the
+    // "Other apps" page (2026-11-10, 0a537bf with the B9's 30 icons: 17.9 ms
+    // a frame there).
     if let (Some((uv, w, h)), Some(_)) = (icon, edge) {
         batch.rounded_fill4(r.x, r.y, r.w, r.h, radius, [base.alpha(a); 4]);
         let side = layout::ICON_ON_OWN_SIZE * zoom / w.max(h) as f32;
         let (iw, ih) = (w as f32 * side, h as f32 * side);
         // Dimmed with the tile at rest, as its colour is.
         let tint = Rgba(shade, shade, shade, a);
-        batch.image(cx - iw / 2.0, cy - ih / 2.0, iw, ih, uv, tint);
-        let over = light.map(|k| WHITE.alpha(k * a));
-        batch.rounded_fill4(r.x, r.y, r.w, r.h, radius, over);
+        batch.picture(cx - iw / 2.0, cy - ih / 2.0, iw, ih, uv, tint);
+        if lift > 0.0 {
+            let over = light.map(|k| WHITE.alpha(k * lift * a));
+            batch.rounded_fill4(r.x, r.y, r.w, r.h, radius, over);
+        }
         return;
     }
     let colors = light.map(|k| base.lerp(WHITE, k).alpha(a));
@@ -656,7 +663,7 @@ fn draw_tile(batch: &mut Batch, tile: &TileView<'_>, sheen: bool, assets: &mut A
     if let Some((uv, w, h)) = icon {
         let side = layout::ICON_SIZE * zoom / w.max(h) as f32;
         let (iw, ih) = (w as f32 * side, h as f32 * side);
-        batch.image(cx - iw / 2.0, cy - ih / 2.0, iw, ih, uv, ON_TILE.alpha(a));
+        batch.picture(cx - iw / 2.0, cy - ih / 2.0, iw, ih, uv, ON_TILE.alpha(a));
         return;
     }
     // Still loading: the plain tile, so its name does not flash up first.

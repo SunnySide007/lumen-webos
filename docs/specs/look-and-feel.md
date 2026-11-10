@@ -548,9 +548,13 @@ Its colour, in order:
 1. Its icon's own edge colour, when the icon sits on a square of its own
    (at least half of its two outer rings of pixels opaque:
    `icons::edge_color`). The icon is then drawn 150 px (most of the tile's
-   height), its square melting into the tile; the tile is flat under it,
-   and its light (below) goes over tile and icon together as white at each
-   corner's lightness, which is the same as the colour taken toward white.
+   height), its square melting into the tile; the tile is flat under it.
+   Focused, its light (below) goes over tile and icon together as white at
+   each corner's lightness, which is the same as the colour taken toward
+   white, coming with the lift; at rest it stays flat. A layer of light
+   over every resting icon was most of what took "Other apps" over its
+   budget with the B9's 30 icons (2026-11-10, 0a537bf: 17.92 ms a frame,
+   0.78 screens of the fill's pixels and 0.62 of the main program's).
 2. Else webOS's `iconColor`, unless it is near white or a light grey (less
    than 24 in 255 between its channels, and not dark): LG gives Netflix and
    YouTube white, which as a whole tile beside dark ones pulls the eye from
@@ -558,7 +562,9 @@ Its colour, in order:
 3. Else the palette's colour for its place in the list.
 
 An icon on a clear background is drawn 104 px on that colour; with no icon
-the name is drawn across the tile, dark on a light colour. "Other apps"
+the name is drawn across the tile, dark on a light colour. Icons are drawn
+by the art's program (`Batch::picture`: a texture times a colour), not the
+main one. "Other apps"
 has a mark of its own drawn in code, four rounded squares two by two, on
 its slate; its name is the title above the row when it has focus. Every
 colour comes from the TV at run time, so no app's artwork is in the repo.
@@ -570,8 +576,8 @@ as the tile's own corner colours (or the light over an icon's tile), so
 it costs no quad on most tiles and one on an icon's. Resting tiles are at
 65% brightness, their icons too when the tile takes the icon's colour.
 The build review (2026-11-09) found focus too quiet from a couch at 1.12,
-no rim and 80%; the rim is a `rounded_fill4` under the tile, so it costs
-the fill's pixels and shape quads only along its edge. Chips light up white with
+no rim and 80%; the rim is drawn under the tile round the part the tile
+hides (`Batch::shadow_around`), so only its edge costs pixels. Chips light up white with
 dark text and lift 1.08; they never lean or take the light. The page and
 the art drift with focus (parallax) only on the home page.
 
