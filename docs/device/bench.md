@@ -203,3 +203,55 @@ App switches (`apps`, with Lumen at 3a89955): a cold start in front after
 1,710 ms (Netflix), 1,990 ms (YouTube) and 2,280 ms (plxnative); warm,
 120 to 220 ms. Target 5, a Home press to Lumen in front: 216 to 229 ms in
 all six.
+
+### 2026-11-10: the new home, the two paths and the Home key
+
+On the B9 (OLED55B9PUA, webOS 4.10.2-31, firmware 05.50.00), 02:45 to
+03:40 UTC, the owner having given the TV over (`--force`), Netflix and
+YouTube closed behind Lumen. Medians of three runs.
+
+| Build, pattern | Average frame | Skipped per 10 s | Start-up | Gate |
+|---|---|---|---|---|
+| 3a89955, home (the baseline again) | 16.84 ms | 2.14 | 502 ms | |
+| 8a4d844, home, full look | 17.01 ms | 0.00 | 549 ms | pass |
+| 8a4d844, pages-43s | 17.07 ms | 7.84 | 537 ms | pass |
+| 8a4d844, control-45s | 16.58 ms | 0.69 | 573 ms | pass |
+| bc053bd, pages-43s (before the fills) | 19.34 to 19.75 ms | 77 to 88 | | fail |
+| f19929a, home, dither from a 4x4 texture | 18.98 ms | 60.52 | 555 ms | fail |
+| main with every seat bound, SDL path | 16.70 ms | 0.45 | 562 ms | pass |
+| the same build, `{"platform":"wayland"}` | 17.00 ms | 1.30 | 440 ms | pass |
+
+The two paths, five cold starts each, the same build: the Wayland path's
+first frame came after 422 to 502 ms (median 436) and the SDL path's
+after 504 to 529 ms (median 520); 8 s in, the shell held 40.5 MB on the
+Wayland path and 49.4 MB on SDL.
+
+**The Home key acts on its release.** A robot Home press with YouTube in
+front and the shell alive behind it, timed from the key going down to the
+swap of Lumen's frame: 91 ms for a 40 ms hold, 217 ms for 180 ms and
+441 ms for 400 ms, twice each. So the TV takes 41 to 51 ms from the
+release, of which the shell's frame is 2 to 3 ms, and the 216 to 229 ms
+above was the bench's own 180 ms hold plus that. `apps` now says the hold
+and the time after the release.
+
+**A build measured with apps running behind it reads slower.** The same
+9d5a988 read 16.92 ms on 2026-11-09 and 17.21 to 17.28 ms on 2026-11-10,
+with the baseline unchanged; closing Netflix and YouTube (246 MB more
+available) brought the skips back but not the average. Not explained.
+
+**A shell started hidden answers Home in the time of a running one.**
+With HDMI 3 in front, a 180 ms robot Home press, three times each: with
+the shell closed, Lumen's first frame came 843 to 864 ms after the key
+went down (663 to 684 ms after its release, a cold start on the SDL
+path); with the shell started hidden on the Wayland path
+(`{"platform":"wayland","hidden":true}`, the input staying in front),
+216 to 218 ms (36 to 38 ms after the release). That is what `lumend`'s
+`shell` part is for.
+
+**The B9 lists two `wl_seat`s, and the remote's keys come on the second.**
+With only the first bound, the Wayland path drew and heard Home (through
+its luna registration) but no arrow reached it; with every seat bound,
+all 90 keys of the bench's pattern did, in each of three runs. Its key stamps are on a clock of the compositor's
+own, 2.9 s behind CLOCK_MONOTONIC, so the Wayland path times a key from
+when the shell reads it.
+

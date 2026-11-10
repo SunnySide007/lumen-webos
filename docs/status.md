@@ -17,31 +17,34 @@ which.
 
 | Stage | State | On the TV |
 |---|---|---|
-| 0. Rules | **Done** (324de1a). The lab window is 00:00 to 06:00 TV time with a dark screen, so runs that light the screen use daytime idle windows (20 minutes on Lumen or LG's screensaver). | In force |
-| 1. Fix and measure | **Done** (2026-11-08; report `tools/out/reports/stage1-20261108.md`). The robot writes keys into the Magic Remote's own node. Baselines in [device/bench.md, "Measured"](device/bench.md#measured): 3a89955 16.89 ms, start-up 541 ms, RSS 42,848 kB, Home press to Lumen 216 to 229 ms. The dither fix is merged (22366d5); the dither itself costs about 12.5 ms, so the default look drops it. | Measured |
-| 2. Speed | Not started. Lane L (platform layer) and lane M (`lumend`) are merged; none of their TV steps has run. | Nothing |
-| 3. Design | The new home in its own session and worktree (`claude/home-design-6d71ec`). 9d5a988's home passes the gate (16.92 ms); Pages (20.38 ms) and the Control Center (23.50 ms) fail it. bc053bd removes their full-screen dims and waits for a daytime window, then the f19929a pair (dither from a 4x4 texture). The branch merges only past the gate. | 9d5a988 measured; bc053bd queued |
-| 4. Privacy | Guard G1 logging since 2026-10-31. G2 (default deny, 5180f96) and G3 (Quad9 over DNS over TLS, acc15cb) are merged, both off. G2's trial steps 2 to 4 are queued for the night window of 2026-11-10 (08:00 UTC). Blocking for the family, and TLS on for good, are the owner's tier C yes. | G1 only |
-| 5. Finish | R3 (Lumen Remote for Windows, cfe8be4) and R4 (the phone's paired HTTPS door) are merged. Neither is verified: on 2026-11-09 no request from the Windows app reached the TV (the app has no saved TV and never opened a link). The sitting for both waits for the owner. | Nothing |
+| 0. Rules | **Done** (324de1a). Night window 00:00 to 06:00 TV time with a dark screen; daytime idle windows; from 2026-11-10 the owner's weekday slot, 10:00 to 15:00, in which an HDMI input in front is no bar. | In force |
+| 1. Fix and measure | **Done** (2026-11-08). Baselines in [device/bench.md, "Measured"](device/bench.md#measured). | Measured |
+| 2. Speed | **Under way.** `lumend` runs from boot with `s1`, `senders` (acr2), `lg-home`, `icons` and `modes`; its `shell`, `link` and `screen-off` parts are off. The Wayland path works once every seat is bound: first frame 436 ms against SDL's 520 ms, 40.5 MB against 49.4 MB, frames level. The Home key acts on its release: 41 to 51 ms from the release with the shell alive or started hidden, 663 to 684 ms with it closed. | `lumend` installed (door, five parts), rebooted once; Wayland by launch parameter only |
+| 3. Design | **The new home is merged** (9ef55e1, at 8a4d844) past the gate: home 17.01 ms, Pages 17.07 ms, Control Center 16.58 ms. The home-design session builds the six design notes next. | Installed as the Home |
+| 4. Privacy | Guard **G3's build runs in log mode**, in clear, from its own boot hook. Tried on the TV: default deny (`block trial`) with the live store-safe check and Netflix, YouTube and Plex launching; the learning window; Quad9 over TLS (`tls trial`), its fallback when port 853 is refused and its return; the clock fallback. Blocking for the family, and TLS for good, are the owner's tier C yes. | G3 binary and hook, log mode |
+| 5. Finish | R3 and R4 are merged, neither verified: the Windows app never saved a TV or opened a link. The sitting for both waits for the owner. | Nothing |
 
 ## On the TV
 
-* **Installed:** 3a89955 (binary b1605833…), the last good build; every
-  bench run ends with it put back.
-* **Hooks:** S1 privacy, Guard G1 (log only), `lumen-home`, `lumen-ctl`
-  behind its forced key, route D (Lumen is the Home).
-* **Not on it:** `lumend`, the Wayland path, Guard G2 and G3,
-  `lumen-remote` and its 8443 rule.
+* **Installed:** main with every seat bound (the commit after 9ef55e1),
+  the new home, as the Home on the SDL path. The last good build before
+  it, 3a89955, is kept in `tools/out/archive/tv-check-20261031T184850Z/restore/`.
+* **Hooks** in `/var/lib/webosbrew/init.d`: `lumen-guard` (G3) and `lumend`
+  (the door). `lumen-privacy` and `lumen-home` are retired to
+  `/var/lib/lumen/lumend/retired/`; `tools/lumend.sh door remove` puts
+  them back. `lumen-ctl` behind its forced key and route D are as before.
+* **Not on it:** `lumen-remote` and its 8443 rule; Guard blocking; TLS.
 
 ## Next
 
-Drain what is merged but unmeasured before building more:
-
-1. The bench chain in daytime windows: bc053bd (pages, control, full),
-   then f19929a (dither, full). Merge the home design once the gate passes.
-2. Night of 2026-11-10: G2 trial steps 2 to 4 and the lean survey; steps 5
-   to 8 on later nights, then G3's trial.
+1. `lumend`'s `shell` part: the shell sends `leaving` before a deliberate
+   exit, lumend launches it hidden on the Wayland path at boot and after
+   a close. Then Wayland for every launch, after the owner has used the
+   real remote on it (Back, the pointer, a click).
+2. Guard's log-mode preview over days of the family's use (G2 step 5),
+   then the owner's two tier C questions with the results.
 3. The R3 and R4 sitting with the owner, the TV lock held throughout.
-4. Stage 2 (speed): lane L's TV steps 1 to 12, `lumend`'s parts one at a
-   time, the shell kept resident, Home press under 150 ms, then the lean
-   track's candidates from the survey.
+4. The lean track from the survey: apps left running behind Lumen hold far
+   more memory than any LG job (Prime Video's 134 MB, Netflix and YouTube
+   246 MB together), so the first candidate is closing them, not stopping
+   jobs.
