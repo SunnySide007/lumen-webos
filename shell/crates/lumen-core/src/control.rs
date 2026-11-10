@@ -13,6 +13,7 @@ use std::fmt;
 
 use crate::anim::Spring;
 use crate::art::Look;
+use crate::layout;
 use crate::privacy::{self, Reading};
 use crate::style;
 
@@ -251,6 +252,32 @@ impl Control {
         true
     }
 
+    /// Focuses row `i`, as the pointer over it does; false if it had focus
+    /// already (or there is no such row).
+    pub fn focus_row(&mut self, i: usize) -> bool {
+        if i >= ROWS || i == self.focus {
+            return false;
+        }
+        self.lifts[self.focus].set_target(0.0);
+        self.lifts[i].set_target(1.0);
+        self.focus = i;
+        true
+    }
+
+    /// The switch row under the point `x`,`y`, with the panel where it is
+    /// drawn now under `look`.
+    pub fn row_under(&self, x: f32, y: f32, look: Look) -> Option<usize> {
+        let panel = layout::panel(self.offset(look));
+        (0..ROWS).find(|&i| layout::motion_row(panel, i).contains(x, y))
+    }
+
+    /// How far right of its place the panel is now, under `look`.
+    fn offset(&self, look: Look) -> f32 {
+        let shown = self.shown.value().clamp(0.0, 1.0);
+        let slide = if look.slide { style::PANEL_SLIDE } else { 0.0 };
+        slide * (1.0 - shown)
+    }
+
     pub fn set_reading(&mut self, reading: Reading) {
         self.reading = reading;
     }
@@ -275,10 +302,9 @@ impl Control {
         if shown <= 0.001 && !self.is_open() {
             return None;
         }
-        let slide = if look.slide { style::PANEL_SLIDE } else { 0.0 };
         Some(ControlView {
             shown,
-            offset: slide * (1.0 - shown),
+            offset: self.offset(look),
             privacy: privacy::lines(&self.reading),
             motion: vec![MotionRow {
                 label: REDUCE_MOTION,

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime};
 use lumen_core::apps::{App, AppId, LaunchError, Launcher};
 use lumen_core::art::Look;
 use lumen_core::control::Reduced;
-use lumen_core::home::{BackAtTop, Effect, Home, LIFT};
+use lumen_core::home::{BackAtTop, Effect, Home, LIFT, Over};
 use lumen_core::input::{Action, Input, Press, action_for, scancode};
 use lumen_core::privacy::{self, Reading};
 
@@ -27,6 +27,22 @@ const LAUNCH_AFTER: Duration = Duration::from_nanos((1e9 / LIFT.omega as f64) as
 /// How often the loop looks for the Privacy read's answer while it is on
 /// its way. The panel's other lines draw meanwhile.
 const PRIVACY_POLL: Duration = Duration::from_millis(50);
+/// How far the pointer must move, in the layout's pixels, before it takes
+/// focus back from a key or from the window coming in front: past a hand's
+/// tremor on the Magic Remote, well under a tile.
+const POINTER_SLOP: i32 = 12;
+
+/// Whether the pointer's moves move focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hover {
+    /// They do.
+    Free,
+    /// Not until the pointer is `POINTER_SLOP` from where it was when a key
+    /// or the window coming in front took over, or from the first place it
+    /// reports if none was known: a pointer left over a tile does not take
+    /// focus from the arrows, nor from Home's first tile.
+    Parked(Option<(i32, i32)>),
+}
 
 /// Everything the loop decides, apart from SDL and GL, so it can be tested.
 pub(super) struct Shell<L: Launcher> {
@@ -63,6 +79,11 @@ pub(super) struct Shell<L: Launcher> {
     pub(super) can_hide_pointer: bool,
     /// An arrow came while the pointer showed: the loop hides it.
     hide_pointer_due: bool,
+    /// Where the pointer last was, in the layout's coordinates.
+    pointer_at: Option<(i32, i32)>,
+    hover: Hover,
+    /// Button 1 went down over nothing: its up is no OK either.
+    click_over_nothing: bool,
     /// The last input and the next heartbeat (docs/specs/shell-mvp.md,
     /// "Input diagnostics").
     pub(super) idle: Idle,
@@ -117,6 +138,9 @@ impl<L: Launcher> Shell<L> {
             pointer: Pointer::default(),
             can_hide_pointer: false,
             hide_pointer_due: false,
+            pointer_at: None,
+            hover: Hover::Parked(None),
+            click_over_nothing: false,
             idle: Idle::new(now),
             shared,
             motion_file: None,
@@ -306,9 +330,11 @@ impl<L: Launcher> Shell<L> {
                     return;
                 }
                 // Keys only reach the app in front, so a real press means the
-                // screen is showing (SDL repeats do not count).
+                // screen is showing (SDL repeats do not count). A key takes
+                // over from the pointer until it moves again.
                 if !repeat && action.is_some() {
                     self.show("a key press", at);
+                    self.park_pointer();
                 }
                 // An OK pressed while the pointer shows arrives as a click
                 // (B9, 2026-10-22), so an arrow puts the pointer away where
@@ -350,7 +376,12 @@ impl<L: Launcher> Shell<L> {
             Event::MouseButton { button, down, x, y } => {
                 self.mouse_button(button, down, x, y, now, at)
             }
-            Event::MouseMotion | Event::MouseWheel => {
+            Event::MouseMotion { x, y } => {
+                self.input(now);
+                self.since_key.other();
+                self.pointer_moved(x, y, now);
+            }
+            Event::MouseWheel => {
                 self.input(now);
                 self.since_key.other();
             }
@@ -389,6 +420,7 @@ impl<L: Launcher> Shell<L> {
             return;
         }
         self.input.release_all();
+        self.park_pointer();
         if self.home.focus_first(now) {
             info!("Home with Lumen in front: focus to the first tile");
             self.relaunched.came_back(at);
@@ -407,17 +439,56 @@ impl<L: Launcher> Shell<L> {
         }
     }
 
-    /// A pointer button. Button 1 down is OK, through OK's own path: it is
-    /// timed as key 40, counts as a key for the focus lines, and launches
-    /// once a frame shows the press pulse's dip. Other buttons are only
-    /// logged.
+    /// Keys or the window coming in front take focus over from the pointer,
+    /// where it is now, until it moves again (`Hover::Parked`).
+    fn park_pointer(&mut self) {
+        self.hover = Hover::Parked(self.pointer_at);
+    }
+
+    /// The pointer moved to `x`,`y`, in the layout's coordinates: focus
+    /// goes to what is under it, unless a key has it (`Hover`).
+    fn pointer_moved(&mut self, x: i32, y: i32, now: Duration) {
+        self.pointer_at = Some((x, y));
+        match self.hover {
+            Hover::Parked(None) => {
+                self.hover = Hover::Parked(Some((x, y)));
+                return;
+            }
+            Hover::Parked(Some((x0, y0)))
+                if (x - x0).abs() < POINTER_SLOP && (y - y0).abs() < POINTER_SLOP =>
+            {
+                return;
+            }
+            _ => self.hover = Hover::Free,
+        }
+        if self.home.point(x as f32, y as f32, now) == Over::Moved {
+            info!("pointer at {x},{y}: focus to {}", self.focus_name());
+        }
+    }
+
+    /// What has focus, for the pointer's lines.
+    fn focus_name(&self) -> String {
+        if self.home.control_open() {
+            return "Reduce Motion".to_owned();
+        }
+        match self.home.focused() {
+            Some(i) => self.home.apps()[i].title.clone(),
+            None => "the gear".to_owned(),
+        }
+    }
+
+    /// A pointer button. Button 1 down opens what is under the pointer:
+    /// focus goes there, then it is OK, through OK's own path: it is timed
+    /// as key 40, counts as a key for the focus lines, and launches once a
+    /// frame shows the press pulse's dip. Over nothing, it does nothing and
+    /// is logged as ignored, as other buttons are.
     fn mouse_button(&mut self, button: u8, down: bool, x: i32, y: i32, now: Duration, at: Instant) {
         self.input(now);
         let stamp = self.stamp(at, now);
         if !down {
             info!("mouse button {button} up at {x},{y}");
             self.since_key.other();
-            if button == 1 {
+            if button == 1 && !std::mem::take(&mut self.click_over_nothing) {
                 for press in self.input.key_up(scancode::RETURN, stamp) {
                     self.press(press, now);
                 }
@@ -428,6 +499,21 @@ impl<L: Launcher> Shell<L> {
             info!("mouse button {button} down at {x},{y}: ignored");
             self.since_key.other();
             return;
+        }
+        self.pointer_at = Some((x, y));
+        self.hover = Hover::Free;
+        // The lines keep their 2026-10-22 words, which tools/frame-stats.sh
+        // counts; what the click opens is the `pointer at` line before.
+        match self.home.point(x as f32, y as f32, now) {
+            Over::Nothing => {
+                info!("mouse button 1 down at {x},{y}: ignored");
+                self.click_over_nothing = true;
+                self.since_key.other();
+                self.show("a click", at);
+                return;
+            }
+            Over::Moved => info!("pointer at {x},{y}: focus to {}", self.focus_name()),
+            Over::Focused => {}
         }
         info!("mouse button 1 down at {x},{y}: taken as OK");
         self.since_key.key(at);
@@ -447,7 +533,10 @@ impl<L: Launcher> Shell<L> {
         }
         self.since_key.other();
         match id {
-            FOCUS_GAINED => self.focused = true,
+            FOCUS_GAINED => {
+                self.focused = true;
+                self.park_pointer();
+            }
             FOCUS_LOST => self.focused = false,
             _ => {}
         }
@@ -497,6 +586,7 @@ impl<L: Launcher> Shell<L> {
         if !self.visible {
             info!("in front again ({cause}): drawing resumes");
             self.visible = true;
+            self.park_pointer();
             self.home.mark_dirty();
             self.foreground.came_back(at);
             // What was in front meanwhile, as the luna watch saw it: the
@@ -803,13 +893,134 @@ mod tests {
         assert!(!shell.keys.is_waiting());
     }
 
+    /// The middle of the row's first tile, Netflix's, in the layout.
+    const FIRST_TILE: (i32, i32) = (240, 702);
+
     fn click(button: u8, down: bool) -> Event {
-        Event::MouseButton {
-            button,
-            down,
-            x: 1408,
-            y: 431,
-        }
+        click_at(button, down, FIRST_TILE)
+    }
+
+    fn click_at(button: u8, down: bool, (x, y): (i32, i32)) -> Event {
+        Event::MouseButton { button, down, x, y }
+    }
+
+    fn motion((x, y): (i32, i32)) -> Event {
+        Event::MouseMotion { x, y }
+    }
+
+    /// The middle of the row's tile `i`, and its app.
+    fn row_tile<L: Launcher>(shell: &Shell<L>, i: usize) -> ((i32, i32), AppId) {
+        let rect = lumen_core::layout::row_tile(i);
+        let (x, y) = (rect.centre_x(), rect.centre_y());
+        let app = shell
+            .home
+            .view()
+            .tiles
+            .iter()
+            .find(|t| t.rect.contains(x, y))
+            .expect("a tile there")
+            .app
+            .id
+            .clone();
+        ((x as i32, y as i32), app)
+    }
+
+    fn focused_id<L: Launcher>(shell: &Shell<L>) -> Option<AppId> {
+        shell
+            .home
+            .focused()
+            .map(|i| shell.home.apps()[i].id.clone())
+    }
+
+    #[test]
+    fn a_click_opens_the_tile_under_the_pointer_not_the_focused_one() {
+        let mut shell = shell();
+        let (point, app) = row_tile(&shell, 2);
+        assert_ne!(focused_id(&shell), Some(app.clone()));
+        let lines = said(|| {
+            send(&mut shell, click_at(1, true, point), 0);
+            send(&mut shell, click_at(1, false, point), 150);
+        });
+        let title = &shell.home.apps()[shell.home.focused().unwrap()].title;
+        let (x, y) = point;
+        assert_eq!(
+            lines[..2],
+            [
+                format!("pointer at {x},{y}: focus to {title}"),
+                format!("mouse button 1 down at {x},{y}: taken as OK"),
+            ]
+        );
+        shell.frame_shown(at(17));
+        assert!(shell.launch_if_due(ms(34), &SystemClock, || ms(34)));
+        assert_eq!(shell.launcher.launched(), &[app]);
+    }
+
+    #[test]
+    fn a_click_over_nothing_does_nothing() {
+        let mut shell = shell();
+        let before = focused_id(&shell);
+        let lines = said(|| {
+            send(&mut shell, click_at(1, true, (1408, 431)), 0);
+            send(&mut shell, click_at(1, false, (1408, 431)), 150);
+        });
+        assert_eq!(
+            lines,
+            [
+                "mouse button 1 down at 1408,431: ignored",
+                "mouse button 1 up at 1408,431",
+            ]
+        );
+        assert_eq!(focused_id(&shell), before);
+        assert!(!shell.keys.is_waiting(), "no press");
+        assert!(!shell.input.is_holding());
+        assert!(!shell.launch_if_due(ms(100), &SystemClock, || ms(100)));
+        assert!(shell.launcher.launched().is_empty());
+    }
+
+    #[test]
+    fn the_pointer_moves_focus_once_it_moves_and_a_key_takes_over() {
+        let mut shell = shell();
+        let netflix = focused_id(&shell);
+        let ((x, y), second) = row_tile(&shell, 1);
+        let ((x3, y3), third) = row_tile(&shell, 3);
+        // Where the pointer first says it is, it takes nothing: it may only
+        // have been left there.
+        send(&mut shell, motion((x, y)), 0);
+        send(&mut shell, motion((x + 5, y - 5)), 10);
+        assert_eq!(focused_id(&shell), netflix);
+        let lines = said(|| send(&mut shell, motion((x + 20, y)), 20));
+        assert_eq!(focused_id(&shell), Some(second.clone()));
+        let title = &shell.home.apps()[shell.home.focused().unwrap()].title;
+        assert_eq!(
+            lines,
+            [format!("pointer at {},{y}: focus to {title}", x + 20)]
+        );
+        // Moves within the tile say nothing more.
+        let lines = said(|| send(&mut shell, motion((x - 20, y + 20)), 30));
+        assert!(lines.is_empty(), "{lines:?}");
+        // An arrow takes over: the pointer, still over the tile, leaves
+        // focus where the arrow put it until it moves on.
+        key(&mut shell, scancode::RIGHT, 40);
+        let after_arrow = focused_id(&shell);
+        assert_ne!(after_arrow, Some(second.clone()));
+        send(&mut shell, motion((x - 18, y + 22)), 50);
+        assert_eq!(focused_id(&shell), after_arrow);
+        send(&mut shell, motion((x3, y3)), 60);
+        assert_eq!(focused_id(&shell), Some(third));
+        // Home with Lumen in front puts focus on the first tile, and the
+        // pointer resting over another one leaves it there.
+        send(&mut shell, Event::Relaunch { home_key: true }, 70);
+        assert_eq!(focused_id(&shell), netflix);
+        send(&mut shell, motion((x3 + 4, y3 - 3)), 80);
+        assert_eq!(focused_id(&shell), netflix);
+        // So does the window coming back in front.
+        send(&mut shell, Event::Window(sdl::window::FOCUS_LOST), 90);
+        send(&mut shell, Event::Window(sdl::window::FOCUS_GAINED), 100);
+        send(&mut shell, motion((x3 + 8, y3 - 6)), 110);
+        assert_eq!(focused_id(&shell), netflix);
+        // Until it moves on.
+        send(&mut shell, motion((x3 + 30, y3)), 120);
+        assert_ne!(focused_id(&shell), netflix);
     }
 
     #[test]
@@ -822,8 +1033,8 @@ mod tests {
         assert_eq!(
             lines,
             [
-                "mouse button 1 down at 1408,431: taken as OK",
-                "mouse button 1 up at 1408,431",
+                "mouse button 1 down at 240,702: taken as OK",
+                "mouse button 1 up at 240,702",
             ]
         );
         assert!(shell.wants_frame(), "the press pulse is drawn first");
@@ -848,7 +1059,7 @@ mod tests {
             send(&mut shell, click(1, true), 1_000);
             send(&mut shell, Event::Window(sdl::window::FOCUS_LOST), 3_500);
         });
-        assert_eq!(lines[0], "mouse button 1 down at 1408,431: taken as OK");
+        assert_eq!(lines[0], "mouse button 1 down at 240,702: taken as OK");
         assert_eq!(lines[1], "in front again (a click): drawing resumes");
         assert_eq!(
             lines[2],
@@ -866,8 +1077,8 @@ mod tests {
         assert_eq!(
             lines,
             [
-                "mouse button 3 down at 1408,431: ignored",
-                "mouse button 3 up at 1408,431",
+                "mouse button 3 down at 240,702: ignored",
+                "mouse button 3 up at 240,702",
             ]
         );
         assert!(!shell.wants_frame());
@@ -958,7 +1169,7 @@ mod tests {
     fn the_heartbeat_counts_from_the_last_input_of_any_kind() {
         let mut shell = shell();
         assert_eq!(shell.heartbeat(ms(29_000)), None);
-        send(&mut shell, Event::MouseMotion, 10_000);
+        send(&mut shell, Event::MouseMotion { x: 0, y: 0 }, 10_000);
         assert_eq!(shell.heartbeat(ms(30_000)), None, "the motion was input");
         send(&mut shell, Event::Window(sdl::window::FOCUS_GAINED), 10_001);
         assert_eq!(

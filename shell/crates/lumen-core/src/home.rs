@@ -57,6 +57,17 @@ pub enum Effect {
     SaveMotion(Reduced),
 }
 
+/// What the pointer is over, as `Home::point` found it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Over {
+    /// Nothing that takes focus: focus stays where it was.
+    Nothing,
+    /// What had focus already.
+    Focused,
+    /// Something else, which has focus now.
+    Moved,
+}
+
 /// The gear on screen.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GearView {
@@ -511,10 +522,104 @@ impl Home {
             Some(to) => {
                 self.spot = Some(to);
                 self.focus_changed(from, dir);
+                // The grid scrolls to show the row focus went to; only keys
+                // scroll it (`point`).
+                if let Spot::Grid(i) = to {
+                    self.scroll
+                        .set_target(layout::grid_scroll_for_row(i / layout::GRID_COLUMNS));
+                }
             }
             // A repeat that reaches an edge stops there; only a fresh press bumps.
             None if !repeat => self.bump(dir),
             None => {}
+        }
+    }
+
+    /// Focuses what is under the Magic Remote's pointer at `x`,`y`, in the
+    /// layout's coordinates, where it is drawn now. What has focus keeps it
+    /// while the pointer is within its lifted size, and anything else takes
+    /// it once the pointer is within its resting size, so focus never
+    /// flutters at the edge between two. Over the gaps between them, focus
+    /// stays. The "Other apps" page does not scroll for it, as it does for
+    /// keys: a scroll would bring another tile under a pointer held still,
+    /// which would scroll again. With the Control Center open, only its
+    /// rows take focus.
+    pub fn point(&mut self, x: f32, y: f32, now: Duration) -> Over {
+        self.advance_to(now);
+        if self.control.is_open() {
+            return match self.control.row_under(x, y, self.look) {
+                None => Over::Nothing,
+                Some(i) if self.control.focus_row(i) => {
+                    self.dirty = true;
+                    Over::Moved
+                }
+                Some(_) => Over::Focused,
+            };
+        }
+        let Some(spot) = self.spot else {
+            return Over::Nothing;
+        };
+        if self.spot_rect(spot, true).contains(x, y) {
+            return Over::Focused;
+        }
+        let Some(to) = self.spot_under(x, y).filter(|&to| to != spot) else {
+            return Over::Nothing;
+        };
+        let (a, b) = (self.spot_rect(spot, false), self.spot_rect(to, false));
+        let (dx, dy) = (b.centre_x() - a.centre_x(), b.centre_y() - a.centre_y());
+        let dir = match (dx.abs() >= dy.abs(), dx >= 0.0, dy >= 0.0) {
+            (true, true, _) => Dir::Right,
+            (true, false, _) => Dir::Left,
+            (false, _, true) => Dir::Down,
+            (false, _, false) => Dir::Up,
+        };
+        let from = self.focused();
+        if let Spot::Grid(i) = to {
+            self.grid.set(i);
+        }
+        self.spot = Some(to);
+        self.focus_changed(from, dir);
+        Over::Moved
+    }
+
+    /// The place on the page in view (the one it is turning to) whose
+    /// resting rect, where it is drawn now, holds `x`,`y`.
+    fn spot_under(&self, x: f32, y: f32) -> Option<Spot> {
+        let spots: Vec<Spot> = if self.on_others() {
+            (0..self.lines.others.len()).map(Spot::Grid).collect()
+        } else {
+            (0..self.lines.row.len())
+                .map(Spot::Row)
+                .chain((0..self.lines.chips.len()).map(Spot::Chip))
+                .chain(std::iter::once(Spot::Gear))
+                .collect()
+        };
+        spots
+            .into_iter()
+            .find(|&spot| self.spot_rect(spot, false).contains(x, y))
+    }
+
+    /// Where `spot` is drawn now, as `view` places it but for the bump:
+    /// resting, or fully `lifted`.
+    fn spot_rect(&self, spot: Spot, lifted: bool) -> Rect {
+        let page = self.page.value().clamp(0.0, 1.0);
+        let slide = if self.look.slide {
+            style::PAGE_SLIDE
+        } else {
+            0.0
+        };
+        let lift = if lifted { 1.0 } else { 0.0 };
+        let home_dy = -slide * page;
+        match spot {
+            Spot::Row(k) => layout::lifted(layout::row_tile(k).offset(0.0, home_dy), lift),
+            Spot::Chip(k) => layout::chip_lifted(self.chip_rects[k].offset(0.0, home_dy), lift),
+            Spot::Gear => layout::GEAR
+                .scaled(1.0 + (layout::GEAR_FOCUS_SCALE - 1.0) * lift)
+                .offset(0.0, home_dy),
+            Spot::Grid(k) => {
+                let dy = slide * (1.0 - page) - self.scroll.value();
+                layout::lifted(layout::grid_tile(k).offset(0.0, dy), lift)
+            }
         }
     }
 
@@ -544,10 +649,6 @@ impl Home {
             dir,
             from: self.now,
         });
-        if let Some(Spot::Grid(i)) = self.spot {
-            self.scroll
-                .set_target(layout::grid_scroll_for_row(i / layout::GRID_COLUMNS));
-        }
         self.update_wanted();
         self.dirty = true;
     }

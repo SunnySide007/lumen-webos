@@ -213,6 +213,7 @@ pointer shown
 pointer hidden
 mouse button <b> down at <x>,<y>: taken as OK
 mouse button <b> down at <x>,<y>: ignored
+pointer at <x>,<y>: focus to <name>
 mouse button <b> up at <x>,<y>
 pointer: SDL_webOSCursorVisibility found in LG's SDL; arrows hide the pointer
 pointer: SDL_webOSCursorVisibility not in LG's SDL; the pointer stays as LG leaves it
@@ -232,9 +233,15 @@ no input for <N> s; focused <yes|no>; pointer <shown|hidden>; power <state|unkno
   SDL-webOS names `SDL_SCANCODE_WEBOS_CURSOR_SHOW` and
   `SDL_SCANCODE_WEBOS_CURSOR_HIDE`. The shell keeps the pointer's state from
   them.
-* `mouse button`: every press and release, not only the first. A left-button
-  (button 1) down while the pointer shows is taken as OK and timed as
-  `key 40: shown after <N> ms`. Any other button is logged as ignored.
+* `mouse button`: every press and release, not only the first, at its place
+  in the layout. A left-button (button 1) down over something opens it
+  ("The home", The pointer): it is taken as OK and timed as
+  `key 40: shown after <N> ms`. Over nothing it is ignored, as any other
+  button is. The words are 2026-10-22's, which `tools/frame-stats.sh`
+  counts; until 2026-11-10 button 1 was OK on whatever had focus.
+* `pointer at`: each time the pointer moves focus, by moving or by a click
+  (just before its `mouse button` line), with what has it now: an app's
+  name, `the gear` or `Reduce Motion`.
 * `pointer:` once at start-up. If LG's SDL exports
   `SDL_webOSCursorVisibility`, an arrow hides a shown pointer, so the next OK
   arrives as key 40. If not, the pointer stays as LG leaves it.
@@ -587,6 +594,32 @@ Back from a chip goes to the row; from the Other apps page, to its tile; on
 the row, it goes back to what was playing (a launch), and with nothing
 playing it does nothing: the shell owns Home now (`BackAtTop::Stay`), so
 Back no longer closes it.
+
+**The pointer** selects what is under it (the owner's first test with the
+real remote, 2026-11-10: "the pointer does not select the tile i want";
+until then a click was OK on whatever had focus, wherever the pointer was).
+Both paths report where it is (SDL's 0x400 at upstream's offsets, Wayland's
+`wl_pointer` enter and motion), the loop puts that in the layout's
+coordinates through the viewport (the same place on the TV, whose window is
+1920 × 1080), and `Home::point` finds what is there where it is drawn now:
+
+* Moving over a tile, a chip, the gear or a tile on Other apps moves focus
+  there, with the lean and the light of a key's move toward it. What has
+  focus keeps it while the pointer is within its lifted size, and anything
+  else takes it only within its resting size, so focus never flutters at an
+  edge; over the gaps between them, the clock or the art, focus stays.
+* The pointer never scrolls Other apps: a scroll would bring another tile
+  under a pointer held still, which would scroll again, row after row. It
+  focuses any tile it is over, the fourth row's sliver included; the arrows
+  scroll as before.
+* A click (button 1) opens what is under it: focus goes there, then it is
+  OK through OK's own path, timed as key 40. Over nothing, it does nothing.
+  With the Control Center open, only its rows take focus or a click.
+* A key takes over from the pointer: after an arrow, OK, Back, Home with
+  Lumen in front or the window coming back in front, the pointer moves focus
+  again only once it has moved 12 px from where it was, so a pointer left
+  resting over a tile takes nothing from the arrows or from Home's first
+  tile.
 
 **What was playing** is the last app in front that was not Lumen, LG's
 screensaver, LG's Home or nothing, as `getForegroundAppInfo` says (the

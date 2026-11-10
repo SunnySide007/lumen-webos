@@ -849,7 +849,9 @@ no input for <N> s; focused <yes|no>; pointer <shown|hidden>; power <state|unkno
   it is timed as `key 40: shown after N ms`, counts as a key for the focus
   lines, and launches once a frame shows the pulse's dip (Navigation). Its
   release releases the key. Other buttons are logged and ignored. The
-  position is logged, not used: nothing is pointed at.
+  position is logged, not used: nothing is pointed at. (Since 2026-11-10 a
+  click opens what is under the pointer, and moving it moves focus:
+  look-and-feel.md, "The home", The pointer.)
 * **Arrows hide the pointer** when LG's SDL exports
   `SDL_webOSCursorVisibility` (webosbrew's fork has it; `dlsym` at start-up
   says whether LG's 2.0.5 does, in the `pointer:` line), as moonlight-tv

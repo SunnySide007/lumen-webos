@@ -971,3 +971,145 @@ fn the_pages_hand_over_and_cross_only_faintly() {
     let (home, others) = page_fades(0.5);
     assert!((home - others).abs() < 1e-6, "even at the middle");
 }
+
+impl Sim {
+    fn point(&mut self, x: f32, y: f32) -> Over {
+        self.home.point(x, y, self.now)
+    }
+
+    fn point_at(&mut self, rect: Rect) -> Over {
+        self.point(rect.centre_x(), rect.centre_y())
+    }
+}
+
+#[test]
+fn the_pointer_focuses_the_tile_under_it_and_the_gaps_keep_focus() {
+    let mut sim = Sim::full();
+    let row: Vec<String> = sim
+        .home
+        .lines
+        .row
+        .iter()
+        .map(|&i| sim.home.apps()[i].title.clone())
+        .collect();
+    assert_eq!(sim.point_at(layout::row_tile(0)), Over::Focused);
+    assert_eq!(sim.point_at(layout::row_tile(2)), Over::Moved);
+    assert_eq!(sim.focused_title(), row[2]);
+    assert_eq!(
+        sim.home.view().title,
+        Some(row[2].as_str()),
+        "the title follows"
+    );
+    // In the gap to the next tile, past the focused one's lift: focus stays.
+    let gap_x = layout::row_tile(3).x - 4.0;
+    assert_eq!(sim.point(gap_x, layout::ROW_Y + 90.0), Over::Nothing);
+    assert_eq!(sim.focused_title(), row[2]);
+    // Over the background, the clock or the title: nothing either.
+    assert_eq!(sim.point(960.0, 300.0), Over::Nothing);
+    assert_eq!(sim.focused_title(), row[2]);
+    // Arrows go on from where the pointer left focus.
+    sim.presses(&[LEFT]);
+    assert_eq!(sim.focused_title(), row[1]);
+}
+
+#[test]
+fn focus_stays_on_its_tile_while_the_pointer_is_within_its_lift() {
+    let mut sim = Sim::full();
+    let (one, two) = (layout::row_tile(1), layout::row_tile(2));
+    let y = one.centre_y();
+    assert_eq!(sim.point(two.x + 1.0, y), Over::Moved);
+    let on_two = sim.home.focused();
+    // Back across the edge into the gap, still within the lifted tile.
+    let grown = layout::lifted(two, 1.0);
+    assert!(grown.x < two.x - 10.0);
+    assert_eq!(sim.point(two.x - 10.0, y), Over::Focused);
+    // The neighbour takes focus only at its own resting edge.
+    assert_eq!(sim.point(one.right() + 1.0, y), Over::Nothing);
+    assert_eq!(sim.home.focused(), on_two);
+    assert_eq!(sim.point(one.right() - 1.0, y), Over::Moved);
+    assert_ne!(sim.home.focused(), on_two);
+    // Along the row and back by a pixel at a time, focus changes once
+    // each way, never back and forth.
+    let mut changes = 0;
+    let mut x = one.centre_x();
+    while x < two.centre_x() {
+        changes += usize::from(sim.point(x, y) == Over::Moved);
+        x += 1.0;
+    }
+    while x > one.centre_x() {
+        changes += usize::from(sim.point(x, y) == Over::Moved);
+        x -= 1.0;
+    }
+    assert_eq!(changes, 2);
+}
+
+#[test]
+fn the_pointer_reaches_the_chips_and_the_gear() {
+    let mut sim = Sim::full();
+    let first_chip = sim.home.lines.chips[0];
+    let title = sim.home.apps()[first_chip].title.clone();
+    let rect = sim.chip(&title).rect;
+    assert_eq!(sim.point_at(rect), Over::Moved);
+    assert_eq!(sim.focused_title(), title);
+    assert_eq!(sim.point_at(layout::GEAR), Over::Moved);
+    assert_eq!(sim.home.focused(), None);
+    assert_eq!(sim.home.view().title, Some(CONTROL_TITLE));
+    // A click on it is OK there: the Control Center opens.
+    assert_eq!(sim.press(OK), Some(Effect::ReadPrivacy));
+    sim.settle();
+    // Open, only its row takes focus; the home under it does not.
+    let row = layout::motion_row(layout::PANEL, 0);
+    assert_eq!(sim.point_at(row), Over::Focused);
+    assert_eq!(sim.point_at(layout::row_tile(0)), Over::Nothing);
+    assert_eq!(sim.point(row.x - 1.0, row.centre_y()), Over::Nothing);
+    assert!(sim.home.view().control.expect("open").motion[0].focused);
+    assert_eq!(sim.press(BACK), None);
+    sim.settle();
+    assert_eq!(sim.home.view().title, Some(CONTROL_TITLE), "still the gear");
+}
+
+#[test]
+fn on_other_apps_the_pointer_takes_the_grid_and_never_scrolls_it() {
+    let apps: Vec<App> = mock_apps().into_iter().cycle().take(40).collect();
+    let mut sim = Sim::new(apps, BackAtTop::Exit);
+    sim.presses(&[RIGHT, RIGHT, RIGHT, RIGHT, OK]);
+    sim.settle();
+    let others = sim.home.lines.others.clone();
+    // The top of the home row's place is the grid's second row now.
+    let k = layout::GRID_COLUMNS + 3;
+    let (x, y) = (layout::row_tile(3).centre_x(), layout::ROW_Y + 10.0);
+    assert!(layout::grid_tile(k).contains(x, y));
+    assert_eq!(sim.point(x, y), Over::Moved);
+    assert_eq!(sim.home.focused(), Some(others[k]));
+    // The third row shows whole: the pointer focuses it, and the page stays.
+    let third = layout::grid_tile(2 * layout::GRID_COLUMNS + 1);
+    assert!(third.bottom() < layout::SCREEN_H);
+    assert_eq!(sim.point_at(third), Over::Moved);
+    sim.settle();
+    assert_eq!(
+        sim.home.view().heading_y,
+        layout::HEADING_BASELINE,
+        "no scroll"
+    );
+    // The fourth row's top edge, just on screen, as well.
+    let fourth = layout::grid_tile(3 * layout::GRID_COLUMNS + 1);
+    assert_eq!(
+        sim.point(fourth.centre_x(), layout::SCREEN_H - 2.0),
+        Over::Moved
+    );
+    sim.settle();
+    assert_eq!(
+        sim.home.view().heading_y,
+        layout::HEADING_BASELINE,
+        "no scroll"
+    );
+    // A key scrolls to it as ever.
+    sim.presses(&[DOWN]);
+    sim.settle();
+    assert!(sim.home.view().heading_y < layout::HEADING_BASELINE);
+    // And the pointer finds tiles where they are drawn, scrolled.
+    let scrolled = layout::HEADING_BASELINE - sim.home.view().heading_y;
+    let first = layout::grid_tile(layout::GRID_COLUMNS).offset(0.0, -scrolled);
+    assert_eq!(sim.point_at(first), Over::Moved);
+    assert_eq!(sim.home.focused(), Some(others[layout::GRID_COLUMNS]));
+}

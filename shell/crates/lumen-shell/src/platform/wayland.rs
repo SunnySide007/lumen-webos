@@ -843,7 +843,8 @@ impl Inner {
                 ) {
                     self.state.borrow_mut().pointer_at = (x, y);
                 }
-                self.push(Event::MouseMotion, now);
+                let (x, y) = self.state.borrow().pointer_at;
+                self.push(Event::MouseMotion { x, y }, now);
             }
             (Kind::Pointer, "button") => {
                 if let (Some(code), Some(down)) = (uint(2), uint(3)) {

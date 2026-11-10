@@ -36,6 +36,16 @@ impl Rect {
         self.x + self.w / 2.0
     }
 
+    pub fn centre_y(&self) -> f32 {
+        self.y + self.h / 2.0
+    }
+
+    /// Whether the point `x`,`y` is inside, its left and top edges included
+    /// and its right and bottom ones not, so rects that meet share no point.
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        x >= self.x && x < self.right() && y >= self.y && y < self.bottom()
+    }
+
     /// Scaled by `s` about its centre.
     pub fn scaled(&self, s: f32) -> Self {
         let (w, h) = (self.w * s, self.h * s);

@@ -79,6 +79,8 @@ pub trait Screen {
     fn icons_loading(&self) -> bool;
     /// How wide `text` is at `px`, as it is drawn.
     fn text_width(&self, text: &str, px: f32) -> f32;
+    /// Where the window's point `x`,`y` falls in the layout, as drawn.
+    fn layout_point(&self, x: i32, y: i32) -> (f32, f32);
     /// Makes every glyph `apps`' titles need and uploads them, and logs the
     /// `warm` line.
     fn warm(&mut self, apps: &[App]);
@@ -380,10 +382,10 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
             }
         }
         if let Some((event, at)) = first {
-            shell.event(event, now, at);
+            shell.event(placed(screen, event), now, at);
         }
         while let Some((event, at)) = events.poll() {
-            shell.event(event, now, at);
+            shell.event(placed(screen, event), now, at);
         }
         // After the events, which fired the repeats due by their own stamps
         // (so a key let go just now fires none after), the repeats due by the
@@ -531,6 +533,26 @@ pub fn run<E: Events, S: Screen, W: WallClock, L: Launcher>(
 }
 
 /// Logs GL's error flag, which holds until read, if it is set.
+/// A pointer event with its place in the layout's coordinates, where the
+/// home finds what is under it; any other event as it is.
+fn placed(screen: &impl Screen, event: Event) -> Event {
+    let at = |x: i32, y: i32| {
+        let (x, y) = screen.layout_point(x, y);
+        (x.round() as i32, y.round() as i32)
+    };
+    match event {
+        Event::MouseMotion { x, y } => {
+            let (x, y) = at(x, y);
+            Event::MouseMotion { x, y }
+        }
+        Event::MouseButton { button, down, x, y } => {
+            let (x, y) = at(x, y);
+            Event::MouseButton { button, down, x, y }
+        }
+        other => other,
+    }
+}
+
 fn gl_error(screen: &mut impl Screen) {
     let err = screen.gl_error();
     if err != gl::NO_ERROR {
