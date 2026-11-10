@@ -608,6 +608,9 @@ impl Daemon {
                     "shell",
                     "shell: closed; starting it again in 5 s".to_owned(),
                 );
+                // One restart, however many events one close makes (SAM
+                // says both `stop` and `close`).
+                self.timers.retain(|_, t| *t != Timer::ShellRestart);
                 self.at(when, Timer::ShellRestart);
             }
             Ask::Relaunched { home_key } => {
@@ -829,6 +832,7 @@ impl Daemon {
                             left.as_secs()
                         ),
                     );
+                    self.timers.retain(|_, t| *t != timer);
                     self.at(now + left + Duration::from_secs(1), timer);
                     return;
                 }

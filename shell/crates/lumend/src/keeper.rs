@@ -56,6 +56,8 @@ pub struct Keeper {
     /// The boot start was made (or the shell was seen running).
     pub started: bool,
     running: bool,
+    /// lumend launched it and SAM's `launch` for that has yet to come.
+    awaited: bool,
     leaving: Option<Instant>,
     restarts: VecDeque<Instant>,
     pub gave_up: bool,
@@ -71,16 +73,20 @@ impl Keeper {
             return Ask::Nothing;
         }
         match e.event.as_str() {
-            "launch" | "relaunch" if self.running => Ask::Relaunched {
+            "launch" | "relaunch" if self.running && !self.awaited => Ask::Relaunched {
                 home_key: e.home_key,
             },
             "launch" | "relaunch" | "splash" | "preload" | "foreground" | "background" => {
+                if matches!(e.event.as_str(), "launch" | "relaunch") {
+                    self.awaited = false;
+                }
                 self.running = true;
                 self.started = true;
                 Ask::Nothing
             }
             "stop" | "close" => {
                 self.running = false;
+                self.awaited = false;
                 if self
                     .leaving
                     .is_some_and(|t| now.duration_since(t) < LEAVING_GRACE)
@@ -133,7 +139,13 @@ impl Keeper {
             "started after boot"
         };
         match bus::checked(bus, uri, &payload) {
-            Ok(_) => format!("shell: {what}, hidden"),
+            Ok(_) => {
+                // Before SAM's own event says so: a second launch in the
+                // meantime would be a relaunch, which shows a hidden shell.
+                self.running = true;
+                self.awaited = true;
+                format!("shell: {what}, hidden")
+            }
             Err(e) => format!("shell: FAILED to start: {e}"),
         }
     }
@@ -227,6 +239,26 @@ mod tests {
         assert_eq!(hold_left("", 1), None);
         assert_eq!(hold_left("soon", 1), None);
         assert_eq!(hold_left("-5", 1), None);
+    }
+
+    #[test]
+    fn a_shell_it_just_started_counts_as_running_before_sam_says_so() {
+        let mut k = Keeper::default();
+        let bus = FakeBus::default();
+        bus.reply(bus::LAUNCH, Ok(json!({"returnValue": true})));
+        let now = Instant::now();
+        k.on_event(&ev(APP_ID, "launch"), now);
+        k.on_event(&ev(APP_ID, "close"), now);
+        assert!(!k.running());
+        k.launch(&bus, now, true);
+        assert!(k.running());
+        // SAM's events for that launch are not a relaunch; the next is.
+        assert_eq!(k.on_event(&ev(APP_ID, "splash"), now), Ask::Nothing);
+        assert_eq!(k.on_event(&ev(APP_ID, "launch"), now), Ask::Nothing);
+        assert_eq!(
+            k.on_event(&ev(APP_ID, "launch"), now),
+            Ask::Relaunched { home_key: false }
+        );
     }
 
     #[test]
