@@ -193,7 +193,7 @@ shown, each 17 to 18 ms after the key).
   down, and 505 for Exit; Lumen stayed in front after every one. What they
   do inside LG's apps and Live TV is not tried. `menu` is the gear, 139
   (b9.md); sent the same day with Netflix in front, the TV took it in 78 ms,
-  and what it showed on the screen is not yet confirmed by eye.
+  and the owner saw LG's settings panel open ("Yes, it opens").
 * **Yield.** Every input node, the remote's included, is opened read-only
   before the first key and never grabbed. Any event other than a separator
   or a scan code is a person, unless it carries a code the robot wrote
