@@ -10,7 +10,7 @@
 mod applog;
 mod tray;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
@@ -63,6 +63,10 @@ pub struct App {
     /// Whether the thin remote has been put at the side of the desktop: it
     /// is placed once, and stays where the owner drags it after that.
     pub side_placed: AtomicBool,
+    /// The windows the app has shown and not hidden since. A window shown
+    /// from `setup` is not yet on screen when its page first asks, and the
+    /// event that said so went out before the page was listening.
+    pub shown: Mutex<HashSet<String>>,
 }
 
 pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -216,11 +220,12 @@ fn popup_painted(app: State<'_, App>) {
     }
 }
 
-/// Whether the asking page's window is on screen, for a page that loads
-/// after its window was shown and so missed the visibility event.
+/// Whether the asking page's window is on screen or was told to show, for
+/// a page that loads after its window was shown and so missed the
+/// visibility event.
 #[tauri::command]
-fn window_visible(window: tauri::WebviewWindow) -> bool {
-    window.is_visible().unwrap_or(false)
+fn window_visible(app: State<'_, App>, window: tauri::WebviewWindow) -> bool {
+    lock(&app.shown).contains(window.label()) || window.is_visible().unwrap_or(false)
 }
 
 /// The full window, in front: the thin remote's way to everything else.
@@ -260,6 +265,7 @@ fn main() {
             popup_opened: Mutex::new(None),
             popup_hidden: Mutex::new(None),
             side_placed: AtomicBool::new(false),
+            shown: Mutex::default(),
         })
         .invoke_handler(tauri::generate_handler![
             link_open,

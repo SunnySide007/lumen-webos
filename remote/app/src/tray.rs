@@ -67,6 +67,15 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
 /// Tells a page whether its window is on screen; the page lets its link go
 /// a while after it hides (`host.ts`).
 pub fn visibility(app: &AppHandle, label: &str, visible: bool) {
+    {
+        let state = app.state::<App>();
+        let mut shown = lock(&state.shown);
+        if visible {
+            shown.insert(label.to_owned());
+        } else {
+            shown.remove(label);
+        }
+    }
     let _ = app.emit_to(label, "lumen-visibility", visible);
 }
 

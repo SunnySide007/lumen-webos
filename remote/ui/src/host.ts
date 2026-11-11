@@ -145,9 +145,11 @@ export function pcHost(tauri: TauriGlobal, settings: PcSettings, window: PcWindo
     // The popup comes and goes; a link kept a minute makes reopening it warm.
     hideGraceMs: 60_000,
     onVisible(fn) {
+      let heard = false;
       const listening = tauri.event.listen<boolean>(
         "lumen-visibility",
         (e) => {
+          heard = true;
           fn(e.payload);
           if (e.payload && window === "popup") {
             // The timing line: two frames after showing, the page has painted.
@@ -156,11 +158,26 @@ export function pcHost(tauri: TauriGlobal, settings: PcSettings, window: PcWindo
         },
         { target: window },
       );
-      // Shown before this page had loaded (the first run opens the window).
-      void listening
-        .then(() => invoke<boolean>("window_visible"))
-        .then((v) => v && fn(true))
-        .catch(() => undefined);
+      // Shown before this page was listening: the first run opens the
+      // window and a start with a TV set shows the thin remote, both while
+      // the pages load (on the owner's PC the pages asked 0.3 s after
+      // the app started, before either was shown, and the event that
+      // followed did not reach them). So the page asks, and asks again a
+      // few times until it is told either way.
+      const ask = (waits: number[]): void => {
+        void invoke<boolean>("window_visible")
+          .then((v) => {
+            if (heard) return;
+            if (v) {
+              heard = true;
+              fn(true);
+            } else if (waits.length > 0) {
+              setTimeout(() => ask(waits.slice(1)), waits[0]);
+            }
+          })
+          .catch(() => undefined);
+      };
+      void listening.then(() => ask([250, 750, 2000, 5000])).catch(() => undefined);
     },
     pc: {
       window,
