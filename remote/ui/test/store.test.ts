@@ -8,7 +8,9 @@ import {
   ambientColor,
   applyEvent,
   frontTitle,
+  isLight,
   shortcuts,
+  tileFace,
   tiles,
 } from "../src/store.ts";
 import type { TvState } from "../src/store.ts";
@@ -101,6 +103,29 @@ describe("Store", () => {
       [2, 1],
       [3, 2],
     ]);
+  });
+});
+
+describe("a small tile's face", () => {
+  it("is an HDMI input's number, whatever the owner named it", () => {
+    expect(tileFace({ id: "com.webos.app.hdmi2", title: "Home Theater", kind: "input" })).toBe("2");
+    expect(tileFace({ id: "com.webos.app.hdmi3", title: "Google Streamer", kind: "input" })).toBe("3");
+    expect(tileFace({ id: "x", title: "HDMI 4", kind: "input" })).toBe("4");
+  });
+
+  it("is another input's initials and an app's first letter", () => {
+    expect(tileFace({ id: "com.webos.app.externalinput.av1", title: "AV", kind: "input" })).toBe("A");
+    expect(tileFace({ id: "x", title: "Live TV", kind: "input" })).toBe("LT");
+    expect(tileFace({ id: "netflix", title: "netflix", kind: "app" })).toBe("N");
+    expect(tileFace({ id: "x", title: "", kind: "app" })).toBe("?");
+  });
+
+  it("knows a light tile from a dark one", () => {
+    expect(isLight("#ffffff")).toBe(true);
+    expect(isLight("#e3c043")).toBe(true);
+    expect(isLight("#e50914")).toBe(false);
+    expect(isLight("#000000")).toBe(false);
+    expect(isLight("var(--ambient)")).toBe(false);
   });
 });
 

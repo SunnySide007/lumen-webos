@@ -11,7 +11,7 @@ import { icon, muteIcon } from "../icons.ts";
 import type { IconName } from "../icons.ts";
 import { tilt } from "../motion.ts";
 import type { KeyName } from "../protocol.ts";
-import { shortcuts } from "../store.ts";
+import { isLight, shortcuts, tileFace } from "../store.ts";
 import type { Tile } from "../store.ts";
 import { Swipe } from "../swipe.ts";
 
@@ -293,11 +293,10 @@ export function shortcutsPart(ctx: Ctx, off: Off, max: number): HTMLElement {
   const els = new Map<string, HTMLButtonElement>();
   let ids = "";
   const make = (t: Tile): HTMLButtonElement => {
-    const short = t.kind === "input" ? t.title.replace(/^HDMI\s*/, "") : ([...t.title][0] ?? "?");
     const b = h(
       "button",
       { class: `shortcut kind-${t.kind}`, type: "button", role: "listitem", "data-id": t.id },
-      h("span", { class: "shortcut-face" }, t.kind === "input" ? icon("input") : null, h("span", { text: short })),
+      h("span", { class: "shortcut-face" }, t.kind === "input" ? icon("input") : null, h("span", { text: tileFace(t) })),
       h("span", { class: "shortcut-title", text: t.title }),
     );
     b.addEventListener("click", () => {
@@ -328,6 +327,7 @@ export function shortcutsPart(ctx: Ctx, off: Off, max: number): HTMLElement {
         if (!b) continue;
         setVars(b, { tile: t.color });
         b.classList.toggle("in-front", t.inFront);
+        b.classList.toggle("light", isLight(t.color));
         b.disabled = !can;
         const label = t.device ? `${t.title}, ${t.device}` : t.title;
         b.title = label;

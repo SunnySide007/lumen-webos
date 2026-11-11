@@ -12,7 +12,7 @@ import { h, setText, setVars } from "../dom.ts";
 import { icon } from "../icons.ts";
 import { POWER_LABELS } from "../labels.ts";
 import { rimLight } from "../motion.ts";
-import { frontApp, frontTitle } from "../store.ts";
+import { frontApp, frontTitle, isLight, tileFace } from "../store.ts";
 import { diffText, editCommands } from "../textdiff.ts";
 import {
   channelRocker,
@@ -57,7 +57,8 @@ export function remoteScreen(ctx: Ctx): Screen {
       const app = frontApp(s);
       now.hidden = title === null;
       setText(nowTitle, title ?? "");
-      setText(nowLetter, app?.kind === "input" ? app.title.replace(/^HDMI\s*/, "") : ([...(title ?? "?")][0] ?? "?"));
+      setText(nowLetter, app ? tileFace(app) : ([...(title ?? "?")][0] ?? "?"));
+      now.classList.toggle("light", app !== null && isLight(app.color));
       setVars(now, { tile: app?.color ?? "var(--ambient)" });
       const power = s.power && s.power !== "active" ? POWER_LABELS[s.power] : null;
       const sound = s.volume ? (s.volume.muted ? "Muted" : `Volume ${s.volume.level}`) : null;
