@@ -14,6 +14,7 @@ import type { KeyName } from "../protocol.ts";
 import { isLight, shortcuts, tileFace } from "../store.ts";
 import type { Tile } from "../store.ts";
 import { Swipe } from "../swipe.ts";
+import { Glide, MoveQueue } from "../glide.ts";
 
 type Off = (() => void)[];
 
@@ -137,28 +138,85 @@ export function padPart(keys: Keys): HTMLElement {
 /** The touchpad: a swipe moves, a tap is OK, a touch held still is Back, and
  * the wheel moves up and down. A light follows the finger and each arrow
  * sent leaves a streak the way it went. */
+const TOUCH_KEY = "lumen.remote.touch";
+
+/** The touchpad. It works one of two ways: swipes that press the arrows, or,
+ * on a TV whose remote has a pointer, a pointer that follows the finger. The
+ * switch in its corner shows only when the TV offers the pointer, and the
+ * choice is kept. */
 export function touchpadPart(ctx: Ctx, keys: Keys, off: Off): HTMLElement {
   const dot = h("span", { class: "touch-dot", "aria-hidden": "true" });
   const streak = h("span", { class: "touch-streak", "aria-hidden": "true" });
+  const hintMove = h("span");
+  const hintTap = h("span");
+  const mode = h(
+    "button",
+    { class: "touch-mode", type: "button", "aria-pressed": "false", hidden: true },
+    icon("pointer"),
+  );
   const el = h(
     "div",
-    {
-      class: "touchpad glass",
-      role: "group",
-      tabindex: "0",
-      "aria-label": "Touchpad: swipe to move, tap for OK, hold for Back",
-    },
+    { class: "touchpad glass", role: "group", tabindex: "0" },
     dot,
     streak,
-    h(
-      "p",
-      { class: "touch-hint" },
-      h("span", { text: "Swipe to move" }),
-      h("span", { text: "Tap for OK · hold for Back" }),
-    ),
+    h("p", { class: "touch-hint" }, hintMove, hintTap),
+    mode,
   );
   const swipe = new Swipe();
+  const glide = new Glide();
+  const queue = new MoveQueue();
+  let wanted = false;
+  try {
+    wanted = localStorage.getItem(TOUCH_KEY) === "pointer";
+  } catch {
+    // Storage is off: the choice lasts for this visit.
+  }
+  /** Whether the pad is a pointer now: chosen, and the TV offers it. */
+  const pointing = () => wanted && accepts(ctx.link.get(), "pointer.move");
+  const paint = () => {
+    const can = accepts(ctx.link.get(), "pointer.move");
+    const on = wanted && can;
+    mode.hidden = !can;
+    mode.setAttribute("aria-pressed", String(on));
+    mode.title = on ? "Pointer: on. Click for swipes" : "Swipes. Click for a pointer";
+    mode.setAttribute("aria-label", "Pointer");
+    el.dataset.touch = on ? "pointer" : "swipe";
+    el.setAttribute(
+      "aria-label",
+      on ? "Touchpad: drag to move the pointer, tap to click, hold for Back" : "Touchpad: swipe to move, tap for OK, hold for Back",
+    );
+    setText(hintMove, on ? "Drag to point" : "Swipe to move");
+    setText(hintTap, on ? "Tap to click · hold for Back" : "Tap for OK · hold for Back");
+  };
+  mode.addEventListener("pointerdown", (e) => e.stopPropagation());
+  mode.addEventListener("click", () => {
+    wanted = !wanted;
+    try {
+      localStorage.setItem(TOUCH_KEY, wanted ? "pointer" : "swipe");
+    } catch {
+      // As above.
+    }
+    queue.clear();
+    paint();
+  });
+  off.push(ctx.link.subscribe(paint));
+  // The pointer's moves go one request at a time, each carrying whatever
+  // gathered while the one before was on its way.
+  let flying = false;
+  const fly = () => {
+    if (flying) return;
+    const move = pointing() ? queue.take() : null;
+    if (!move) return;
+    flying = true;
+    void ctx.send("pointer.move", move).then((done) => {
+      flying = false;
+      // A refused move is said once; what waited behind it is dropped.
+      if (done === null) queue.clear();
+      else fly();
+    });
+  };
   let pointer: number | null = null;
+  let asPointer = false;
   let holdTimer: ReturnType<typeof setTimeout> | null = null;
   const clearHold = () => {
     if (holdTimer) clearTimeout(holdTimer);
@@ -184,16 +242,28 @@ export function touchpadPart(ctx: Ctx, keys: Keys, off: Off): HTMLElement {
     el.setPointerCapture(e.pointerId);
     el.classList.add("touching");
     place(e);
-    swipe.down(e.clientX, e.clientY, e.timeStamp);
+    // One touch is a swipe or a pointer's from down to up, whichever the
+    // pad was when it began.
+    asPointer = pointing();
     clearHold();
+    if (asPointer) glide.down(e.clientX, e.clientY, e.timeStamp);
+    else swipe.down(e.clientX, e.clientY, e.timeStamp);
     holdTimer = setTimeout(() => {
-      const key = swipe.hold(performance.now());
+      const key = asPointer ? glide.hold(performance.now()) : swipe.hold(performance.now());
       if (key) send(key);
     }, 620);
   });
   el.addEventListener("pointermove", (e) => {
     if (e.pointerId !== pointer) return;
     place(e);
+    if (asPointer) {
+      const move = glide.move(e.clientX, e.clientY);
+      if (move) {
+        queue.add(move);
+        fly();
+      }
+      return;
+    }
     // A fast flick is capped: three arrows from one move are plenty.
     for (const key of swipe.move(e.clientX, e.clientY).slice(0, 3)) send(key);
   });
@@ -202,6 +272,14 @@ export function touchpadPart(ctx: Ctx, keys: Keys, off: Off): HTMLElement {
     pointer = null;
     clearHold();
     el.classList.remove("touching");
+    if (asPointer) {
+      if (cancelled) glide.cancel();
+      else if (glide.up(e.timeStamp) && pointing()) {
+        flash(el, "tapped", 380);
+        void ctx.send("pointer.click");
+      }
+      return;
+    }
     if (cancelled) swipe.cancel();
     else {
       const key = swipe.up(e.timeStamp);

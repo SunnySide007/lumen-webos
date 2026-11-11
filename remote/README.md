@@ -101,7 +101,9 @@ state changes, whoever changed it, and `alive` every 10 s.
 | `mute.set` | `muted`: boolean | `{}` |
 | `apps.list` | none | `apps`: `[{id, title, kind: "app" \| "input", iconColor: "#rrggbb" \| null}]` |
 | `launch` | `id`: an app or input id (`[A-Za-z0-9][A-Za-z0-9._-]{0,127}`) | `{}` |
-| `key` | `name`: up, down, left, right, ok, back, home, menu, play, pause, stop, rewind, fastforward | `{}` |
+| `key` | `name`: up, down, left, right, ok, back, home, menu, play, pause, stop, rewind, fastforward, info, exit, channelup, channeldown, red, green, yellow, blue, 0 to 9 | `{}` |
+| `pointer.move` | `dx`: integer −1920 to 1920; `dy`: integer −1080 to 1080: how far the TV's pointer goes, in pixels of a 1920 by 1080 screen | `{}` |
+| `pointer.click` | none | `{}` |
 | `text.insert` | `text`: 1–256 characters, no control characters | `{}` |
 | `text.delete` | `count`: integer 1–256 | `{}` |
 | `text.enter` | none | `{}` |
@@ -188,8 +190,10 @@ memory only.
 **R2, `lumen-ctl`, is built and on the B9** ([remote.md, R2](../docs/specs/remote.md)).
 `shell/crates/lumen-ctl` speaks `protocol.ts` on stdin and stdout, behind an
 SSH key whose forced command runs it (`tools/remote.sh install`). Its
-`hello` leaves out `key` until the TV has a key route, and `ambient.start`
-for now. `tools/remote/ctl.py` drives it from a terminal:
+`hello` leaves out `key` until the TV has a key route, `pointer.move` and
+`pointer.click` unless that route is `inject` on a TV whose remote has a
+pointer, and `ambient.start` for now. A `pointer.move` that works is not
+written to the TV's log, since a pointer in motion sends many a second. `tools/remote/ctl.py` drives it from a terminal:
 
 ```sh
 python tools/remote/ctl.py hello                 # the hello and the TV's state
@@ -217,7 +221,9 @@ colour keys stay hidden until a hello offers `key`.
 
 The Remote screen (`ui/src/screens/remote.ts`, its parts in `parts.ts`)
 shows what is on the TV, the pad or a touchpad (a swipe moves one arrow for
-every 44 px, a tap is OK, a touch held still is Back; `ui/src/swipe.ts`)
+every 44 px, a tap is OK, a touch held still is Back; `ui/src/swipe.ts`;
+or, with the switch in its corner on a TV that offers `pointer.move`, a
+pointer that follows the finger, a tap being a click; `ui/src/glide.ts`)
 between the volume and channel rockers, shortcuts to the inputs with
 something plugged in and to the family's apps, and the number and colour
 keys. A browser shows the thin remote at `/?window=side`.

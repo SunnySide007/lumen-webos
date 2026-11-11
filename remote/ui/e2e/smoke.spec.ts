@@ -78,6 +78,38 @@ test("Remote: the touchpad, the rockers, the number keys and a shortcut become v
   await expect(page.locator(".touchpad")).toBeVisible();
 });
 
+test("Remote: the touchpad as a pointer moves and clicks, and the choice is kept", async ({ page }) => {
+  const sent = watchRequests(page);
+  await open(page, "remote");
+  await page.getByRole("button", { name: "Touchpad", exact: true }).click();
+  const pad = page.locator(".touchpad");
+  const mode = pad.getByRole("button", { name: "Pointer" });
+  await expect(mode).toHaveAttribute("aria-pressed", "false");
+  await mode.click();
+  await expect(mode).toHaveAttribute("aria-pressed", "true");
+  await expect(pad).toContainText("Drag to point");
+  const box = (await pad.boundingBox())!;
+  const [cx, cy] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(cx - 40, cy + 30);
+  await page.mouse.down();
+  await page.mouse.move(cx, cy + 30, { steps: 5 });
+  await page.mouse.move(cx + 40, cy + 30, { steps: 5 });
+  await page.mouse.up();
+  await page.mouse.click(cx, cy + 30);
+  await expect.poll(() => sent.some((r) => r.verb === "pointer.click")).toBe(true);
+  const moves = sent.filter((r) => r.verb === "pointer.move");
+  expect(moves.length).toBeGreaterThan(0);
+  const dx = moves.reduce((n, r) => n + (r.args.dx as number), 0);
+  // 80 px of travel less the slop, at a gain of 2.2 or more.
+  expect(dx).toBeGreaterThan(140);
+  expect(moves.every((r) => r.args.dy === 0)).toBe(true);
+  // A drag as a pointer presses no arrow.
+  expect(sent.some((r) => r.verb === "key")).toBe(false);
+  await expect(page.locator(".snack.show")).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(".touchpad").getByRole("button", { name: "Pointer" })).toHaveAttribute("aria-pressed", "true");
+});
+
 test("The thin remote: one column with the pad, the rockers and shortcuts", async ({ page }) => {
   const sent = watchRequests(page);
   await page.setViewportSize({ width: 140, height: 700 });

@@ -194,6 +194,14 @@ shown, each 17 to 18 ms after the key).
   do inside LG's apps and Live TV is not tried. `menu` is the gear, 139
   (b9.md); sent the same day with Netflix in front, the TV took it in 78 ms,
   and the owner saw LG's settings panel open ("Yes, it opens").
+* **The pointer.** `serve --keys inject` also takes `pointer.move` and
+  `pointer.click` for the Remote's touchpad, written into the same node the
+  way the Magic Remote sends its own (b9.md): LG's 1198 when the pointer
+  appears, its place as `ABS_X` and `ABS_Y` scaled to the node's own range
+  (read with `EVIOCGABS`) from where the kernel last had it, `BTN_LEFT`
+  (272) for a click, and LG's 1199 once it has rested 5 s. Built and tested
+  on the PC on 2026-11-11; **not yet tried on the TV**, so whether LG's
+  compositor draws a pointer for it is not known.
 * **Yield.** Every input node, the remote's included, is opened read-only
   before the first key and never grabbed. Any event other than a separator
   or a scan code is a person, unless it carries a code the robot wrote

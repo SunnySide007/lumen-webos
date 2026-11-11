@@ -64,6 +64,8 @@ export class FakeTv {
   pairing: { code: string; until: number; attemptsLeft: number } | null = null;
 
   private readonly keys: boolean;
+  /** Where the pointer is, on a 1920 by 1080 screen. */
+  pointer = { x: 960, y: 540 };
   private readonly privacy: PrivacyState;
   private readonly schedule: (ms: number, fn: () => void) => void;
   private readonly log: (line: string) => void;
@@ -85,7 +87,7 @@ export class FakeTv {
   }
 
   get verbs(): Verb[] {
-    return VERBS.filter((v) => this.keys || v !== "key");
+    return VERBS.filter((v) => this.keys || (v !== "key" && !v.startsWith("pointer.")));
   }
 
   onEvent(fn: (e: Event) => void): () => void {
@@ -163,6 +165,18 @@ export class FakeTv {
         if (!this.keys) throw new Refusal("unavailable", "this TV has no route for keys");
         this.log(`key ${r.args.name}`);
         if (this.power === "screensaver") this.setPower("active");
+        return {};
+      case "pointer.move":
+        if (!this.keys) throw new Refusal("unavailable", "this TV has no route for a pointer");
+        this.pointer = {
+          x: Math.max(0, Math.min(1919, this.pointer.x + r.args.dx)),
+          y: Math.max(0, Math.min(1079, this.pointer.y + r.args.dy)),
+        };
+        this.log(`pointer at ${this.pointer.x}, ${this.pointer.y}`);
+        return {};
+      case "pointer.click":
+        if (!this.keys) throw new Refusal("unavailable", "this TV has no route for a pointer");
+        this.log(`click at ${this.pointer.x}, ${this.pointer.y}`);
         return {};
       case "text.insert":
         this.text += r.args.text;

@@ -15,7 +15,10 @@ use std::path::Path;
 
 pub const EV_SYN: u16 = 0;
 pub const EV_KEY: u16 = 1;
+pub const EV_ABS: u16 = 3;
 pub const EV_MSC: u16 = 4;
+pub const ABS_X: u16 = 0;
+pub const ABS_Y: u16 = 1;
 const SYN_REPORT: u16 = 0;
 /// `BUS_VIRTUAL`, as LG's own remotes' nodes are virtual too.
 const BUS_VIRTUAL: u16 = 0x06;
@@ -31,6 +34,38 @@ const UI_DEV_CREATE: u32 = ioc(0, 1, 0);
 const UI_DEV_DESTROY: u32 = ioc(0, 2, 0);
 const UI_SET_EVBIT: u32 = ioc(1, 100, 4);
 const UI_SET_KEYBIT: u32 = ioc(1, 101, 4);
+
+/// `EVIOCGABS(axis)`: a read of type `'E'`, number `0x40 + axis`, into a
+/// `struct input_absinfo` of six ints.
+const fn eviocgabs(axis: u16) -> u32 {
+    (2 << 30) | (ABSINFO_SIZE << 16) | ((b'E' as u32) << 8) | (0x40 + axis as u32)
+}
+const ABSINFO_SIZE: u32 = 24;
+
+/// One absolute axis as the kernel holds it: where it is and may go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Axis {
+    pub value: i32,
+    pub min: i32,
+    pub max: i32,
+}
+
+fn read_axis(file: &File, axis: u16) -> io::Result<Axis> {
+    // value, minimum, maximum, fuzz, flat, resolution.
+    let mut info = [0i32; 6];
+    // SAFETY: the descriptor is open for the call's length (`file` is
+    // borrowed), and `EVIOCGABS` writes one `struct input_absinfo`, 24
+    // bytes, which is exactly `info`, alive and exclusively borrowed here.
+    let rc = unsafe { libc::ioctl(file.as_raw_fd(), eviocgabs(axis) as _, info.as_mut_ptr()) };
+    if rc < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(Axis {
+        value: info[0],
+        min: info[1],
+        max: info[2],
+    })
+}
 
 fn ioctl_int(file: &File, request: u32, value: libc::c_int) -> io::Result<()> {
     // SAFETY: the descriptor is open for the call's length (`file` is
@@ -111,6 +146,26 @@ pub fn parse_event(b: &[u8]) -> Option<InputEvent> {
 pub trait KeySink: Send {
     /// One key event (1 down, 0 up, 2 a repeat) and its `SYN_REPORT`.
     fn emit(&mut self, code: u16, value: i32) -> io::Result<()>;
+
+    /// The pointer's X and Y axes, on a node that has a pointer.
+    fn axes(&mut self) -> Option<(Axis, Axis)> {
+        None
+    }
+
+    /// The pointer's place, in the axes' own units, and its `SYN_REPORT`.
+    fn point(&mut self, _x: i32, _y: i32) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this node has no pointer",
+        ))
+    }
+}
+
+fn point_and_sync(x: i32, y: i32) -> Vec<u8> {
+    let mut bytes = event_bytes(EV_ABS, ABS_X, x);
+    bytes.extend(event_bytes(EV_ABS, ABS_Y, y));
+    bytes.extend(event_bytes(EV_SYN, SYN_REPORT, 0));
+    bytes
 }
 
 fn key_and_sync(code: u16, value: i32) -> Vec<u8> {
@@ -141,6 +196,17 @@ impl Inject {
 impl KeySink for Inject {
     fn emit(&mut self, code: u16, value: i32) -> io::Result<()> {
         self.file.write_all(&key_and_sync(code, value))
+    }
+
+    fn axes(&mut self) -> Option<(Axis, Axis)> {
+        let x = read_axis(&self.file, ABS_X).ok()?;
+        let y = read_axis(&self.file, ABS_Y).ok()?;
+        (x.max > x.min && y.max > y.min).then_some((x, y))
+    }
+
+    /// X, Y and the report in one write, so a reader never sees half.
+    fn point(&mut self, x: i32, y: i32) -> io::Result<()> {
+        self.file.write_all(&point_and_sync(x, y))
     }
 }
 
@@ -233,6 +299,18 @@ mod tests {
         assert_eq!(UI_DEV_DESTROY, 0x5502);
         assert_eq!(UI_SET_EVBIT, 0x4004_5564);
         assert_eq!(UI_SET_KEYBIT, 0x4004_5565);
+        assert_eq!(eviocgabs(ABS_X), 0x8018_4540);
+        assert_eq!(eviocgabs(ABS_Y), 0x8018_4541);
+    }
+
+    #[test]
+    fn a_pointer_move_is_x_y_and_a_report_in_one_write() {
+        let b = point_and_sync(960, 540);
+        assert_eq!(b.len(), 3 * EVENT_SIZE);
+        let at = |i: usize| parse_event(&b[i * EVENT_SIZE..(i + 1) * EVENT_SIZE]).unwrap();
+        assert_eq!((at(0).kind, at(0).code, at(0).value), (EV_ABS, ABS_X, 960));
+        assert_eq!((at(1).kind, at(1).code, at(1).value), (EV_ABS, ABS_Y, 540));
+        assert_eq!((at(2).kind, at(2).code, at(2).value), (EV_SYN, 0, 0));
     }
 
     #[test]

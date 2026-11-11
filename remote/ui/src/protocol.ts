@@ -220,6 +220,10 @@ export interface Verbs {
   "apps.list": { args: NoArgs; result: { apps: AppInfo[] } };
   launch: { args: { id: string }; result: Done };
   key: { args: { name: KeyName }; result: Done };
+  /** Moves the TV's pointer by whole pixels of a 1920 by 1080 screen. */
+  "pointer.move": { args: { dx: number; dy: number }; result: Done };
+  /** One click where the pointer is. */
+  "pointer.click": { args: NoArgs; result: Done };
   "text.insert": { args: { text: string }; result: Done };
   "text.delete": { args: { count: number }; result: Done };
   "text.enter": { args: NoArgs; result: Done };
@@ -295,6 +299,9 @@ function checkText(name: string, v: unknown, max: number): string | null {
 
 const none: ArgCheck = (a) => onlyKeys(a, []);
 
+/** The farthest one `pointer.move` goes on each axis: the whole screen. */
+export const POINTER_SPAN: readonly [number, number] = [1920, 1080];
+
 /** Checks a setting and its value; returns what is wrong, or null. */
 export function checkSetting(key: unknown, value: unknown): string | null {
   if (typeof key !== "string" || !Object.hasOwn(SETTINGS, key)) {
@@ -333,6 +340,12 @@ const ARG_CHECKS: { [V in Verb]: ArgCheck } = {
     (typeof a.name === "string" && (KEY_NAMES as readonly string[]).includes(a.name)
       ? null
       : `name must be one of ${KEY_NAMES.join(", ")}`),
+  "pointer.move": (a) =>
+    onlyKeys(a, ["dx", "dy"]) ??
+    (isInt(a.dx, -POINTER_SPAN[0], POINTER_SPAN[0]) && isInt(a.dy, -POINTER_SPAN[1], POINTER_SPAN[1])
+      ? null
+      : `dx must be an integer from -${POINTER_SPAN[0]} to ${POINTER_SPAN[0]} and dy from -${POINTER_SPAN[1]} to ${POINTER_SPAN[1]}`),
+  "pointer.click": none,
   "text.insert": (a) => onlyKeys(a, ["text"]) ?? checkText("text", a.text, MAX_INSERT),
   "text.delete": (a) =>
     onlyKeys(a, ["count"]) ??

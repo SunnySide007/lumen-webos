@@ -226,13 +226,14 @@ impl Ctl {
     }
 
     /// The verbs this TV takes, for `hello`: all but `key` without a route,
-    /// and `ambient.start`, which waits for the ambient track; on the web
+    /// the pointer's two without a pointer, and `ambient.start`, which waits for the ambient track; on the web
     /// link, not the PC's pairing verbs.
     pub fn verbs(&self) -> Vec<&'static str> {
         VERBS
             .iter()
             .copied()
             .filter(|v| *v != "ambient.start" && (*v != "key" || self.keys.any()))
+            .filter(|v| !v.starts_with("pointer.") || self.keys.pointer())
             .filter(|v| protocol::takes(self.link, v))
             .collect()
     }
@@ -294,6 +295,8 @@ impl Ctl {
             ),
             Verb::Launch(id) => (self.launch(id), Some(Source::Foreground)),
             Verb::Key(name) => (self.keys.press(&*self.bus, name).map(|()| json!({})), None),
+            Verb::PointerMove(dx, dy) => (self.keys.point(*dx, *dy).map(|()| json!({})), None),
+            Verb::PointerClick => (self.keys.click().map(|()| json!({})), None),
             Verb::TextInsert(text) => (self.done(&lg::insert_text(text)), None),
             Verb::TextDelete(count) => (self.done(&lg::delete_characters(*count)), None),
             Verb::TextEnter => (self.done(&lg::send_enter_key()), None),
@@ -505,11 +508,17 @@ pub fn answer(ctl: &Ctl, log: &Mutex<Log>, line: &[u8]) -> (String, Option<Sourc
         Ok(None) => String::new(),
         Err(_) => "[refused] ".to_owned(),
     };
-    lock(log).line(&format!(
+    // A pointer in motion sends tens of moves a second: one that works is
+    // not logged, so the log keeps its other lines; one that fails is.
+    let quiet = matches!(verb, Verb::PointerMove(..));
+    let asked = format!(
         "> {id} {who}{}{}{args}",
         verb.name(),
         if args.is_empty() { "" } else { " " }
-    ));
+    );
+    if !quiet {
+        lock(log).line(&asked);
+    }
     let (result, refresh) = match &device {
         Ok(device) => ctl.handle(verb, device.as_ref()),
         Err(refusal) => (Err(refusal.clone()), None),
@@ -532,7 +541,13 @@ pub fn answer(ctl: &Ctl, log: &Mutex<Log>, line: &[u8]) -> (String, Option<Sourc
         Err(r) if typed => r.code.as_str().to_owned(),
         Err(r) => format!("{}: {}", r.code.as_str(), r.message),
     };
-    lock(log).line(&format!("< {id} {outcome} ({ms} ms)"));
+    if !quiet {
+        lock(log).line(&format!("< {id} {outcome} ({ms} ms)"));
+    } else if result.is_err() {
+        let mut log = lock(log);
+        log.line(&asked);
+        log.line(&format!("< {id} {outcome} ({ms} ms)"));
+    }
     (reply, refresh)
 }
 
@@ -971,8 +986,9 @@ mod tests {
             .iter()
             .map(|v| v.as_str().unwrap())
             .collect();
-        assert_eq!(verbs.len(), VERBS.len() - 2);
+        assert_eq!(verbs.len(), VERBS.len() - 4);
         assert!(!verbs.contains(&"key") && !verbs.contains(&"ambient.start"));
+        assert!(!verbs.iter().any(|v| v.starts_with("pointer.")));
         assert_eq!(
             lines[2],
             json!({ "event": "volume", "data": { "level": 14, "muted": false } })

@@ -183,6 +183,9 @@ pub enum Verb {
     AppsList,
     Launch(String),
     Key(&'static str),
+    /// The pointer moved by this much, in pixels of a 1920 by 1080 screen.
+    PointerMove(i16, i16),
+    PointerClick,
     TextInsert(String),
     TextDelete(u16),
     TextEnter,
@@ -208,7 +211,7 @@ pub enum Verb {
 }
 
 /// Every verb's name, in protocol.ts's order (`VERBS`).
-pub const VERBS: [&str; 24] = [
+pub const VERBS: [&str; 26] = [
     "power.off",
     "screen.off",
     "screen.on",
@@ -219,6 +222,8 @@ pub const VERBS: [&str; 24] = [
     "apps.list",
     "launch",
     "key",
+    "pointer.move",
+    "pointer.click",
     "text.insert",
     "text.delete",
     "text.enter",
@@ -234,6 +239,9 @@ pub const VERBS: [&str; 24] = [
     "devices.revoke",
     "devices.role",
 ];
+
+/// The farthest one `pointer.move` goes on each axis: the whole screen.
+pub const POINTER_SPAN: (i64, i64) = (1920, 1080);
 
 /// Verbs only the PC's SSH session takes: pairing and the devices' rights.
 pub const SSH_ONLY: [&str; 5] = [
@@ -302,6 +310,8 @@ impl Verb {
             Self::AppsList => "apps.list",
             Self::Launch(_) => "launch",
             Self::Key(_) => "key",
+            Self::PointerMove(..) => "pointer.move",
+            Self::PointerClick => "pointer.click",
             Self::TextInsert(_) => "text.insert",
             Self::TextDelete(_) => "text.delete",
             Self::TextEnter => "text.enter",
@@ -329,6 +339,7 @@ impl Verb {
             Self::MuteSet(muted) => json!({ "muted": muted }).to_string(),
             Self::Launch(id) => json!({ "id": id }).to_string(),
             Self::Key(name) => json!({ "name": name }).to_string(),
+            Self::PointerMove(dx, dy) => json!({ "dx": dx, "dy": dy }).to_string(),
             Self::TextDelete(count) => json!({ "count": count }).to_string(),
             Self::TextInsert(_) | Self::Toast(_) => "(text withheld)".to_owned(),
             Self::PairComplete { .. } => "(code and name withheld)".to_owned(),
@@ -563,6 +574,17 @@ fn check_args(verb: &str, args: &Map<String, Value>) -> Result<Verb, String> {
                 .map(|&k| Verb::Key(k))
                 .ok_or_else(|| format!("name must be one of {}", KEY_NAMES.join(", ")))
         }
+        "pointer.move" => {
+            only_keys(args, &["dx", "dy"])?;
+            let (w, h) = POINTER_SPAN;
+            match (int_in(args.get("dx"), -w, w), int_in(args.get("dy"), -h, h)) {
+                (Some(dx), Some(dy)) => Ok(Verb::PointerMove(dx as i16, dy as i16)),
+                _ => Err(format!(
+                    "dx must be an integer from -{w} to {w} and dy from -{h} to {h}"
+                )),
+            }
+        }
+        "pointer.click" => none(Verb::PointerClick),
         "text.insert" => {
             only_keys(args, &["text"])?;
             check_text("text", args.get("text"), MAX_INSERT).map(Verb::TextInsert)
@@ -732,7 +754,7 @@ mod tests {
     }
 
     /// protocol.test.ts's GOOD: one good set of arguments per verb.
-    const GOOD: [(&str, &str); 24] = [
+    const GOOD: [(&str, &str); 26] = [
         ("power.off", "{}"),
         ("screen.off", "{}"),
         ("screen.on", "{}"),
@@ -743,6 +765,8 @@ mod tests {
         ("apps.list", "{}"),
         ("launch", r#"{"id":"com.webos.app.hdmi1"}"#),
         ("key", r#"{"name":"ok"}"#),
+        ("pointer.move", r#"{"dx":-1920,"dy":1080}"#),
+        ("pointer.click", "{}"),
         ("text.insert", r#"{"text":"héllo 👋"}"#),
         ("text.delete", r#"{"count":3}"#),
         ("text.enter", "{}"),
@@ -781,6 +805,12 @@ mod tests {
         ("key", r#"{"name":"power"}"#),
         ("key", r#"{"name":"OK"}"#),
         ("key", "{}"),
+        ("pointer.move", r#"{"dx":1921,"dy":0}"#),
+        ("pointer.move", r#"{"dx":0,"dy":-1081}"#),
+        ("pointer.move", r#"{"dx":1.5,"dy":0}"#),
+        ("pointer.move", r#"{"dx":1}"#),
+        ("pointer.move", r#"{"dx":1,"dy":1,"x":1}"#),
+        ("pointer.click", r#"{"x":1}"#),
         ("text.insert", r#"{"text":""}"#),
         ("text.insert", r#"{"text":"a\nb"}"#),
         ("text.insert", r#"{"text":"\t"}"#),
@@ -834,6 +864,8 @@ mod tests {
             "apps.list",
             "launch",
             "key",
+            "pointer.move",
+            "pointer.click",
             "text.insert",
             "text.enter",
             "text.delete",
@@ -1303,6 +1335,8 @@ mod tests {
             "volume.set",
             "launch",
             "key",
+            "pointer.move",
+            "pointer.click",
             "text.insert",
             "settings.set",
         ] {

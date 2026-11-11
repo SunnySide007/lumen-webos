@@ -27,16 +27,18 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 
 use crate::bus::Bus;
-use crate::keys::KeyRoute;
-use crate::protocol::{ErrorCode, KEY_NAMES, Refusal};
-use crate::sys::uinput::{EV_KEY, EV_MSC, EV_SYN, Evdev, Inject, InputEvent, KeySink, Uinput};
+use crate::keys::{KeyRoute, no_pointer};
+use crate::protocol::{ErrorCode, KEY_NAMES, POINTER_SPAN, Refusal};
+use crate::sys::uinput::{
+    Axis, EV_KEY, EV_MSC, EV_SYN, Evdev, Inject, InputEvent, KeySink, Uinput,
+};
 
 pub const DEVICE_NAME: &str = "Lumen robot remote";
 
@@ -480,20 +482,31 @@ pub fn watch_remote(secs: u64, out: &mut impl Write) -> ExitCode {
 /// `/proc/bus/input/devices`.
 pub const MAGIC_REMOTE: &str = "LGE M-RCU";
 
+/// A place keys go, and its name for the log.
+type Sink = (Box<dyn KeySink>, String);
+
+/// The Magic Remote's node, opened for writing.
+fn open_magic() -> Result<Option<Sink>, String> {
+    let text = std::fs::read_to_string("/proc/bus/input/devices")
+        .map_err(|e| format!("/proc/bus/input/devices: {e}"))?;
+    let Some((name, event)) = input_nodes(&text)
+        .into_iter()
+        .find(|(name, _)| name.starts_with(MAGIC_REMOTE))
+    else {
+        return Ok(None);
+    };
+    let path = PathBuf::from("/dev/input").join(&event);
+    let sink = Inject::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(Some((Box::new(sink), format!("{event} ({name})"))))
+}
+
 /// Where the robot's keys go: written into the Magic Remote's own node,
 /// which LG's compositor has held open since boot (it opens no node that
 /// appears later, and the B9 runs no udev; 2026-11-08), or, on a TV without
 /// one, a new virtual remote through `/dev/uinput`. Also says which.
-pub fn open_sink(codes: &[u16]) -> Result<(Box<dyn KeySink>, String), String> {
-    let text = std::fs::read_to_string("/proc/bus/input/devices")
-        .map_err(|e| format!("/proc/bus/input/devices: {e}"))?;
-    if let Some((name, event)) = input_nodes(&text)
-        .into_iter()
-        .find(|(name, _)| name.starts_with(MAGIC_REMOTE))
-    {
-        let path = PathBuf::from("/dev/input").join(&event);
-        let sink = Inject::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        return Ok((Box::new(sink), format!("{event} ({name})")));
+pub fn open_sink(codes: &[u16]) -> Result<Sink, String> {
+    if let Some(magic) = open_magic()? {
+        return Ok(magic);
     }
     let sink = Uinput::create(DEVICE_NAME, codes).map_err(|e| format!("/dev/uinput: {e}"))?;
     Ok((Box::new(sink), "uinput".to_owned()))
@@ -503,18 +516,117 @@ pub fn open_sink(codes: &[u16]) -> Result<(Box<dyn KeySink>, String), String> {
 /// opened at the first press and kept for the session. A key the Magic
 /// Remote has no code for would be refused as unavailable; today every
 /// name has one.
+///
+/// The pointer goes the same way, as the Magic Remote sends its own (b9.md):
+/// LG's 1198 when it appears, its place as absolute X and Y, a click as
+/// `BTN_LEFT`, and LG's 1199 once it has rested `POINTER_REST`. It starts
+/// from where the kernel last had it, so it never jumps from under a hand
+/// on the real remote. Only the remote's own node has a pointer; a virtual
+/// remote has none.
 pub struct RobotKeys {
-    device: Mutex<Option<Box<dyn KeySink>>>,
+    hand: Arc<Mutex<Hand>>,
     settle: Duration,
+    rest: Duration,
+}
+
+/// LG's codes for the pointer showing and hiding, and Linux's click.
+pub const POINTER_SHOW: u16 = 1198;
+pub const POINTER_HIDE: u16 = 1199;
+pub const BTN_LEFT: u16 = 272;
+/// How long after its last move the Magic Remote hides its pointer (about
+/// 5 s in the recordings of 2026-10-22).
+pub const POINTER_REST: Duration = Duration::from_secs(5);
+
+struct Hand {
+    device: Option<Box<dyn KeySink>>,
+    /// The pointer is up by this route's doing, and owes a 1199.
+    shown: bool,
+    /// A key went since the last move: LG may have hidden the pointer, so
+    /// the next move says 1198 again.
+    stale: bool,
+    moved: Instant,
+    at: (i32, i32),
+    /// The thread that hides a rested pointer is running.
+    hider: bool,
+}
+
+/// `at` moved by `d` pixels of a screen `span` wide, in the axis's units
+/// and held inside it.
+pub fn step(axis: Axis, at: i32, d: i16, span: i64) -> i32 {
+    let range = i64::from(axis.max) - i64::from(axis.min);
+    // To the nearest unit, halves away from zero.
+    let scaled = (i64::from(d) * range + i64::from(d.signum()) * span / 2) / span;
+    (i64::from(at) + scaled).clamp(i64::from(axis.min), i64::from(axis.max)) as i32
+}
+
+fn tap(dev: &mut dyn KeySink, code: u16, held: Duration) -> std::io::Result<()> {
+    dev.emit(code, 1)?;
+    if !held.is_zero() {
+        thread::sleep(held);
+    }
+    dev.emit(code, 0)
 }
 
 impl RobotKeys {
     /// `settle`: the wait after making a virtual remote, for a compositor
     /// that finds new ones; none when writing into the remote's own node.
     pub fn new(settle: Duration) -> Self {
+        Self::with(None, settle, POINTER_REST)
+    }
+
+    fn with(device: Option<Box<dyn KeySink>>, settle: Duration, rest: Duration) -> Self {
         Self {
-            device: Mutex::new(None),
+            hand: Arc::new(Mutex::new(Hand {
+                device,
+                shown: false,
+                stale: false,
+                moved: Instant::now(),
+                at: (0, 0),
+                hider: false,
+            })),
             settle,
+            rest,
+        }
+    }
+
+    /// The remote's own node and its axes; never a virtual remote.
+    fn pointer_axes(hand: &mut Hand) -> Result<(Axis, Axis), Refusal> {
+        if hand.device.is_none() {
+            let magic = open_magic().map_err(|e| Refusal::new(ErrorCode::Failed, e))?;
+            hand.device = magic.map(|(dev, _)| dev);
+        }
+        hand.device
+            .as_mut()
+            .and_then(|dev| dev.axes())
+            .ok_or_else(no_pointer)
+    }
+
+    /// Hides the pointer once it has rested, as the remote itself does.
+    fn hide_when_rested(&self) {
+        let (hand, rest) = (Arc::clone(&self.hand), self.rest);
+        let look = rest.min(Duration::from_millis(250));
+        let run = move || loop {
+            thread::sleep(look);
+            let mut hand = hand.lock().unwrap_or_else(|e| e.into_inner());
+            if hand.shown && hand.moved.elapsed() < rest {
+                continue;
+            }
+            if hand.shown {
+                if let Some(dev) = hand.device.as_mut() {
+                    let _ = tap(&mut **dev, POINTER_HIDE, Duration::ZERO);
+                }
+                hand.shown = false;
+            }
+            hand.hider = false;
+            return;
+        };
+        if thread::Builder::new()
+            .name("pointer-rest".to_owned())
+            .spawn(run)
+            .is_err()
+        {
+            let mut hand = self.hand.lock().unwrap_or_else(|e| e.into_inner());
+            hand.hider = false;
         }
     }
 }
@@ -535,22 +647,70 @@ impl KeyRoute for RobotKeys {
                 format!("the remote has no code for {key}"),
             )
         })?;
-        let mut device = self.device.lock().unwrap_or_else(|e| e.into_inner());
-        if device.is_none() {
+        let mut hand = self.hand.lock().unwrap_or_else(|e| e.into_inner());
+        if hand.device.is_none() {
             let codes: Vec<u16> = CODES.iter().map(|&(_, c)| c).collect();
             let (made, via) = open_sink(&codes).map_err(|e| Refusal::new(ErrorCode::Failed, e))?;
-            *device = Some(made);
+            hand.device = Some(made);
             if via == "uinput" {
                 thread::sleep(self.settle);
             }
         }
-        let Some(dev) = device.as_mut() else {
+        hand.stale = true;
+        let Some(dev) = hand.device.as_mut() else {
             return Err(Refusal::new(ErrorCode::Failed, "no virtual remote"));
         };
-        let fail = |e: std::io::Error| Refusal::new(ErrorCode::Failed, format!("{key}: {e}"));
-        dev.emit(code, 1).map_err(fail)?;
-        thread::sleep(Duration::from_millis(TAP_MS));
-        dev.emit(code, 0).map_err(fail)
+        tap(&mut **dev, code, Duration::from_millis(TAP_MS))
+            .map_err(|e| Refusal::new(ErrorCode::Failed, format!("{key}: {e}")))
+    }
+
+    fn pointer(&self) -> bool {
+        let mut hand = self.hand.lock().unwrap_or_else(|e| e.into_inner());
+        Self::pointer_axes(&mut hand).is_ok()
+    }
+
+    fn point(&self, dx: i16, dy: i16) -> Result<(), Refusal> {
+        let fail = |e: std::io::Error| Refusal::new(ErrorCode::Failed, format!("pointer: {e}"));
+        let mut hand = self.hand.lock().unwrap_or_else(|e| e.into_inner());
+        let (x, y) = Self::pointer_axes(&mut hand)?;
+        let (was_shown, stale) = (hand.shown, hand.stale);
+        if !was_shown {
+            hand.at = (x.value, y.value);
+        }
+        let to = (
+            step(x, hand.at.0, dx, POINTER_SPAN.0),
+            step(y, hand.at.1, dy, POINTER_SPAN.1),
+        );
+        let Some(dev) = hand.device.as_mut() else {
+            return Err(no_pointer());
+        };
+        if !was_shown || stale {
+            tap(&mut **dev, POINTER_SHOW, Duration::ZERO).map_err(fail)?;
+        }
+        dev.point(to.0, to.1).map_err(fail)?;
+        hand.at = to;
+        hand.shown = true;
+        hand.stale = false;
+        hand.moved = Instant::now();
+        let start = !hand.hider;
+        hand.hider = true;
+        drop(hand);
+        if start {
+            self.hide_when_rested();
+        }
+        Ok(())
+    }
+
+    fn click(&self) -> Result<(), Refusal> {
+        let mut hand = self.hand.lock().unwrap_or_else(|e| e.into_inner());
+        Self::pointer_axes(&mut hand)?;
+        // A click keeps a shown pointer up, as a hand on the remote would.
+        hand.moved = Instant::now();
+        let Some(dev) = hand.device.as_mut() else {
+            return Err(no_pointer());
+        };
+        tap(&mut **dev, BTN_LEFT, Duration::from_millis(TAP_MS))
+            .map_err(|e| Refusal::new(ErrorCode::Failed, format!("click: {e}")))
     }
 }
 
@@ -680,6 +840,153 @@ mod tests {
         assert_eq!(code_of("menu"), Some(139));
         assert_eq!(code_of("power"), None);
         assert_eq!(CODES.len(), KEY_NAMES.len());
+    }
+
+    /// What a route wrote: `K code value` for a key, `P x y` for a place.
+    type Tape = Arc<Mutex<Vec<String>>>;
+
+    struct Recorder {
+        tape: Tape,
+        axes: Option<(Axis, Axis)>,
+    }
+
+    impl KeySink for Recorder {
+        fn emit(&mut self, code: u16, value: i32) -> std::io::Result<()> {
+            self.tape.lock().unwrap().push(format!("K {code} {value}"));
+            Ok(())
+        }
+
+        fn axes(&mut self) -> Option<(Axis, Axis)> {
+            self.axes
+        }
+
+        fn point(&mut self, x: i32, y: i32) -> std::io::Result<()> {
+            self.tape.lock().unwrap().push(format!("P {x} {y}"));
+            Ok(())
+        }
+    }
+
+    fn recorded(axes: Option<(Axis, Axis)>, rest: Duration) -> (RobotKeys, Tape) {
+        let tape = Tape::default();
+        let sink = Recorder {
+            tape: Arc::clone(&tape),
+            axes,
+        };
+        (
+            RobotKeys::with(Some(Box::new(sink)), Duration::ZERO, rest),
+            tape,
+        )
+    }
+
+    fn screen(x: i32, y: i32) -> Option<(Axis, Axis)> {
+        Some((
+            Axis {
+                value: x,
+                min: 0,
+                max: 1919,
+            },
+            Axis {
+                value: y,
+                min: 0,
+                max: 1079,
+            },
+        ))
+    }
+
+    #[test]
+    fn a_step_scales_to_the_axis_and_stays_inside_it() {
+        let wide = Axis {
+            value: 0,
+            min: 0,
+            max: 3840,
+        };
+        assert_eq!(step(wide, 100, 10, 1920), 120);
+        assert_eq!(step(wide, 100, -10, 1920), 80);
+        assert_eq!(step(wide, 100, -1920, 1920), 0);
+        assert_eq!(step(wide, 3800, 1920, 1920), 3840);
+        let narrow = Axis {
+            value: 0,
+            min: -100,
+            max: 100,
+        };
+        // 200 units over 1920 pixels: 5 pixels round to 1, 4 to 0.
+        assert_eq!(step(narrow, 0, 5, 1920), 1);
+        assert_eq!(step(narrow, 0, -5, 1920), -1);
+        assert_eq!(step(narrow, 0, 4, 1920), 0);
+        assert_eq!(step(narrow, -100, -1920, 1920), -100);
+    }
+
+    #[test]
+    fn the_pointer_shows_once_then_moves_from_where_the_kernel_had_it() {
+        let (route, tape) = recorded(screen(960, 540), Duration::from_secs(60));
+        assert!(route.pointer());
+        route.point(10, -20).unwrap();
+        route.point(5, 5).unwrap();
+        route.point(1920, 1080).unwrap();
+        route.click().unwrap();
+        assert_eq!(
+            *tape.lock().unwrap(),
+            [
+                "K 1198 1",
+                "K 1198 0",
+                "P 970 520",
+                "P 975 525",
+                "P 1919 1079",
+                "K 272 1",
+                "K 272 0",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_key_between_moves_shows_the_pointer_again() {
+        let (route, tape) = recorded(screen(100, 100), Duration::from_secs(60));
+        let bus = crate::fake::FakeBus::new(false);
+        route.point(1, 1).unwrap();
+        route.press(&bus, "down").unwrap();
+        route.point(1, 1).unwrap();
+        assert_eq!(
+            *tape.lock().unwrap(),
+            [
+                "K 1198 1",
+                "K 1198 0",
+                "P 101 101",
+                "K 108 1",
+                "K 108 0",
+                "K 1198 1",
+                "K 1198 0",
+                "P 102 102",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_rested_pointer_is_hidden_and_the_next_move_shows_it_again() {
+        let (route, tape) = recorded(screen(100, 100), Duration::from_millis(30));
+        route.point(1, 1).unwrap();
+        let hidden = |tape: &Tape| tape.lock().unwrap().iter().any(|l| l == "K 1199 0");
+        let until = Instant::now() + Duration::from_secs(5);
+        while !hidden(&tape) && Instant::now() < until {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            *tape.lock().unwrap(),
+            ["K 1198 1", "K 1198 0", "P 101 101", "K 1199 1", "K 1199 0"]
+        );
+        route.point(1, 1).unwrap();
+        assert_eq!(
+            tape.lock().unwrap()[5..8],
+            ["K 1198 1", "K 1198 0", "P 101 101"]
+        );
+    }
+
+    #[test]
+    fn a_remote_without_a_pointer_refuses_the_pointer() {
+        let (route, tape) = recorded(None, Duration::from_secs(60));
+        assert!(!route.pointer());
+        assert_eq!(route.point(1, 1).unwrap_err().code, ErrorCode::Unavailable);
+        assert_eq!(route.click().unwrap_err().code, ErrorCode::Unavailable);
+        assert!(tape.lock().unwrap().is_empty());
     }
 
     #[test]

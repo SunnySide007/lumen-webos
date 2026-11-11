@@ -38,6 +38,7 @@ describe("FakeTv", () => {
       "mute.set": { muted: true },
       launch: { id: "netflix" },
       key: { name: "ok" },
+      "pointer.move": { dx: 12, dy: -7 },
       "text.insert": { text: "a" },
       "text.delete": { count: 1 },
       "settings.set": { key: "sound.mode", value: "music" },
@@ -156,6 +157,18 @@ describe("FakeTv", () => {
     const hello = tv.hello("t");
     expect(hello.event === "hello" && hello.data.verbs.includes("key")).toBe(false);
     expect(ask("key", { name: "ok" })).toMatchObject({ ok: false, error: { code: "unavailable" } });
+    expect(hello.event === "hello" && hello.data.verbs.some((v) => v.startsWith("pointer."))).toBe(false);
+    expect(ask("pointer.move", { dx: 1, dy: 1 })).toMatchObject({ ok: false, error: { code: "unavailable" } });
+    expect(ask("pointer.click")).toMatchObject({ ok: false, error: { code: "unavailable" } });
+  });
+
+  it("moves the pointer from the middle and keeps it on the screen", () => {
+    expect(ask("pointer.move", { dx: 40, dy: -40 })).toMatchObject({ ok: true });
+    expect(tv.pointer).toEqual({ x: 1000, y: 500 });
+    ask("pointer.move", { dx: 1920, dy: -1080 });
+    expect(tv.pointer).toEqual({ x: 1919, y: 0 });
+    expect(ask("pointer.click")).toMatchObject({ ok: true });
+    expect(ask("pointer.move", { dx: 1921, dy: 0 })).toMatchObject({ ok: false, error: { code: "bad-args" } });
   });
 });
 

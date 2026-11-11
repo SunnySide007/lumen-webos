@@ -44,6 +44,26 @@ pub trait KeyRoute: Send + Sync {
     /// Whether `key` is in `hello`'s verbs.
     fn any(&self) -> bool;
     fn press(&self, bus: &dyn Bus, key: &'static str) -> Result<(), Refusal>;
+
+    /// Whether `pointer.move` and `pointer.click` are in `hello`'s verbs:
+    /// only the `inject` route on a TV whose remote has a pointer.
+    fn pointer(&self) -> bool {
+        false
+    }
+
+    /// Moves the pointer by `dx`, `dy`, in pixels of a 1920 by 1080 screen.
+    fn point(&self, _dx: i16, _dy: i16) -> Result<(), Refusal> {
+        Err(no_pointer())
+    }
+
+    /// One click where the pointer is.
+    fn click(&self) -> Result<(), Refusal> {
+        Err(no_pointer())
+    }
+}
+
+pub fn no_pointer() -> Refusal {
+    Refusal::new(ErrorCode::Unavailable, "this TV has no route for a pointer")
 }
 
 pub struct NoKeys;
