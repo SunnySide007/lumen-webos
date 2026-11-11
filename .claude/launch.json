@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "lumen-remote-mock",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "remote/mock-ctl", "run", "mock"],
+      "port": 8765
+    }
+  ]
+}

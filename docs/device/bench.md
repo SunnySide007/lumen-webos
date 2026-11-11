@@ -181,11 +181,18 @@ shown, each 17 to 18 ms after the key).
   Home 773 (LG's code, held 150 to 200 ms before each trip through LG's
   launcher in the 2026-10-22 recordings; not yet tried from the robot);
   play 207, pause 119, stop 128, rewind 168, fast forward 208. Added
-  from the same key map on 2026-11-11 for the Remote, and not yet pressed
-  on the TV: Info 358, Exit 174, channel up and down 402 and 403, red,
-  green, yellow and blue 398 to 401, and the numbers (1 to 9 are 2 to 10,
-  0 is 11). `menu` still has no code: the node's 139 comes by itself with
-  the pointer (b9.md).
+  from the same key map on 2026-11-11 for the Remote: Info 358, Exit 174,
+  channel up and down 402 and 403, red, green, yellow and blue 398 to 401,
+  and the numbers (1 to 9 are 2 to 10, 0 is 11). Pressed the same day
+  through `lumen-ctl serve --keys inject` with Lumen's shell in front (B9
+  OLED55B9PUA, firmware 05.50.00, the SDL path): each of 1, 5, 0, the four
+  colours, Info, channel up, channel down and Exit reached the shell, 78 to
+  79 ms a press from the PC. The shell's log names them as the numbers'
+  own key codes (0x31, 0x35, 0x30) and SDL scancodes 486 to 489 for red,
+  green, yellow and blue, 499 for Info, 480 and 481 for channel up and
+  down, and 505 for Exit; Lumen stayed in front after every one. What they
+  do inside LG's apps and Live TV is not tried. `menu` still has no code:
+  the node's 139 comes by itself with the pointer (b9.md).
 * **Yield.** Every input node, the remote's included, is opened read-only
   before the first key and never grabbed. Any event other than a separator
   or a scan code is a person, unless it carries a code the robot wrote
