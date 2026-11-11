@@ -1,5 +1,7 @@
-//! The tray icon, its menu, and placing the popup above it.
+//! The tray icon, its menu, placing the popup above it, and placing the
+//! thin remote at the side of the desktop.
 
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -15,16 +17,28 @@ const REOPEN_GUARD: Duration = Duration::from_millis(300);
 const MARGIN: f64 = 12.0;
 
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
+    let side = MenuItem::with_id(app, "side", "Thin remote", true, None::<&str>)?;
+    let panel = MenuItem::with_id(app, "panel", "Quick panel", true, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", "Open window", true, None::<&str>)?;
     let pair = MenuItem::with_id(app, "pair", "Pair a phone", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &pair, &sep, &quit])?;
+    let menu = Menu::with_items(app, &[&side, &panel, &open, &pair, &sep, &quit])?;
     let mut tray = TrayIconBuilder::with_id("lumen")
         .tooltip("Lumen Remote")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
+            "side" => toggle_side(app),
+            "panel" => {
+                // The popup goes above the icon, wherever the taskbar is.
+                let rect = app
+                    .tray_by_id("lumen")
+                    .and_then(|t| t.rect().ok().flatten());
+                if let Some(rect) = rect {
+                    toggle_popup(app, rect);
+                }
+            }
             "open" => open_main(app, None),
             "pair" => open_main(app, Some("pairing")),
             "quit" => {
@@ -37,11 +51,10 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
-                rect,
                 ..
             } = event
             {
-                toggle_popup(tray.app_handle(), rect);
+                toggle_side(tray.app_handle());
             }
         });
     if let Some(icon) = app.default_window_icon() {
@@ -54,6 +67,15 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
 /// Tells a page whether its window is on screen; the page lets its link go
 /// a while after it hides (`host.ts`).
 pub fn visibility(app: &AppHandle, label: &str, visible: bool) {
+    {
+        let state = app.state::<App>();
+        let mut shown = lock(&state.shown);
+        if visible {
+            shown.insert(label.to_owned());
+        } else {
+            shown.remove(label);
+        }
+    }
     let _ = app.emit_to(label, "lumen-visibility", visible);
 }
 
@@ -69,6 +91,54 @@ pub fn open_main(app: &AppHandle, route: Option<&str>) {
     let _ = w.show();
     let _ = w.set_focus();
     visibility(app, "main", true);
+}
+
+/// The tray icon's click: the thin remote comes and goes.
+fn toggle_side(app: &AppHandle) {
+    let Some(w) = app.get_webview_window("side") else {
+        return;
+    };
+    if w.is_visible().unwrap_or(false) {
+        let _ = w.hide();
+        visibility(app, "side", false);
+    } else {
+        show_side(app);
+    }
+}
+
+/// Shows the thin remote. The first time, it goes to the right edge of the
+/// main screen's work area, half-way down; after that it stays where it was
+/// dragged. It takes no focus: whatever the owner was typing in keeps it.
+pub fn show_side(app: &AppHandle) {
+    let Some(w) = app.get_webview_window("side") else {
+        return;
+    };
+    if !app.state::<App>().side_placed.swap(true, Ordering::Relaxed) {
+        place_side(&w);
+    }
+    let _ = w.show();
+    visibility(app, "side", true);
+}
+
+fn place_side(w: &WebviewWindow) {
+    let Ok(Some(monitor)) = w.primary_monitor() else {
+        return;
+    };
+    let area = monitor.work_area();
+    let margin = MARGIN * monitor.scale_factor();
+    let (ax, ay) = (f64::from(area.position.x), f64::from(area.position.y));
+    let (aw, ah) = (f64::from(area.size.width), f64::from(area.size.height));
+    let mut size = w.outer_size().unwrap_or_default();
+    // A short screen gets a shorter remote, which scrolls.
+    let room = (ah - 2.0 * margin).max(200.0);
+    if f64::from(size.height) > room {
+        size.height = room.round() as u32;
+        let _ = w.set_size(size);
+    }
+    let (pw, ph) = (f64::from(size.width), f64::from(size.height));
+    let x = ax + aw - pw - margin;
+    let y = ay + (ah - ph) / 2.0;
+    let _ = w.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
 }
 
 fn toggle_popup(app: &AppHandle, rect: Rect) {

@@ -199,15 +199,28 @@ python tools/remote/ctl.py watch                 # every event, until Ctrl-C
 
 ## The PC app (R3)
 
-`app/` wraps `ui/` in Tauri 2. A left click on the tray icon opens the popup
-above it, and clicking away hides it; the right-click menu has Open window,
-Pair a phone and Quit; closing the window leaves the app in the tray. The
+`app/` wraps `ui/` in Tauri 2. A left click on the tray icon shows or hides
+the thin remote: one narrow column (140 by 700) that stays above other
+windows at the right edge of the desktop, with the pad, Back, Home and Menu,
+the volume and channel rockers, playback and shortcuts. It is placed once
+and stays where it is dragged by its grip; it shows by itself when the app
+starts with a TV set. The right-click menu has Thin remote, Quick panel
+(the popup above the icon, which hides when clicked away from), Open window,
+Pair a phone and Quit; closing a window leaves the app in the tray. The
 page reaches `lumen-ctl` through the app: Windows' own OpenSSH
 (`C:\Windows\System32\OpenSSH\ssh.exe`) with ctl.py's options and the app's
 key, one JSON line each way, handed to `RemoteClient` as its socket
 (`ui/src/host.ts`). Nothing else in the page changes, since `lumen-ctl`
-sends the mock's lines. "Turn on" sends Wake-on-LAN. The key pad, Back,
-Home, Menu and playback stay hidden until a hello offers `key`.
+sends the mock's lines. "Turn on" sends Wake-on-LAN. The key pad, the
+touchpad, Back, Home, Menu, the channel rocker, playback and the number and
+colour keys stay hidden until a hello offers `key`.
+
+The Remote screen (`ui/src/screens/remote.ts`, its parts in `parts.ts`)
+shows what is on the TV, the pad or a touchpad (a swipe moves one arrow for
+every 44 px, a tap is OK, a touch held still is Back; `ui/src/swipe.ts`)
+between the volume and channel rockers, shortcuts to the inputs with
+something plugged in and to the family's apps, and the number and colour
+keys. A browser shows the thin remote at `/?window=side`.
 
 Everything the app keeps is in `~/.lumen/remote/`: the key (`id_ed25519`,
 from `tools/remote.sh keygen`; the app makes none), `tv.conf` (the TV's

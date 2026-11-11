@@ -1,0 +1,950 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * The remote's parts (screens/parts.ts): what is on the TV, the pad or the
+ * touchpad between two rockers, shortcuts, the number and colour keys, and
+ * the PC's thin remote at the side of the desktop (screens/side.ts).
+ */
+
+/* ------------------------------------------------------------ on the TV */
+
+.now {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  max-width: 460px;
+  padding: 12px 18px 12px 12px;
+  border-radius: 24px;
+  background:
+    linear-gradient(110deg, color-mix(in oklab, var(--tile) 34%, transparent), transparent 70%),
+    linear-gradient(155deg, rgb(255 255 255 / 0.11), rgb(255 255 255 / 0.025) 45%, rgb(255 255 255 / 0.05)),
+    rgb(14 18 34 / 0.42);
+  transition: background 600ms;
+}
+
+.now-face {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 68px;
+  height: 46px;
+  border-radius: 13px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--tile) 86%, white) 0%,
+    var(--tile) 40%,
+    color-mix(in oklab, var(--tile) 70%, black) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.3),
+    0 0 30px -6px color-mix(in oklab, var(--tile) 80%, transparent),
+    0 10px 18px -10px rgb(0 0 0 / 0.9);
+  color: #fff;
+  font-size: 22px;
+  font-weight: 650;
+  text-shadow: 0 2px 10px rgb(0 0 0 / 0.3);
+  transition: background 600ms;
+}
+
+.now-text {
+  display: grid;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.now-label {
+  color: var(--dim);
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.now-title {
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-sub {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-sub:empty {
+  display: none;
+}
+
+/* ------------------------------------------------------------ pad or touchpad */
+
+.surface-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.05);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+}
+
+.surface-switch .chip-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.surface-switch .chip-option .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.surface-switch .chip-option[aria-pressed="true"] {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 70%, white), var(--accent));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.5),
+    0 8px 20px -12px var(--accent);
+}
+
+.deck {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(8px, 3vw, 22px);
+  width: 100%;
+}
+
+.surface {
+  display: grid;
+  place-items: center;
+  flex: none;
+  perspective: 900px;
+}
+
+.surface[data-surface="pad"] > .touchpad,
+.surface[data-surface="touchpad"] > .pad {
+  display: none;
+}
+
+/* The pad sits between the rockers, so it takes what they leave of the
+ * column, on a phone and in a narrow window alike. */
+.remote-main {
+  container-type: inline-size;
+}
+
+.deck .pad,
+.deck .touchpad {
+  --size: clamp(176px, calc(100cqw - 172px), 300px);
+}
+
+/* A bolder pad: a lit ring round the disc and a brighter press. */
+.pad-disc {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.2),
+    inset 0 -1px 0 rgb(255 255 255 / 0.05),
+    inset 0 0 0 1px rgb(255 255 255 / 0.09),
+    0 0 0 6px rgb(255 255 255 / 0.03),
+    0 0 70px -18px color-mix(in oklab, var(--accent) 75%, transparent),
+    0 34px 60px -26px rgb(0 0 0 / 0.85);
+}
+
+.pad:is(.lean-up, .lean-down, .lean-left, .lean-right, .lean-ok) .pad-disc {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.24),
+    inset 0 0 0 1px rgb(255 255 255 / 0.12),
+    0 0 0 6px color-mix(in oklab, var(--accent) 14%, transparent),
+    0 0 90px -14px var(--accent),
+    0 34px 60px -26px rgb(0 0 0 / 0.85);
+}
+
+.pad-disc {
+  transition: box-shadow 320ms;
+}
+
+.touchpad {
+  position: relative;
+  display: grid;
+  place-items: end center;
+  width: var(--size);
+  height: var(--size);
+  overflow: hidden;
+  border-radius: 34px;
+  cursor: grab;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  transition: box-shadow 300ms;
+}
+
+.touchpad:focus-visible {
+  box-shadow:
+    inset 0 0 0 2px var(--text),
+    0 30px 60px -28px rgb(0 0 0 / 0.75);
+}
+
+.touchpad.touching {
+  cursor: grabbing;
+}
+
+/* The light under the finger. */
+.touch-dot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 150px;
+  height: 150px;
+  margin: -75px 0 0 -75px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--accent) 70%, transparent), transparent);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(var(--touch-x, 50%), var(--touch-y, 50%)) scale(0.6);
+  transition:
+    opacity 300ms,
+    scale var(--spring-ms) var(--spring);
+}
+
+.touchpad.touching .touch-dot {
+  opacity: 0.85;
+  transform: translate(var(--touch-x, 50%), var(--touch-y, 50%)) scale(1);
+  transition-duration: 80ms, 200ms;
+}
+
+/* A tap rings; a hold (Back) rings wider and warmer. */
+.touchpad::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 60px;
+  height: 60px;
+  margin: -30px 0 0 -30px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(var(--touch-x, 50%), var(--touch-y, 50%));
+}
+
+.touchpad.tapped::after {
+  animation: touch-ring 380ms ease-out;
+}
+
+.touchpad.held::after {
+  box-shadow: 0 0 0 3px var(--warn);
+  animation: touch-ring 380ms ease-out;
+}
+
+@keyframes touch-ring {
+  from {
+    opacity: 0.9;
+    scale: 0.5;
+  }
+  to {
+    opacity: 0;
+    scale: 2.6;
+  }
+}
+
+/* An arrow sent leaves a streak the way it went. */
+.touch-streak {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.touch-streak[data-way="right"] {
+  background: linear-gradient(90deg, transparent 40%, color-mix(in oklab, var(--accent) 45%, transparent));
+}
+.touch-streak[data-way="left"] {
+  background: linear-gradient(270deg, transparent 40%, color-mix(in oklab, var(--accent) 45%, transparent));
+}
+.touch-streak[data-way="down"] {
+  background: linear-gradient(180deg, transparent 40%, color-mix(in oklab, var(--accent) 45%, transparent));
+}
+.touch-streak[data-way="up"] {
+  background: linear-gradient(0deg, transparent 40%, color-mix(in oklab, var(--accent) 45%, transparent));
+}
+
+.touch-streak.go {
+  animation: touch-streak 320ms ease-out;
+}
+
+@keyframes touch-streak {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.touch-hint {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  margin: 0 0 18px;
+  color: var(--dim);
+  font-size: 12.5px;
+  pointer-events: none;
+  transition: opacity 250ms;
+}
+
+.touch-hint span:first-child {
+  color: color-mix(in oklab, var(--text) 80%, transparent);
+  font-weight: 600;
+}
+
+.touchpad.touching .touch-hint {
+  opacity: 0.25;
+}
+
+/* ------------------------------------------------------------ rockers */
+
+.rocker-col {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.rocker {
+  display: grid;
+  grid-template-rows: 1fr auto 1fr;
+  justify-items: center;
+  width: 52px;
+  height: 164px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.rocker-key {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  transition:
+    background 200ms,
+    color 200ms;
+}
+
+.rocker-key .icon {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2.2;
+  transition: transform var(--spring-ms) var(--spring);
+}
+
+.rocker-key:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.07);
+  color: var(--accent);
+}
+
+.rocker-key:is(:active, .pressed):not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 30%, transparent);
+  color: #fff;
+  transition-duration: 60ms;
+}
+
+.rocker-key:first-child:is(:active, .pressed) .icon {
+  transform: translateY(-3px) scale(1.15);
+}
+
+.rocker-key:last-child:is(:active, .pressed) .icon {
+  transform: translateY(3px) scale(1.15);
+}
+
+.rocker-key:disabled {
+  color: var(--dim);
+  opacity: 0.45;
+}
+
+.rocker-mid {
+  min-width: 2ch;
+  color: var(--dim);
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+.rocker-mid.vol-level {
+  color: var(--text);
+  font-size: 16px;
+  transition: transform var(--spring-ms) var(--spring);
+}
+
+.rocker-mid.bump {
+  transform: scale(1.3);
+  color: var(--accent);
+}
+
+.rocker-label {
+  color: var(--dim);
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mute-key.muted {
+  color: var(--warn);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.13),
+    inset 0 0 0 1px color-mix(in oklab, var(--warn) 50%, transparent);
+}
+
+/* ------------------------------------------------------------ shortcuts */
+
+.shortcuts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px 10px;
+}
+
+.shortcut {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.shortcut-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  aspect-ratio: 5 / 3;
+  border-radius: 14px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--tile) 86%, white) 0%,
+    var(--tile) 38%,
+    color-mix(in oklab, var(--tile) 72%, black) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.28),
+    0 10px 18px -12px rgb(0 0 0 / 0.9);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 650;
+  text-shadow: 0 2px 10px rgb(0 0 0 / 0.3);
+  filter: brightness(0.82);
+  transition:
+    filter 250ms,
+    box-shadow 350ms,
+    transform var(--spring-ms) var(--spring);
+}
+
+/* A light tile (Netflix's white, say) takes dark letters. */
+.shortcut.light .shortcut-face,
+.now.light .now-face {
+  color: var(--ink);
+  text-shadow: none;
+}
+
+.shortcut-face .icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.85;
+}
+
+.shortcut:is(:hover, :focus-visible):not(:disabled) .shortcut-face {
+  filter: none;
+  transform: scale(1.07);
+}
+
+.shortcut:focus-visible {
+  outline: none;
+}
+
+.shortcut:focus-visible .shortcut-face {
+  box-shadow: 0 0 0 2px var(--text);
+}
+
+.shortcut:active:not(:disabled) .shortcut-face,
+.shortcut.launch .shortcut-face {
+  transform: scale(0.92);
+  transition-duration: 250ms, 350ms, 80ms;
+}
+
+.shortcut.in-front .shortcut-face {
+  filter: none;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.3),
+    0 0 0 2px rgb(255 255 255 / 0.92),
+    0 0 28px -4px color-mix(in oklab, var(--tile) 85%, transparent);
+}
+
+.shortcut:disabled {
+  opacity: 0.45;
+}
+
+.shortcut-title {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 12px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut.in-front .shortcut-title {
+  color: var(--text);
+}
+
+/* ------------------------------------------------------------ numbers and colours */
+
+.more-keys {
+  padding: 6px 18px;
+  border-radius: 24px;
+}
+
+.more-keys summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.more-keys summary::-webkit-details-marker {
+  display: none;
+}
+
+.more-keys summary .icon {
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+}
+
+.more-keys summary::after {
+  content: "";
+  width: 9px;
+  height: 9px;
+  margin-left: auto;
+  border-right: 2px solid var(--dim);
+  border-bottom: 2px solid var(--dim);
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform var(--spring-ms) var(--spring);
+}
+
+.more-keys[open] summary::after {
+  transform: translateY(2px) rotate(225deg);
+}
+
+.numbers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  max-width: 300px;
+  margin: 8px auto 14px;
+}
+
+.num-key {
+  display: grid;
+  place-items: center;
+  height: 50px;
+  border: 0;
+  border-radius: 16px;
+  background: rgb(255 255 255 / 0.08);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.13),
+    inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  transition:
+    transform var(--spring-ms) var(--spring),
+    background 200ms,
+    box-shadow 250ms;
+}
+
+.num-key.side {
+  background: transparent;
+  box-shadow: none;
+  color: var(--dim);
+}
+
+.num-key .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.num-key:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.13);
+}
+
+.num-key:is(:active, .pressed):not(:disabled) {
+  transform: scale(0.92);
+  background: rgb(255 255 255 / 0.22);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.2),
+    0 0 22px -6px color-mix(in oklab, var(--accent) 80%, transparent);
+  transition-duration: 70ms, 70ms, 200ms;
+}
+
+.num-key:disabled,
+.colour-key:disabled {
+  opacity: 0.38;
+}
+
+.colours {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  max-width: 300px;
+  margin: 0 auto 14px;
+}
+
+.colour-key {
+  --key: #888;
+  height: 26px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--key) 80%, white), var(--key));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    0 8px 16px -10px var(--key);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    transform var(--spring-ms) var(--spring),
+    box-shadow 250ms;
+}
+
+.colour-key:is(:active, .pressed):not(:disabled) {
+  transform: scale(0.9);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    0 0 24px -2px var(--key);
+  transition-duration: 70ms, 200ms;
+}
+
+.colour-red {
+  --key: #e2504c;
+}
+.colour-green {
+  --key: #4cba6b;
+}
+.colour-yellow {
+  --key: #e3c043;
+}
+.colour-blue {
+  --key: #4a7fe0;
+}
+
+/* ------------------------------------------------------------ the PC's thin remote */
+
+html.window-side,
+html.window-side body {
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+/* The window is the remote: no backdrop of the page's own behind it. */
+html.window-side body::before,
+html.window-side body::after {
+  display: none;
+}
+
+.app.side {
+  display: block;
+  height: 100dvh;
+  min-height: 0;
+  padding: 0;
+}
+
+.side-remote {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 6px 10px 12px;
+  overflow: hidden auto;
+  border-radius: 26px;
+  scrollbar-width: none;
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--ambient) 26%, transparent), transparent 38%),
+    linear-gradient(155deg, rgb(255 255 255 / 0.1), rgb(255 255 255 / 0.02) 45%, rgb(255 255 255 / 0.05)),
+    rgb(12 15 30 / 0.72);
+  transition: background 1.4s;
+}
+
+.side-remote > * {
+  flex: none;
+}
+
+.side-grip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  height: 30px;
+  cursor: grab;
+  user-select: none;
+}
+
+.side-grip-dots {
+  display: grid;
+  place-items: center;
+  flex: 1;
+  height: 100%;
+  color: var(--dim);
+}
+
+.side-grip-dots .icon {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.6;
+  pointer-events: none;
+}
+
+.side-light {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.side-light::after {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 8px;
+  margin: auto;
+  border-radius: 50%;
+  background: var(--dim);
+  transition:
+    background 300ms,
+    box-shadow 300ms;
+}
+
+.side-light[data-tone="ok"]::after {
+  background: var(--good);
+  box-shadow: 0 0 10px var(--good);
+}
+
+.side-light[data-tone="stale"]::after {
+  background: var(--warn);
+  box-shadow: 0 0 10px var(--warn);
+}
+
+.side-light[data-tone="bad"]::after {
+  background: var(--bad);
+  box-shadow: 0 0 10px var(--bad);
+}
+
+.side-tool {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+  transition:
+    background 200ms,
+    color 200ms;
+}
+
+.side-tool:hover {
+  background: rgb(255 255 255 / 0.1);
+  color: var(--text);
+}
+
+.side-tool .icon {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.2;
+}
+
+.side-row {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.side-remote .round-button.small {
+  width: 36px;
+  height: 36px;
+}
+
+.side-remote .round-button.small .icon {
+  width: 17px;
+  height: 17px;
+}
+
+.side-remote .round-button.danger {
+  color: #ffc9c9;
+}
+
+.side-remote .round-button.danger.armed {
+  background: linear-gradient(180deg, #ff7f7f, #e04848);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.4),
+    0 0 22px -4px #ff5c5c;
+}
+
+.side-remote .round-button.accent {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 70%, white), var(--accent));
+  color: var(--ink);
+}
+
+.side-remote .pad {
+  --size: 118px;
+  margin: 4px 0;
+}
+
+.side-remote .pad-arrow .icon {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.4;
+}
+
+.side-remote .pad-ok {
+  font-size: 12px;
+  transform: translateZ(14px);
+}
+
+.side-remote .pad-ok:hover:not(:disabled) {
+  transform: translateZ(14px) scale(1.05);
+}
+
+.side-remote .pad-ok:is(:active, .pressed):not(:disabled) {
+  transform: translateZ(14px) scale(0.88);
+}
+
+.side-rockers {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.side-remote .rocker {
+  width: 42px;
+  height: 116px;
+}
+
+.side-remote .rocker-key .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.side-remote .rocker-col {
+  gap: 6px;
+}
+
+.side-remote .rocker-label {
+  display: none;
+}
+
+.side-play {
+  display: grid;
+  grid-template-columns: repeat(2, 36px);
+  gap: 6px;
+}
+
+.side-remote .shortcuts {
+  grid-template-columns: repeat(2, 48px);
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.side-remote .shortcut-face {
+  border-radius: 10px;
+  font-size: 14px;
+  gap: 3px;
+}
+
+.side-remote .shortcut-face .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.side-remote .shortcut-title {
+  display: none;
+}
+
+/* The snackbar fits the column: a small card at the foot. */
+.app.side .snack {
+  left: 6px;
+  right: 6px;
+  bottom: 8px;
+  max-width: none;
+  min-height: 0;
+  padding: 8px 10px;
+  border-radius: 14px;
+  font-size: 11.5px;
+  line-height: 1.3;
+  transform: translateY(16px) scale(0.96);
+}
+
+.app.side .snack.show {
+  transform: none;
+}
+
+/* ------------------------------------------------------------ layout on the PC */
+
+@media (min-width: 1000px) {
+  .remote {
+    grid-template-columns: minmax(340px, 1fr) minmax(300px, 380px);
+  }
+
+  .rocker {
+    height: 190px;
+    width: 56px;
+  }
+}
+
+@media (max-width: 380px) {
+  .rocker {
+    width: 44px;
+    height: 140px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .touchpad.tapped::after,
+  .touchpad.held::after,
+  .touch-streak.go {
+    animation: none;
+  }
+}

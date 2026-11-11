@@ -37,6 +37,65 @@ test("Remote: keys, keyboard and typing become verbs", async ({ page }) => {
   await expect(page.locator(".snack.show")).toHaveCount(0);
 });
 
+test("Remote: the touchpad, the rockers, the number keys and a shortcut become verbs", async ({ page }) => {
+  const sent = watchRequests(page);
+  await open(page, "remote");
+  await page.getByRole("button", { name: "Touchpad", exact: true }).click();
+  const pad = page.locator(".touchpad");
+  await expect(pad).toBeVisible();
+  await expect(page.locator(".pad")).toBeHidden();
+  const box = (await pad.boundingBox())!;
+  const [cx, cy] = [box.x + box.width / 2, box.y + box.height / 2];
+  // A swipe of 100 px is two arrows; a quick touch is OK.
+  await page.mouse.move(cx - 50, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx, cy, { steps: 4 });
+  await page.mouse.move(cx + 50, cy, { steps: 4 });
+  await page.mouse.up();
+  await page.mouse.click(cx, cy);
+  await page.getByRole("button", { name: "Channel up" }).click();
+  await page.getByRole("button", { name: "Volume up" }).click();
+  await page.getByText("Numbers and colours").click();
+  await page.getByRole("button", { name: "7", exact: true }).click();
+  await page.getByRole("button", { name: "Red", exact: true }).click();
+  await page.locator(".shortcut", { hasText: "YouTube" }).click();
+  await expect
+    .poll(() => sent.map((r) => `${r.verb} ${JSON.stringify(r.args)}`))
+    .toEqual(
+      expect.arrayContaining([
+        'key {"name":"right"}',
+        'key {"name":"ok"}',
+        'key {"name":"channelup"}',
+        "volume.up {}",
+        'key {"name":"7"}',
+        'key {"name":"red"}',
+      ]),
+    );
+  expect(sent.filter((r) => r.verb === "key" && r.args.name === "right")).toHaveLength(2);
+  expect(sent.some((r) => r.verb === "launch")).toBe(true);
+  // The choice of touchpad is kept for the next visit.
+  await page.reload();
+  await expect(page.locator(".touchpad")).toBeVisible();
+});
+
+test("The thin remote: one column with the pad, the rockers and shortcuts", async ({ page }) => {
+  const sent = watchRequests(page);
+  await page.setViewportSize({ width: 140, height: 700 });
+  await page.goto("/?window=side");
+  await page.locator(".side-light[data-tone='ok']").waitFor();
+  await expect(page.locator(".nav")).toHaveCount(0);
+  await page.getByRole("button", { name: "OK", exact: true }).click();
+  await page.getByRole("button", { name: "Home" }).click();
+  await page.getByRole("button", { name: "Volume down" }).click();
+  await page.locator("body").press("ArrowUp");
+  await expect
+    .poll(() => sent.map((r) => `${r.verb} ${JSON.stringify(r.args)}`))
+    .toEqual(expect.arrayContaining(['key {"name":"ok"}', 'key {"name":"home"}', "volume.down {}", 'key {"name":"up"}']));
+  // Nothing is cut off at the side: the column fits its window.
+  const wide = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(wide).toBeLessThanOrEqual(140);
+});
+
 test("Sound: follows a volume change made elsewhere, and mutes", async ({ page }) => {
   await open(page, "sound");
   await other.send("volume.set", { level: 37 });

@@ -161,3 +161,54 @@ export function frontTitle(s: TvState): string | null {
   if (s.foreground === null) return null;
   return frontApp(s)?.title ?? s.foreground;
 }
+
+/** What a small tile shows for an app or input: an HDMI input's number
+ * (the owner may have named it "Home Theater", which no small tile holds),
+ * any other input's initials, an app's first letter. */
+export function tileFace(t: Pick<AppInfo, "id" | "title" | "kind">): string {
+  if (t.kind === "input") {
+    const hdmi = /hdmi\s*(\d)/i.exec(t.id) ?? /^hdmi\s*(\d)/i.exec(t.title);
+    if (hdmi?.[1]) return hdmi[1];
+    const words = t.title.split(/\s+/).filter((w) => w !== "");
+    return words
+      .slice(0, 2)
+      .map((w) => [...w][0] ?? "")
+      .join("")
+      .toUpperCase() || "?";
+  }
+  return [...t.title.trim()][0]?.toUpperCase() ?? "?";
+}
+
+/** Whether "#rrggbb" is light enough that white letters on it are lost. */
+export function isLight(color: string): boolean {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+  if (!m) return false;
+  const [r, g, b] = [m[1], m[2], m[3]].map((x) => parseInt(x ?? "0", 16) / 255) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.62;
+}
+
+/** Apps the Remote's shortcuts put first, by a word in the id or title. */
+const SHORTCUT_FIRST = ["netflix", "youtube", "plex", "prime", "amazon"] as const;
+
+/** The Remote screen's shortcuts: inputs with something plugged in (every
+ * input while the TV hasn't said), then apps, the family's few first, at
+ * most `max` in all. Whatever is in front is always among them. */
+export function shortcuts(s: TvState, max: number): Tile[] {
+  const all = tiles(s);
+  const known = s.inputs !== null;
+  const inputs = all.filter((t) => t.kind === "input" && (!known || t.connected === true));
+  const rank = (t: Tile) => {
+    const text = `${t.id} ${t.title}`.toLowerCase();
+    const i = SHORTCUT_FIRST.findIndex((w) => text.includes(w));
+    return i < 0 ? SHORTCUT_FIRST.length : i;
+  };
+  const apps = all
+    .filter((t) => t.kind === "app")
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i)
+    .map((x) => x.t);
+  const list = [...inputs, ...apps].slice(0, Math.max(0, max));
+  const front = all.find((t) => t.inFront);
+  if (front && list.length > 0 && !list.includes(front)) list[list.length - 1] = front;
+  return list;
+}

@@ -1,6 +1,7 @@
 //! Lumen Remote for Windows (docs/specs/remote.md, R3): a tray icon whose
-//! left click opens the popup above it, a menu (Open window, Pair a phone,
-//! Quit), and the same page in a normal window. The page is `remote/ui`,
+//! left click shows or hides the thin remote at the side of the desktop, a
+//! menu (Thin remote, Quick panel, Open window, Pair a phone, Quit), and
+//! the same page in a popup above the icon and in a normal window. The page is `remote/ui`,
 //! built with `npm run build:pc`; it reaches the TV through the commands
 //! below, which run `lumen-ctl serve` over SSH with the app's own key
 //! (`lumen-remote-link`). The app talks to nothing but the TV.
@@ -9,8 +10,8 @@
 mod applog;
 mod tray;
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
@@ -59,6 +60,13 @@ pub struct App {
     /// When the popup last hid on losing the focus: the tray click that
     /// took the focus must not open it again.
     pub popup_hidden: Mutex<Option<Instant>>,
+    /// Whether the thin remote has been put at the side of the desktop: it
+    /// is placed once, and stays where the owner drags it after that.
+    pub side_placed: AtomicBool,
+    /// The windows the app has shown and not hidden since. A window shown
+    /// from `setup` is not yet on screen when its page first asks, and the
+    /// event that said so went out before the page was listening.
+    pub shown: Mutex<HashSet<String>>,
 }
 
 pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -212,11 +220,25 @@ fn popup_painted(app: State<'_, App>) {
     }
 }
 
-/// Whether the asking page's window is on screen, for a page that loads
-/// after its window was shown and so missed the visibility event.
+/// Whether the asking page's window is on screen or was told to show, for
+/// a page that loads after its window was shown and so missed the
+/// visibility event.
 #[tauri::command]
-fn window_visible(window: tauri::WebviewWindow) -> bool {
-    window.is_visible().unwrap_or(false)
+fn window_visible(app: State<'_, App>, window: tauri::WebviewWindow) -> bool {
+    lock(&app.shown).contains(window.label()) || window.is_visible().unwrap_or(false)
+}
+
+/// The full window, in front: the thin remote's way to everything else.
+#[tauri::command]
+fn open_window(app: tauri::AppHandle) {
+    tray::open_main(&app, None);
+}
+
+/// Hides the asking page's own window; the tray icon shows it again.
+#[tauri::command]
+fn hide_window(window: tauri::WebviewWindow) {
+    let _ = window.hide();
+    tray::visibility(window.app_handle(), window.label(), false);
 }
 
 fn main() {
@@ -242,6 +264,8 @@ fn main() {
             next_link: AtomicU32::new(1),
             popup_opened: Mutex::new(None),
             popup_hidden: Mutex::new(None),
+            side_placed: AtomicBool::new(false),
+            shown: Mutex::default(),
         })
         .invoke_handler(tauri::generate_handler![
             link_open,
@@ -251,7 +275,9 @@ fn main() {
             settings_get,
             settings_set,
             popup_painted,
-            window_visible
+            window_visible,
+            open_window,
+            hide_window
         ])
         .on_window_event(|window, event| match (window.label(), event) {
             ("popup", WindowEvent::Focused(false)) => {
@@ -259,11 +285,11 @@ fn main() {
                 *lock(&window.state::<App>().popup_hidden) = Some(Instant::now());
                 tray::visibility(window.app_handle(), "popup", false);
             }
-            ("main", WindowEvent::CloseRequested { api, .. }) => {
-                // Closing the window leaves the app in the tray; Quit ends it.
+            (label @ ("main" | "side"), WindowEvent::CloseRequested { api, .. }) => {
+                // Closing a window leaves the app in the tray; Quit ends it.
                 api.prevent_close();
                 let _ = window.hide();
-                tray::visibility(window.app_handle(), "main", false);
+                tray::visibility(window.app_handle(), label, false);
             }
             _ => {}
         })
@@ -271,6 +297,9 @@ fn main() {
             tray::build(app.handle())?;
             if first_run {
                 tray::open_main(app.handle(), Some("pairing"));
+            } else {
+                // A TV is set: the remote is on the desk from the start.
+                tray::show_side(app.handle());
             }
             Ok(())
         })
