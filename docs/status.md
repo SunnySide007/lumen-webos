@@ -22,7 +22,7 @@ which.
 | 2. Speed | **The Home press meets its target.** `lumend` keeps the shell hidden on the Wayland path from boot and after a close; a Home press then shows Lumen 194 to 229 ms after the key goes down with a 180 ms hold, which is 14 to 49 ms after its release (LG acts on the release), against 843 to 864 ms with the shell closed. `tools/tv.sh close` and `install` hold the keeper for two minutes. Left: the lean track, lifecycle version 2, and starting the shell sooner than 157 s after a boot. | `lumend` with six parts (`s1`, `senders` acr2, `lg-home`, `icons`, `modes`, `shell`), rebooted twice |
 | 3. Design | **The new home and the six design notes are merged** (9ef55e1 and a1d9a58, at 90a3880) past the gate with all 30 icons: home 17.04 ms, Pages 17.14 ms, Control Center 16.98 ms. The owner's first test with the real remote (2026-11-10): the pointer must select the tile under it; a click opened the focused tile. The fix, 57c4831, is merged (fd3d44e) past the gate with all 30 icons (home 17.02 ms, Pages 17.12 ms, Control Center 16.50 ms) and after the owner's own test ("Pointer is right"). The stutter on coming back in front has a bench pattern (`tools/bench.sh front`) and a baseline: 8 vsyncs skipped in the 0.7 s fade, slow frames of up to 74 ms, all submit time. The fix is merged at a433623: the fade waits for the window's focus and the gradient under it is a fill, which leaves 2 vsyncs skipped and at most one slow frame; the art shows 136 to 263 ms later for it. | a433623 installed as the Home and the bench's last good |
 | 4. Privacy | Guard **G3's build runs in log mode**, in clear, from its own boot hook. Tried on the TV: default deny (`block trial`) with the live store-safe check and Netflix, YouTube and Plex launching; the learning window; Quad9 over TLS (`tls trial`), its fallback when port 853 is refused and its return; the clock fallback. Blocking for the family, and TLS for good, are the owner's tier C yes. | G3 binary and hook, log mode |
-| 5. Finish | **R3 is done** (the owner's sitting of 2026-11-11): the Windows app saved the TV, opened its link, and every row passed, with 47 requests answered in the TV's log. The pad was hidden until the TV got the current `lumen-ctl` with `keys inject`; a key takes 60 ms. Not tried: turning the TV on by Wake-on-LAN. R4 is merged and not verified: the phone service started and its certificate checked from the PC, then the owner put the phone off, so it is stopped with no phone paired. **The richer remote is merged** (6bd7825, the owner's ask): a thin remote at the side of the desktop, a touchpad, volume and channel rockers, shortcuts, and number, colour, Info and Exit keys. The owner tried the thin remote against the B9 ("buttons work", "Looks right"). The new keys were pressed on the TV the same day and each reached the shell ([bench.md, "Codes"](device/bench.md)). Left: Menu has no code until the gear is pressed once under `watch-remote`, and a true pointer. | `lumen-ctl` 72142736 with `keys inject` and the new key names; the phone service's files, stopped, no 8443 rule |
+| 5. Finish | **R3 is done** (the owner's sitting of 2026-11-11): the Windows app saved the TV, opened its link, and every row passed, with 47 requests answered in the TV's log. The pad was hidden until the TV got the current `lumen-ctl` with `keys inject`; a key takes 60 ms. Not tried: turning the TV on by Wake-on-LAN. R4 is merged and not verified: the phone service started and its certificate checked from the PC, then the owner put the phone off, so it is stopped with no phone paired. **The richer remote is merged** (6bd7825, the owner's ask): a thin remote at the side of the desktop, a touchpad, volume and channel rockers, shortcuts, and number, colour, Info and Exit keys. The owner tried the thin remote against the B9 ("buttons work", "Looks right"). The new keys were pressed on the TV the same day and each reached the shell ([bench.md, "Codes"](device/bench.md)). Menu is the gear, code 139, learned from the owner's presses under `watch-remote`; the TV takes it, and its effect on the screen waits for the owner's eye. Left: a true pointer. | `lumen-ctl` 4643efca with `keys inject` and the new key names; the phone service's files, stopped, no 8443 rule |
 
 ## On the TV
 
@@ -39,9 +39,9 @@ which.
   (the door). `lumen-privacy` and `lumen-home` are retired to
   `/var/lib/lumen/lumend/retired/`; `tools/lumend.sh door remove` puts
   them back. `lumen-ctl` behind its forced key and route D are as before.
-* **Remote:** `lumen-ctl` 72142736 with `keys inject` since 2026-11-11
-  (the builds before it are kept beside it as `lumen-ctl.before-rich` and
-  `lumen-ctl.before-20261111`;
+* **Remote:** `lumen-ctl` 4643efca with `keys inject` since 2026-11-11
+  (the builds before it are kept beside it as `lumen-ctl.before-menu`,
+  `lumen-ctl.before-rich` and `lumen-ctl.before-20261111`;
   `tools/remote.sh config keys=none` hides the pad). `lumen-remote` and the
   phone page are copied but not running, with no 8443 rule.
 * **Not on it:** a running `lumen-remote`; Guard blocking; TLS.
@@ -55,9 +55,8 @@ which.
    icons until `lumend` next starts: the first copy needs an owner.
 2. Guard's log-mode preview over days of the family's use (G2 step 5),
    then the owner's two tier C questions with the results.
-3. The gear's code for Menu (one press of the real remote under
-   `watch-remote`), a true pointer, then R4's phone rows at a second sitting, the TV lock
-   held throughout.
+3. A true pointer for the touchpad, then R4's phone rows at a second
+   sitting, the TV lock held throughout.
 4. The lean track from the survey: apps left running behind Lumen hold far
    more memory than any LG job (Prime Video's 134 MB, Netflix and YouTube
    246 MB together), so the first candidate is closing them, not stopping

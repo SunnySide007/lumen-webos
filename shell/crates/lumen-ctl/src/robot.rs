@@ -46,8 +46,10 @@ pub const DEVICE_NAME: &str = "Lumen robot remote";
 /// The second group is Linux's own codes for keys the Magic Remote's node
 /// declares in its key map (read on 2026-11-11) but that were not in the
 /// 2026-10-22 recordings: the number keys, the channel rocker, the four
-/// colours, Info and Exit.
-pub const CODES: [(&str, u16); 30] = [
+/// colours, Info and Exit. `menu` is the gear: 139 (KEY_MENU), which the
+/// owner's four presses of it sent on 2026-11-11, each down and up within
+/// 0.3 ms.
+pub const CODES: [(&str, u16); 31] = [
     ("up", 103),
     ("down", 108),
     ("left", 105),
@@ -55,6 +57,7 @@ pub const CODES: [(&str, u16); 30] = [
     ("ok", 28),
     ("back", 412),
     ("home", 773),
+    ("menu", 139),
     ("play", 207),
     ("pause", 119),
     ("stop", 128),
@@ -498,7 +501,8 @@ pub fn open_sink(codes: &[u16]) -> Result<(Box<dyn KeySink>, String), String> {
 
 /// `serve --keys inject`: the Remote's `key` verb through `open_sink`,
 /// opened at the first press and kept for the session. A key the Magic
-/// Remote has no code for (`menu`) is refused as unavailable.
+/// Remote has no code for would be refused as unavailable; today every
+/// name has one.
 pub struct RobotKeys {
     device: Mutex<Option<Box<dyn KeySink>>>,
     settle: Duration,
@@ -666,21 +670,16 @@ mod tests {
     }
 
     #[test]
-    fn the_robot_route_offers_keys_and_refuses_one_without_a_code() {
+    fn the_robot_route_offers_keys_and_has_a_code_for_every_name() {
         let route = RobotKeys::new(Duration::ZERO);
         assert_eq!(route.name(), "inject");
         assert!(route.any());
-        let bus = crate::fake::FakeBus::new(false);
-        assert_eq!(
-            route.press(&bus, "menu").unwrap_err().code,
-            ErrorCode::Unavailable
-        );
         for name in KEY_NAMES {
-            assert!(
-                name == "menu" || code_of(name).is_some(),
-                "{name} has no code"
-            );
+            assert!(code_of(name).is_some(), "{name} has no code");
         }
+        assert_eq!(code_of("menu"), Some(139));
+        assert_eq!(code_of("power"), None);
+        assert_eq!(CODES.len(), KEY_NAMES.len());
     }
 
     #[test]

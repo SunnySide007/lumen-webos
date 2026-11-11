@@ -191,8 +191,9 @@ shown, each 17 to 18 ms after the key).
   own key codes (0x31, 0x35, 0x30) and SDL scancodes 486 to 489 for red,
   green, yellow and blue, 499 for Info, 480 and 481 for channel up and
   down, and 505 for Exit; Lumen stayed in front after every one. What they
-  do inside LG's apps and Live TV is not tried. `menu` still has no code:
-  the node's 139 comes by itself with the pointer (b9.md).
+  do inside LG's apps and Live TV is not tried. `menu` is the gear, 139
+  (b9.md); sent the same day with Netflix in front, the TV took it in 78 ms,
+  and what it showed on the screen is not yet confirmed by eye.
 * **Yield.** Every input node, the remote's included, is opened read-only
   before the first key and never grabbed. Any event other than a separator
   or a scan code is a person, unless it carries a code the robot wrote

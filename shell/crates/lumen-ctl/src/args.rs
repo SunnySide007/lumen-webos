@@ -45,7 +45,7 @@ play, key and watch-remote are the bench's robot remote (docs/device/
 bench.md): play writes a pattern file's keys into the Magic Remote's own
 input node (or, on a TV without one, a virtual remote made through
 /dev/uinput), after --settle-ms (default 1500); key plays one press (held
---hold-ms, default 60) of up, down, left, right, ok, back, home, play,
+--hold-ms, default 60) of up, down, left, right, ok, back, home, menu, play,
 pause, stop, rewind, fastforward, info, exit, channelup, channeldown, red,
 green, yellow, blue or 0 to 9. Both watch every input node meanwhile,
 never grabbing it, and stop at the first person's event (exit 3); the
