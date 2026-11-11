@@ -25,7 +25,7 @@ pub const MAX_TOAST: usize = 120;
 pub const MAX_DEVICE_NAME: usize = 40;
 
 /// Keys `key` can press, in protocol.ts's order.
-pub const KEY_NAMES: [&str; 13] = [
+pub const KEY_NAMES: [&str; 31] = [
     "up",
     "down",
     "left",
@@ -39,6 +39,24 @@ pub const KEY_NAMES: [&str; 13] = [
     "stop",
     "rewind",
     "fastforward",
+    "info",
+    "exit",
+    "channelup",
+    "channeldown",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
 ];
 
 /// LG's power states in Lumen's words.
@@ -899,7 +917,7 @@ mod tests {
             (
                 "key",
                 r#"{"name":"power"}"#,
-                "name must be one of up, down, left, right, ok, back, home, menu, play, pause, stop, rewind, fastforward",
+                "name must be one of up, down, left, right, ok, back, home, menu, play, pause, stop, rewind, fastforward, info, exit, channelup, channeldown, red, green, yellow, blue, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9",
             ),
             ("text.insert", r#"{"text":1}"#, "text must be a string"),
             (

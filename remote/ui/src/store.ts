@@ -161,3 +161,29 @@ export function frontTitle(s: TvState): string | null {
   if (s.foreground === null) return null;
   return frontApp(s)?.title ?? s.foreground;
 }
+
+/** Apps the Remote's shortcuts put first, by a word in the id or title. */
+const SHORTCUT_FIRST = ["netflix", "youtube", "plex", "prime", "amazon"] as const;
+
+/** The Remote screen's shortcuts: inputs with something plugged in (every
+ * input while the TV hasn't said), then apps, the family's few first, at
+ * most `max` in all. Whatever is in front is always among them. */
+export function shortcuts(s: TvState, max: number): Tile[] {
+  const all = tiles(s);
+  const known = s.inputs !== null;
+  const inputs = all.filter((t) => t.kind === "input" && (!known || t.connected === true));
+  const rank = (t: Tile) => {
+    const text = `${t.id} ${t.title}`.toLowerCase();
+    const i = SHORTCUT_FIRST.findIndex((w) => text.includes(w));
+    return i < 0 ? SHORTCUT_FIRST.length : i;
+  };
+  const apps = all
+    .filter((t) => t.kind === "app")
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i)
+    .map((x) => x.t);
+  const list = [...inputs, ...apps].slice(0, Math.max(0, max));
+  const front = all.find((t) => t.inFront);
+  if (front && list.length > 0 && !list.includes(front)) list[list.length - 1] = front;
+  return list;
+}

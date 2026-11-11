@@ -19,9 +19,17 @@ export interface PcSettings {
   ssh: string;
 }
 
+/** The app's three windows: the popup above the tray icon, the full window,
+ * and the thin remote at the side of the desktop. */
+export type PcWindow = "popup" | "main" | "side";
+
 export interface PcHost {
-  readonly window: "popup" | "main";
+  readonly window: PcWindow;
   wake(): Promise<void>;
+  /** Shows the full window, in front. */
+  openMain(): Promise<void>;
+  /** Hides this page's window; the tray icon shows it again. */
+  hide(): Promise<void>;
   settings(): Promise<PcSettings>;
   saveSettings(s: { host: string; port: string; mac: string }): Promise<PcSettings>;
 }
@@ -127,7 +135,7 @@ export function sshSocket(tauri: TauriGlobal): SocketFactory {
   };
 }
 
-export function pcHost(tauri: TauriGlobal, settings: PcSettings, window: "popup" | "main"): Host {
+export function pcHost(tauri: TauriGlobal, settings: PcSettings, window: PcWindow): Host {
   const { invoke } = tauri.core;
   return {
     address: sshAddress(settings),
@@ -157,6 +165,8 @@ export function pcHost(tauri: TauriGlobal, settings: PcSettings, window: "popup"
     pc: {
       window,
       wake: () => invoke<void>("wake"),
+      openMain: () => invoke<void>("open_window"),
+      hide: () => invoke<void>("hide_window"),
       settings: () => invoke<PcSettings>("settings_get"),
       saveSettings: (s) => invoke<PcSettings>("settings_set", s),
     },
@@ -187,7 +197,8 @@ export function browserHost(loc: Location, doc: Document): Host {
 export async function detectHost(loc: Location, doc: Document): Promise<Host> {
   const tauri = tauriGlobal();
   if (!tauri) return browserHost(loc, doc);
-  const window = new URLSearchParams(loc.search).get("window") === "popup" ? "popup" : "main";
+  const asked = new URLSearchParams(loc.search).get("window");
+  const window: PcWindow = asked === "popup" || asked === "side" ? asked : "main";
   const settings = await tauri.core.invoke<PcSettings>("settings_get").catch(
     (): PcSettings => ({ host: null, port: 22, mac: null, key: "", keyFound: false, ssh: "" }),
   );

@@ -34,7 +34,7 @@ test.afterAll(async () => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-async function pageFor(window: "main" | "popup"): Promise<Page> {
+async function pageFor(window: "main" | "popup" | "side"): Promise<Page> {
   for (let i = 0; i < 60; i++) {
     try {
       browser ??= await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
@@ -125,4 +125,19 @@ test("the PC app: first run, settings, then power, sound, apps and no key pad", 
   // The popup is the same page, loaded hidden and not connected until shown.
   const popup = await pageFor("popup");
   await expect(popup.locator(".chip.link")).toHaveAttribute("data-tone", "busy");
+
+  // So is the thin remote: one column, and its two commands are allowed
+  // (a command the capability left out would reject).
+  const side = await pageFor("side");
+  await expect(side.locator(".side-remote")).toHaveCount(1);
+  await expect(side.locator(".nav")).toHaveCount(0);
+  await expect(side.locator(".side-light")).toHaveAttribute("data-tone", "busy");
+  type Invoke = (cmd: string) => Promise<unknown>;
+  const run = (cmd: string) =>
+    side.evaluate(
+      (c) => (globalThis as unknown as { __TAURI__: { core: { invoke: Invoke } } }).__TAURI__.core.invoke(c).then(() => "ok"),
+      cmd,
+    );
+  expect(await run("hide_window")).toBe("ok");
+  expect(await run("open_window")).toBe("ok");
 });

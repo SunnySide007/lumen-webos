@@ -180,7 +180,12 @@ shown, each 17 to 18 ms after the key).
   map, read on 2026-11-08): arrows 103, 108, 105, 106; OK 28; Back 412;
   Home 773 (LG's code, held 150 to 200 ms before each trip through LG's
   launcher in the 2026-10-22 recordings; not yet tried from the robot);
-  play 207, pause 119, stop 128, rewind 168, fast forward 208.
+  play 207, pause 119, stop 128, rewind 168, fast forward 208. Added
+  from the same key map on 2026-11-11 for the Remote, and not yet pressed
+  on the TV: Info 358, Exit 174, channel up and down 402 and 403, red,
+  green, yellow and blue 398 to 401, and the numbers (1 to 9 are 2 to 10,
+  0 is 11). `menu` still has no code: the node's 139 comes by itself with
+  the pointer (b9.md).
 * **Yield.** Every input node, the remote's included, is opened read-only
   before the first key and never grabbed. Any event other than a separator
   or a scan code is a person, unless it carries a code the robot wrote

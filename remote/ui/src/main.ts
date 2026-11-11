@@ -6,6 +6,7 @@ import "./styles/fonts.css";
 import "./styles/base.css";
 import "./styles/controls.css";
 import "./styles/screens.css";
+import "./styles/remote.css";
 import { RemoteClient } from "./client.ts";
 import type { LinkState } from "./client.ts";
 import { failureText } from "./context.ts";
@@ -25,6 +26,7 @@ import { lumenScreen } from "./screens/lumen.ts";
 import { pairingScreen } from "./screens/pairing.ts";
 import { pictureScreen } from "./screens/picture.ts";
 import { remoteScreen } from "./screens/remote.ts";
+import { sideRemote } from "./screens/side.ts";
 import { soundScreen } from "./screens/sound.ts";
 
 interface Route {
@@ -98,6 +100,41 @@ function boot(host: Host): void {
   // The ambient colour: whatever is in front on the TV tints the page.
   tv.subscribe((s) => document.documentElement.style.setProperty("--ambient", ambientColor(s)));
 
+  const app = document.getElementById("app");
+  if (!app) throw new Error("no #app");
+  // The thin remote is the PC app's side window; a browser shows the same
+  // column with ?window=side, for the mock and the captures.
+  const side = host.pc ? host.pc.window === "side" : new URLSearchParams(location.search).get("window") === "side";
+  if (side) {
+    // One column, no screens to move between.
+    document.documentElement.classList.add("window-side");
+    app.className = "app side";
+    app.append(sideRemote(ctx).el, snack.el);
+    document.title = "Lumen Remote";
+  } else {
+    mountScreens(app, ctx, statusLine(tv, link, client), snack.el);
+  }
+
+  // A hidden page (the phone's screen off, the tray popup closed) lets the
+  // link go after a while instead of keeping the radio awake for it. The
+  // PC app's windows start hidden, so they connect when first shown.
+  let hideTimer: ReturnType<typeof setTimeout> | null = null;
+  host.onVisible((visible) => {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = null;
+    if (!visible) {
+      hideTimer = setTimeout(() => client.pause(), host.hideGraceMs);
+    } else if (client.state.kind === "paused") {
+      client.start();
+    }
+  });
+
+  if (!host.pc) client.start();
+}
+
+/** The frame around the six screens: the title bar with the status line,
+ * the screen, and the dock that moves between them. */
+function mountScreens(app: HTMLElement, ctx: Ctx, status: HTMLElement, snack: HTMLElement): void {
   const nav = h("nav", { class: "nav glass refract", "aria-label": "Screens" });
   const links = new Map<string, HTMLAnchorElement>();
   for (const r of ROUTES) {
@@ -116,12 +153,10 @@ function boot(host: Host): void {
   );
 
   const title = h("h1", { class: "screen-title" });
-  const header = h("header", { class: "topbar" }, title, statusLine(tv, link, client));
+  const header = h("header", { class: "topbar" }, title, status);
   const main = h("main", { class: "screen", id: "screen", tabindex: "-1" });
-  const app = document.getElementById("app");
-  if (!app) throw new Error("no #app");
   app.className = "app";
-  app.append(header, main, nav, snack.el);
+  app.append(header, main, nav, snack);
   rimLight(nav);
 
   let current: { route: Route; screen: Screen } | null = null;
@@ -145,22 +180,6 @@ function boot(host: Host): void {
   };
   window.addEventListener("hashchange", show);
   show();
-
-  // A hidden page (the phone's screen off, the tray popup closed) lets the
-  // link go after a while instead of keeping the radio awake for it. The
-  // PC app's windows start hidden, so they connect when first shown.
-  let hideTimer: ReturnType<typeof setTimeout> | null = null;
-  host.onVisible((visible) => {
-    if (hideTimer) clearTimeout(hideTimer);
-    hideTimer = null;
-    if (!visible) {
-      hideTimer = setTimeout(() => client.pause(), host.hideGraceMs);
-    } else if (client.state.kind === "paused") {
-      client.start();
-    }
-  });
-
-  if (!host.pc) client.start();
 }
 
 /** The line at the top: what's in front, the volume, the TV's power and the

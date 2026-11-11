@@ -1,94 +1,133 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Remote: the direction pad, OK, Back, Home and Menu, playback, power, and a
+// Remote: what is on the TV, the direction pad or the touchpad between the
+// volume and channel rockers, Back, Home and Menu, shortcuts to the inputs
+// and the family's apps, power, playback, the number and colour keys, and a
 // field whose typing goes to the TV's focused text field. The keys show only
 // once a hello has offered `key`: lumen-ctl leaves it out while the TV has no
 // key route (remote.md, risk 1), and a pad that can never work is noise.
 import { accepts, enableWhen } from "../context.ts";
 import type { Ctx, Screen } from "../context.ts";
-import { flash, h, holdRepeat } from "../dom.ts";
+import { h, setText, setVars } from "../dom.ts";
 import { icon } from "../icons.ts";
-import type { IconName } from "../icons.ts";
-import { rimLight, tilt } from "../motion.ts";
-import type { KeyName } from "../protocol.ts";
+import { POWER_LABELS } from "../labels.ts";
+import { rimLight } from "../motion.ts";
+import { frontApp, frontTitle } from "../store.ts";
 import { diffText, editCommands } from "../textdiff.ts";
+import {
+  channelRocker,
+  coloursPart,
+  makeKeys,
+  numbersPart,
+  padPart,
+  shortcutsPart,
+  touchpadPart,
+  volumeRocker,
+} from "./parts.ts";
 
-/** Keyboard keys that press the TV's keys while the Remote screen is up and
- * no text field has the focus. */
-const KEYBOARD: Record<string, KeyName> = {
-  ArrowUp: "up",
-  ArrowDown: "down",
-  ArrowLeft: "left",
-  ArrowRight: "right",
-  Enter: "ok",
-  Backspace: "back",
-  Escape: "back",
-  h: "home",
-  m: "menu",
-  " ": "play",
-  k: "pause",
-};
+/** Where the choice of pad or touchpad is kept, on this device only. */
+const SURFACE_KEY = "lumen.remote.surface";
+type Surface = "pad" | "touchpad";
+
+function savedSurface(): Surface {
+  try {
+    return localStorage.getItem(SURFACE_KEY) === "touchpad" ? "touchpad" : "pad";
+  } catch {
+    return "pad";
+  }
+}
 
 export function remoteScreen(ctx: Ctx): Screen {
   const off: (() => void)[] = [];
-  const keyButtons = new Map<KeyName, HTMLButtonElement>();
+  const keys = makeKeys(ctx, off);
 
-  const press = (name: KeyName) => {
-    const b = keyButtons.get(name);
-    if (b) flash(b, "pressed", 220);
-    if (["up", "down", "left", "right", "ok"].includes(name)) flash(pad, `lean-${name}`, 260);
-    void ctx.send("key", { name });
-  };
-
-  const keyButton = (name: KeyName, label: string, iconName: IconName, cls: string, repeat = false) => {
-    const b = h("button", { class: cls, type: "button", "aria-label": label, title: label }, icon(iconName));
-    if (repeat) holdRepeat(b, () => press(name));
-    else b.addEventListener("click", () => press(name));
-    keyButtons.set(name, b);
-    return b;
-  };
-
-  // The pad: four arcs and OK, as one glass disc that leans toward a press.
-  const ok = h("button", { class: "pad-ok", type: "button", "aria-label": "OK", title: "OK" }, h("span", { text: "OK" }));
-  ok.addEventListener("click", () => press("ok"));
-  keyButtons.set("ok", ok);
-  const pad = h(
+  // What is on the TV: the app or input in front, in its colour.
+  const nowLetter = h("span", { class: "now-letter" });
+  const nowTitle = h("strong", { class: "now-title" });
+  const nowSub = h("span", { class: "now-sub" });
+  const now = h(
     "div",
-    { class: "pad tilt", role: "group", "aria-label": "Direction pad: arrow keys move, Enter is OK, Backspace is Back" },
-    h("div", { class: "pad-disc glass refract" }),
-    keyButton("up", "Up", "up", "pad-arrow pad-up", true),
-    keyButton("right", "Right", "right", "pad-arrow pad-right", true),
-    keyButton("down", "Down", "down", "pad-arrow pad-down", true),
-    keyButton("left", "Left", "left", "pad-arrow pad-left", true),
-    ok,
+    { class: "now glass", role: "status", "aria-label": "On the TV" },
+    h("span", { class: "now-face", "aria-hidden": "true" }, nowLetter),
+    h("span", { class: "now-text" }, h("span", { class: "now-label", text: "On the TV" }), nowTitle, nowSub),
   );
-  tilt(pad, 6);
+  off.push(
+    ctx.tv.subscribe((s) => {
+      const title = frontTitle(s);
+      const app = frontApp(s);
+      now.hidden = title === null;
+      setText(nowTitle, title ?? "");
+      setText(nowLetter, app?.kind === "input" ? app.title.replace(/^HDMI\s*/, "") : ([...(title ?? "?")][0] ?? "?"));
+      setVars(now, { tile: app?.color ?? "var(--ambient)" });
+      const power = s.power && s.power !== "active" ? POWER_LABELS[s.power] : null;
+      const sound = s.volume ? (s.volume.muted ? "Muted" : `Volume ${s.volume.level}`) : null;
+      setText(nowSub, [power, app?.device, sound].filter((x) => x).join(" · "));
+    }),
+    rimLight(now),
+  );
+
+  // The pad or the touchpad, whichever this device last chose.
+  const pad = padPart(keys);
+  const touchpad = touchpadPart(ctx, keys, off);
+  const surface = h("div", { class: "surface" }, pad, touchpad);
+  const choose = (which: Surface, label: string, iconName: "remote" | "touchpad") =>
+    h(
+      "button",
+      { class: "chip-option", type: "button", "data-surface": which, "aria-pressed": "false" },
+      icon(iconName),
+      h("span", { text: label }),
+    );
+  const padChoice = choose("pad", "Pad", "remote");
+  const touchChoice = choose("touchpad", "Touchpad", "touchpad");
+  const switcher = h("div", { class: "surface-switch", role: "group", "aria-label": "Pad or touchpad" }, padChoice, touchChoice);
+  keys.groups.push(switcher);
+  const show = (which: Surface) => {
+    surface.dataset.surface = which;
+    padChoice.setAttribute("aria-pressed", String(which === "pad"));
+    touchChoice.setAttribute("aria-pressed", String(which === "touchpad"));
+    try {
+      localStorage.setItem(SURFACE_KEY, which);
+    } catch {
+      // Private browsing: the choice lasts as long as the page.
+    }
+  };
+  padChoice.addEventListener("click", () => show("pad"));
+  touchChoice.addEventListener("click", () => show("touchpad"));
+  show(savedSurface());
+
+  const deck = h("div", { class: "deck" }, volumeRocker(ctx, off), surface, channelRocker(keys));
 
   const nav = h(
     "div",
     { class: "key-row" },
-    labelled(keyButton("back", "Back", "back", "pill-button"), "Back"),
-    labelled(keyButton("home", "Home", "home", "pill-button"), "Home"),
-    labelled(keyButton("menu", "Menu", "menu", "pill-button"), "Menu"),
+    labelled(keys.button("back", "Back", "back", "pill-button"), "Back"),
+    labelled(keys.button("home", "Home", "home", "pill-button"), "Home"),
+    labelled(keys.button("menu", "Menu", "menu", "pill-button"), "Menu"),
   );
+  keys.groups.push(nav);
 
   const playback = h(
     "div",
     { class: "play-row glass", role: "group", "aria-label": "Playback" },
-    keyButton("rewind", "Rewind", "rewind", "round-button"),
-    keyButton("play", "Play", "play", "round-button big"),
-    keyButton("pause", "Pause", "pause", "round-button big"),
-    keyButton("stop", "Stop", "stop", "round-button"),
-    keyButton("fastforward", "Fast-forward", "fastforward", "round-button"),
+    keys.button("rewind", "Rewind", "rewind", "round-button"),
+    keys.button("play", "Play", "play", "round-button big"),
+    keys.button("pause", "Pause", "pause", "round-button big"),
+    keys.button("stop", "Stop", "stop", "round-button"),
+    keys.button("fastforward", "Fast-forward", "fastforward", "round-button"),
   );
-  off.push(enableWhen(ctx.link, [...keyButtons.values()], "key"));
-  const keyGroups = [pad, nav, playback];
-  off.push(
-    ctx.link.subscribe(() => {
-      const keys = ctx.client.lastVerbs?.has("key") === true;
-      for (const g of keyGroups) g.hidden = !keys;
-    }),
+  keys.groups.push(playback);
+
+  const shortcutList = shortcutsPart(ctx, off, 8);
+
+  // The keys a remote has and a pad doesn't: numbers and the four colours.
+  const more = h(
+    "details",
+    { class: "more-keys glass" },
+    h("summary", null, icon("keypad"), h("span", { text: "Numbers and colours" })),
+    numbersPart(keys),
+    coloursPart(keys),
   );
+  keys.groups.push(more);
 
   // Power. On is Wake-on-LAN, which only the PC app can send (remote.md):
   // the TV's own server is off whenever the TV is. A phone has Google Home.
@@ -213,26 +252,11 @@ export function remoteScreen(ctx: Ctx): Screen {
     }),
   );
 
-  const onKey = (e: KeyboardEvent) => {
-    if (e.altKey || e.ctrlKey || e.metaKey) return;
-    const t = e.target as HTMLElement;
-    if (t.closest("input, textarea, select, [contenteditable]")) return;
-    // Enter and Space on a focused button press that button instead.
-    if ((e.key === "Enter" || e.key === " ") && t.closest("button, a")) return;
-    const name = KEYBOARD[e.key];
-    if (!name || !ctx.client.supports("key")) return;
-    e.preventDefault();
-    if (e.repeat && !["up", "down", "left", "right"].includes(name)) return;
-    press(name);
-  };
-  document.addEventListener("keydown", onKey);
-  off.push(() => document.removeEventListener("keydown", onKey));
-
   const el = h(
     "section",
     { class: "remote" },
-    h("div", { class: "remote-main" }, noKeys, pad, nav),
-    h("div", { class: "remote-side" }, power, playback, form),
+    h("div", { class: "remote-main" }, noKeys, now, switcher, deck, nav),
+    h("div", { class: "remote-side" }, shortcutList, power, playback, more, form),
   );
   off.push(ctx.link.subscribe(() => el.classList.toggle("no-keys", ctx.client.lastVerbs?.has("key") !== true)));
   return {

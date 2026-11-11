@@ -34,6 +34,24 @@
         "windowEffects": { "effects": ["acrylic"] }
       },
       {
+        "label": "side",
+        "url": "index.html?window=side",
+        "title": "Lumen Remote",
+        "width": 140,
+        "height": 700,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "skipTaskbar": true,
+        "alwaysOnTop": true,
+        "shadow": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
+        "windowEffects": { "effects": ["acrylic"] }
+      },
+      {
         "label": "main",
         "url": "index.html?window=main",
         "title": "Lumen Remote",

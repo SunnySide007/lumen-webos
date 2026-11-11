@@ -42,7 +42,12 @@ pub const DEVICE_NAME: &str = "Lumen robot remote";
 
 /// Names to Linux key codes. `home` is LG's 773, which the Magic Remote
 /// holds 150 to 200 ms before each trip through LG's launcher.
-pub const CODES: [(&str, u16); 12] = [
+///
+/// The second group is Linux's own codes for keys the Magic Remote's node
+/// declares in its key map (read on 2026-11-11) but that were not in the
+/// 2026-10-22 recordings: the number keys, the channel rocker, the four
+/// colours, Info and Exit.
+pub const CODES: [(&str, u16); 30] = [
     ("up", 103),
     ("down", 108),
     ("left", 105),
@@ -55,6 +60,24 @@ pub const CODES: [(&str, u16); 12] = [
     ("stop", 128),
     ("rewind", 168),
     ("fastforward", 208),
+    ("info", 358),
+    ("exit", 174),
+    ("channelup", 402),
+    ("channeldown", 403),
+    ("red", 398),
+    ("green", 399),
+    ("yellow", 400),
+    ("blue", 401),
+    ("0", 11),
+    ("1", 2),
+    ("2", 3),
+    ("3", 4),
+    ("4", 5),
+    ("5", 6),
+    ("6", 7),
+    ("7", 8),
+    ("8", 9),
+    ("9", 10),
 ];
 
 const TAP_MS: u64 = 60;
